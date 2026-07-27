@@ -33,6 +33,13 @@ sudo docker compose -f compose.cloud.yaml up -d --build
 sudo docker compose -f compose.cloud.yaml ps
 ```
 
+Local first-push command after `gh auth login`:
+
+```powershell
+cd "C:\Users\New User\Documents\Projects 2026\O.B.E.O.S (official blackfong ecosystem operating system)"
+gh repo create obeos-cloud --private --source . --remote origin --push --description "O.B.E.O.S cloud node source and deployment"
+```
+
 ## First EC2 bootstrap
 
 Run these commands from EC2 Instance Connect as `ubuntu`.
@@ -42,7 +49,7 @@ set -euo pipefail
 
 sudo apt-get update
 sudo apt-get upgrade -y
-sudo apt-get install -y ca-certificates curl gnupg git jq lsb-release
+sudo apt-get install -y ca-certificates curl gnupg git jq lsb-release wget
 
 # Docker Engine + Compose plugin, installed from Docker's Ubuntu repository.
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -60,6 +67,16 @@ sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo systemctl enable --now docker
 sudo usermod -aG docker ubuntu
+
+# GitHub CLI for private-repo clone/pull on EC2.
+sudo mkdir -p -m 755 /etc/apt/keyrings
+wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg |
+  sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" |
+  sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y gh
 
 # Tailscale. This prints a login URL; open it and authorize the EC2 node.
 curl -fsSL https://tailscale.com/install.sh | sh
@@ -79,12 +96,21 @@ After the bootstrap, log out and back in if you want to run Docker without
 
 ## First source checkout
 
-After the private GitHub repo exists and contains this project:
+After the private GitHub repo exists and contains this project, authenticate the
+EC2 host to GitHub:
+
+```bash
+gh auth login
+```
+
+Choose GitHub.com, HTTPS, and browser/device-code login.
+
+Then clone:
 
 ```bash
 sudo mkdir -p /opt/obeos
 sudo chown ubuntu:ubuntu /opt/obeos
-git clone https://github.com/<OWNER>/obeos-cloud.git /opt/obeos
+gh repo clone <OWNER>/obeos-cloud /opt/obeos
 cd /opt/obeos
 cp .env.cloud.example .env.cloud
 sudo docker compose -f compose.cloud.yaml up -d --build
