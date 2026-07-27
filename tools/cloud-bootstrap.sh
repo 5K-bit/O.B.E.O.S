@@ -16,6 +16,31 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+wait_for_http() {
+  local label="$1"
+  local url="$2"
+  local attempts="${3:-45}"
+  local show_body="${4:-0}"
+  local body
+  local attempt
+
+  for attempt in $(seq 1 "$attempts"); do
+    if body="$(curl -fsS -m 5 "$url" 2>/dev/null)"; then
+      if [[ "$show_body" == "1" ]]; then
+        printf '%s\n' "$body"
+      else
+        printf '%s OK\n' "$label"
+      fi
+      return 0
+    fi
+    printf '%s not ready yet (%s/%s)\n' "$label" "$attempt" "$attempts" >&2
+    sleep 2
+  done
+
+  printf 'ERROR: %s did not become ready at %s\n' "$label" "$url" >&2
+  return 1
+}
+
 apt_install_base() {
   log "Installing base packages"
   sudo apt-get update
@@ -177,9 +202,9 @@ verify() {
   df -h /
   docker compose version
   ollama list || true
-  curl -fsS http://127.0.0.1:11434/api/tags | jq '.models | length' || true
-  curl -fsS http://127.0.0.1:8080/legion >/dev/null && echo "HUD /legion OK"
-  curl -fsS http://127.0.0.1:8000/health | jq .
+  wait_for_http "Ollama API" "http://127.0.0.1:11434/api/tags" 15 1 | jq '.models | length' || true
+  wait_for_http "HUD /legion" "http://127.0.0.1:8080/legion" 45 0
+  wait_for_http "Event API /health" "http://127.0.0.1:8000/health" 45 1 | jq .
 }
 
 main() {
