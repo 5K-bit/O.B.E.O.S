@@ -42,7 +42,19 @@ gh repo create obeos-cloud --private --source . --remote origin --push --descrip
 
 ## First EC2 bootstrap
 
-Run these commands from EC2 Instance Connect as `ubuntu`.
+Preferred path: authorize Codex/local SSH once, then run the bootstrap from this
+machine over SSH. If using EC2 Instance Connect manually, run the script version
+instead of pasting the full package-install recipe.
+
+```bash
+bash /opt/obeos/tools/cloud-bootstrap.sh
+```
+
+The script is idempotent: it installs/updates base tools, Docker, GitHub CLI,
+Tailscale, Ollama, clones or pulls the repo, deploys containers, and verifies
+the local endpoints.
+
+The older fully expanded command sequence is below for audit/debugging.
 
 ```bash
 set -euo pipefail
