@@ -6,6 +6,7 @@ APP_DIR="${OBEOS_APP_DIR:-/opt/obeos}"
 HOSTNAME="${OBEOS_TAILSCALE_HOSTNAME:-obeos-cloud}"
 DEPLOY_KEY="${OBEOS_DEPLOY_KEY:-$HOME/.ssh/obeos_cloud_deploy_ed25519}"
 MODELS="${OBEOS_OLLAMA_MODELS:-llama3.2:1b llama3.2:3b deepseek-r1:1.5b}"
+SKIP_TAILSCALE="${OBEOS_SKIP_TAILSCALE:-false}"
 
 log() {
   printf '\n[%s] %s\n' "$(date -Is)" "$*"
@@ -71,6 +72,11 @@ install_gh() {
 }
 
 install_tailscale() {
+  if [[ "$SKIP_TAILSCALE" == "1" || "$SKIP_TAILSCALE" == "true" ]]; then
+    log "Skipping Tailscale install/auth because OBEOS_SKIP_TAILSCALE=${SKIP_TAILSCALE}"
+    return
+  fi
+
   if need_cmd tailscale; then
     log "Tailscale already installed"
   else
@@ -159,6 +165,8 @@ deploy_stack() {
     log "Publishing HUD privately with Tailscale Serve"
     sudo tailscale serve --bg --http=8080 http://127.0.0.1:8080 || true
     tailscale serve status || true
+  elif [[ "$SKIP_TAILSCALE" == "1" || "$SKIP_TAILSCALE" == "true" ]]; then
+    log "Skipping Tailscale Serve because OBEOS_SKIP_TAILSCALE=${SKIP_TAILSCALE}"
   fi
 }
 
