@@ -1,0 +1,34 @@
+{
+  "samples": [
+    {
+      "chunk_id": "spawn_001_008_0001",
+      "collection": "spawn",
+      "confidence": 1.0,
+      "domain": "comics",
+      "found": true,
+      "section": "",
+      "source_file": "Spaw1to8_djvu.txt",
+      "source_type": "djvu_text"
+    },
+    {
+      "chunk_id": "spawn_045_052_0136",
+      "collection": "spawn",
+      "confidence": 1.0,
+      "domain": "comics",
+      "found": true,
+      "section": "",
+      "source_file": "Spawn45to52_djvu.txt",
+      "source_type": "djvu_text"
+    },
+    {
+      "chunk_id": "spawn_090_099_0230",
+      "collection": "spawn",
+      "confidence": 1.0,
+      "domain": "comics",
+      "found": true,
+      "section": "",
+      "source_file": "Spawn90to99_djvu.txt",
+      "source_type": "djvu_text"
+    }
+  ]
+}

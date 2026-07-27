@@ -1,0 +1,715 @@
+{
+  "chunk_count": 3203,
+  "collection": "python",
+  "domain": "programming",
+  "sources": [
+    {
+      "chunk_count": 25,
+      "issue_range": "unknown",
+      "source_file": "02_variables_builtin_functions.md",
+      "source_id": "markdown_a7593ce99d49272f"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "03_operators.md",
+      "source_id": "markdown_d002a394a1e38911"
+    },
+    {
+      "chunk_count": 36,
+      "issue_range": "unknown",
+      "source_file": "04_strings.md",
+      "source_id": "markdown_25011d6da8dd1d1f"
+    },
+    {
+      "chunk_count": 38,
+      "issue_range": "unknown",
+      "source_file": "05_lists.md",
+      "source_id": "markdown_fdcb7ad4493cb3e0"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "06_tuples.md",
+      "source_id": "markdown_7dc36a4b49934771"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "07_sets.md",
+      "source_id": "markdown_db7a12277da7fa2c"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "08_dictionaries.md",
+      "source_id": "markdown_cb0eef31407b9af5"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "09_conditionals.md",
+      "source_id": "markdown_a8432067cb15018d"
+    },
+    {
+      "chunk_count": 19,
+      "issue_range": "unknown",
+      "source_file": "10_loops.md",
+      "source_id": "markdown_a1c7451ae7dffa09"
+    },
+    {
+      "chunk_count": 32,
+      "issue_range": "unknown",
+      "source_file": "11_functions.md",
+      "source_id": "markdown_72e50278e173c0d3"
+    },
+    {
+      "chunk_count": 25,
+      "issue_range": "unknown",
+      "source_file": "12_modules.md",
+      "source_id": "markdown_6b64994a6409172b"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "13_list_comprehension.md",
+      "source_id": "markdown_52f3c1a2d6bff957"
+    },
+    {
+      "chunk_count": 22,
+      "issue_range": "unknown",
+      "source_file": "14_higher_order_functions.md",
+      "source_id": "markdown_e41438338af58d85"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "15_python_type_errors.md",
+      "source_id": "markdown_2f1f131298bab7b7"
+    },
+    {
+      "chunk_count": 12,
+      "issue_range": "unknown",
+      "source_file": "16_python_datetime.md",
+      "source_id": "markdown_8151392224d917f4"
+    },
+    {
+      "chunk_count": 22,
+      "issue_range": "unknown",
+      "source_file": "17_exception_handling.md",
+      "source_id": "markdown_faecf0b707d926c3"
+    },
+    {
+      "chunk_count": 28,
+      "issue_range": "unknown",
+      "source_file": "18_regular_expressions.md",
+      "source_id": "markdown_e48b475bd2b04337"
+    },
+    {
+      "chunk_count": 36,
+      "issue_range": "unknown",
+      "source_file": "19_file_handling.md",
+      "source_id": "markdown_f053b9cb5191ae02"
+    },
+    {
+      "chunk_count": 40,
+      "issue_range": "unknown",
+      "source_file": "20_python_package_manager.md",
+      "source_id": "markdown_98a8591b288eb3ab"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "21_classes_and_objects.md",
+      "source_id": "markdown_cb9896b8ef473954"
+    },
+    {
+      "chunk_count": 10,
+      "issue_range": "unknown",
+      "source_file": "22_web_scraping.md",
+      "source_id": "markdown_23dd44d5e7e2631c"
+    },
+    {
+      "chunk_count": 11,
+      "issue_range": "unknown",
+      "source_file": "23_virtual_environment.md",
+      "source_id": "markdown_225630dc29d561f6"
+    },
+    {
+      "chunk_count": 59,
+      "issue_range": "unknown",
+      "source_file": "24_statistics.md",
+      "source_id": "markdown_0f4ed485101ebf68"
+    },
+    {
+      "chunk_count": 45,
+      "issue_range": "unknown",
+      "source_file": "25_pandas.md",
+      "source_id": "markdown_6dd8dda1431f6c6c"
+    },
+    {
+      "chunk_count": 35,
+      "issue_range": "unknown",
+      "source_file": "26_python_web.md",
+      "source_id": "markdown_a3c570cd90190587"
+    },
+    {
+      "chunk_count": 44,
+      "issue_range": "unknown",
+      "source_file": "27_python_with_mongodb.md",
+      "source_id": "markdown_92f557178327b93f"
+    },
+    {
+      "chunk_count": 17,
+      "issue_range": "unknown",
+      "source_file": "28_API.md",
+      "source_id": "markdown_6e1356dea058fdc0"
+    },
+    {
+      "chunk_count": 19,
+      "issue_range": "unknown",
+      "source_file": "29_building_API.md",
+      "source_id": "markdown_c590012bf89b9c1e"
+    },
+    {
+      "chunk_count": 4,
+      "issue_range": "unknown",
+      "source_file": "30_conclusions.md",
+      "source_id": "markdown_24ca1aa29ef4003f"
+    },
+    {
+      "chunk_count": 15,
+      "issue_range": "unknown",
+      "source_file": "02_variables_builtin_functions.md",
+      "source_id": "markdown_413b4200b205d27d"
+    },
+    {
+      "chunk_count": 10,
+      "issue_range": "unknown",
+      "source_file": "03_operators.md",
+      "source_id": "markdown_8e1a12398b10e28a"
+    },
+    {
+      "chunk_count": 27,
+      "issue_range": "unknown",
+      "source_file": "04_strings.md",
+      "source_id": "markdown_547a3dad489a636b"
+    },
+    {
+      "chunk_count": 26,
+      "issue_range": "unknown",
+      "source_file": "05_lists.md",
+      "source_id": "markdown_bd34f0cf1b8c7e26"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "06_tuples.md",
+      "source_id": "markdown_f3ac0f04e0830179"
+    },
+    {
+      "chunk_count": 22,
+      "issue_range": "unknown",
+      "source_file": "07_sets.md",
+      "source_id": "markdown_bbc52441fcc673b7"
+    },
+    {
+      "chunk_count": 17,
+      "issue_range": "unknown",
+      "source_file": "08_dictionaries.md",
+      "source_id": "markdown_c88d8cbfb7d9eeeb"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "09_conditionals.md",
+      "source_id": "markdown_db6040e8c7eec7b5"
+    },
+    {
+      "chunk_count": 15,
+      "issue_range": "unknown",
+      "source_file": "10_loops.md",
+      "source_id": "markdown_a87bbb2928419b55"
+    },
+    {
+      "chunk_count": 25,
+      "issue_range": "unknown",
+      "source_file": "11_functions.md",
+      "source_id": "markdown_439d004e780991f2"
+    },
+    {
+      "chunk_count": 19,
+      "issue_range": "unknown",
+      "source_file": "12_modules.md",
+      "source_id": "markdown_0f24e44b4e867357"
+    },
+    {
+      "chunk_count": 8,
+      "issue_range": "unknown",
+      "source_file": "13_list_comprehension.md",
+      "source_id": "markdown_2e26696c135a86e7"
+    },
+    {
+      "chunk_count": 18,
+      "issue_range": "unknown",
+      "source_file": "14_higher_order_functions.md",
+      "source_id": "markdown_91464ec23945aa74"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "15_python_type_errors.md",
+      "source_id": "markdown_193956c6518532ad"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "15_python_type_errors_cn.md",
+      "source_id": "markdown_3b47a3452dedbddd"
+    },
+    {
+      "chunk_count": 11,
+      "issue_range": "unknown",
+      "source_file": "16_python_datetime.md",
+      "source_id": "markdown_d2d2e6bc6c380e61"
+    },
+    {
+      "chunk_count": 11,
+      "issue_range": "unknown",
+      "source_file": "16_python_datetime_cn.md",
+      "source_id": "markdown_e6fbd8bcc905771b"
+    },
+    {
+      "chunk_count": 18,
+      "issue_range": "unknown",
+      "source_file": "17_exception_handling_cn.md",
+      "source_id": "markdown_5bddcca99b84463d"
+    },
+    {
+      "chunk_count": 26,
+      "issue_range": "unknown",
+      "source_file": "18_regular_expressions_cn.md",
+      "source_id": "markdown_4e50e0d0dacb5ffe"
+    },
+    {
+      "chunk_count": 24,
+      "issue_range": "unknown",
+      "source_file": "19_file_handling_cn.md",
+      "source_id": "markdown_89af40c0ba71314d"
+    },
+    {
+      "chunk_count": 19,
+      "issue_range": "unknown",
+      "source_file": "20_python_package_manager_cn.md",
+      "source_id": "markdown_c2b7cbb4daf9bb74"
+    },
+    {
+      "chunk_count": 18,
+      "issue_range": "unknown",
+      "source_file": "21_classes_and_objects_cn.md",
+      "source_id": "markdown_84e3c3098199f5c2"
+    },
+    {
+      "chunk_count": 6,
+      "issue_range": "unknown",
+      "source_file": "22_web_scraping_cn.md",
+      "source_id": "markdown_c48edeb29dcd86a5"
+    },
+    {
+      "chunk_count": 7,
+      "issue_range": "unknown",
+      "source_file": "23_virtual_environment_cn.md",
+      "source_id": "markdown_ae60332cfea3e8dd"
+    },
+    {
+      "chunk_count": 36,
+      "issue_range": "unknown",
+      "source_file": "24_statistics_cn.md",
+      "source_id": "markdown_8b6599082591b7a1"
+    },
+    {
+      "chunk_count": 24,
+      "issue_range": "unknown",
+      "source_file": "25_pandas_cn.md",
+      "source_id": "markdown_eecc80c6f09f0dab"
+    },
+    {
+      "chunk_count": 28,
+      "issue_range": "unknown",
+      "source_file": "26_python_web_cn.md",
+      "source_id": "markdown_b35aa8281a643e88"
+    },
+    {
+      "chunk_count": 22,
+      "issue_range": "unknown",
+      "source_file": "27_python_with_mongodb_cn.md",
+      "source_id": "markdown_0bc5f7001641a0bf"
+    },
+    {
+      "chunk_count": 13,
+      "issue_range": "unknown",
+      "source_file": "28_API_cn.md",
+      "source_id": "markdown_8afdaf25026576bc"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "29_building_API_cn.md",
+      "source_id": "markdown_c0ce60c3345f5a3a"
+    },
+    {
+      "chunk_count": 4,
+      "issue_range": "unknown",
+      "source_file": "30_conclusions_cn.md",
+      "source_id": "markdown_4f758c45b416c5c5"
+    },
+    {
+      "chunk_count": 32,
+      "issue_range": "unknown",
+      "source_file": "README.md",
+      "source_id": "markdown_9353c22db10bbd05"
+    },
+    {
+      "chunk_count": 26,
+      "issue_range": "unknown",
+      "source_file": "02_variables_builtin_functions.md",
+      "source_id": "markdown_ecc241e7f23ced72"
+    },
+    {
+      "chunk_count": 24,
+      "issue_range": "unknown",
+      "source_file": "03_operators.md",
+      "source_id": "markdown_0a11ee20ede17c4a"
+    },
+    {
+      "chunk_count": 40,
+      "issue_range": "unknown",
+      "source_file": "04_strings_ko.md",
+      "source_id": "markdown_4c907f74c9e519d3"
+    },
+    {
+      "chunk_count": 29,
+      "issue_range": "unknown",
+      "source_file": "05_lists.md",
+      "source_id": "markdown_ec8a07e84d2fc2ff"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "07_sets_ko.md",
+      "source_id": "markdown_3223639d8d476fcc"
+    },
+    {
+      "chunk_count": 18,
+      "issue_range": "unknown",
+      "source_file": "08_dictionaries.md",
+      "source_id": "markdown_90c47875b574946f"
+    },
+    {
+      "chunk_count": 19,
+      "issue_range": "unknown",
+      "source_file": "10_loops_ko.md",
+      "source_id": "markdown_24acf2837436a402"
+    },
+    {
+      "chunk_count": 34,
+      "issue_range": "unknown",
+      "source_file": "readme_ko.md",
+      "source_id": "markdown_70af273f081ebeb0"
+    },
+    {
+      "chunk_count": 27,
+      "issue_range": "unknown",
+      "source_file": "README.md",
+      "source_id": "markdown_95cfeb32d158261b"
+    },
+    {
+      "chunk_count": 48,
+      "issue_range": "unknown",
+      "source_file": "README.md",
+      "source_id": "markdown_b5debb3b6a8bf7b2"
+    },
+    {
+      "chunk_count": 27,
+      "issue_range": "unknown",
+      "source_file": "02_variables_builtin_functions.md",
+      "source_id": "markdown_2a4b7d85068dc7f5"
+    },
+    {
+      "chunk_count": 27,
+      "issue_range": "unknown",
+      "source_file": "02_variables_builtin_functions_sp.md",
+      "source_id": "markdown_996749289cac04f0"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "03_operators.md",
+      "source_id": "markdown_74bb40fe9e184a0f"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "03_operators_sp.md",
+      "source_id": "markdown_879389aacea5575e"
+    },
+    {
+      "chunk_count": 40,
+      "issue_range": "unknown",
+      "source_file": "04_strings_sp.md",
+      "source_id": "markdown_4d42fb1331ab477e"
+    },
+    {
+      "chunk_count": 31,
+      "issue_range": "unknown",
+      "source_file": "05_lists_sp.md",
+      "source_id": "markdown_5665df2f40945592"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "06_tuples_sp.md",
+      "source_id": "markdown_1c337dcc473e3244"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "07_sets_sp.md",
+      "source_id": "markdown_b5b6d8e4935dcfd4"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "08_dictionaries_sp.md",
+      "source_id": "markdown_817da6499ca1c6d3"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "09_conditionals_sp.md",
+      "source_id": "markdown_bfa41db9f6fe8e1d"
+    },
+    {
+      "chunk_count": 19,
+      "issue_range": "unknown",
+      "source_file": "10_loops_sp.md",
+      "source_id": "markdown_cec60f16f6603b8f"
+    },
+    {
+      "chunk_count": 29,
+      "issue_range": "unknown",
+      "source_file": "11_functions_sp.md",
+      "source_id": "markdown_3ae208fb2d166076"
+    },
+    {
+      "chunk_count": 24,
+      "issue_range": "unknown",
+      "source_file": "12_modules_sp.md",
+      "source_id": "markdown_d46737aa030bdb10"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "13_list_comprehension_sp.md",
+      "source_id": "markdown_2e565eed7e829e41"
+    },
+    {
+      "chunk_count": 22,
+      "issue_range": "unknown",
+      "source_file": "14_higher_order_functions_sp.md",
+      "source_id": "markdown_743711d7b68b0713"
+    },
+    {
+      "chunk_count": 14,
+      "issue_range": "unknown",
+      "source_file": "15_python_type_errors_sp.md",
+      "source_id": "markdown_371ed54da36411a1"
+    },
+    {
+      "chunk_count": 11,
+      "issue_range": "unknown",
+      "source_file": "16_python_datetime_sp.md",
+      "source_id": "markdown_a68f1d845a529e77"
+    },
+    {
+      "chunk_count": 22,
+      "issue_range": "unknown",
+      "source_file": "17_exception_handling_sp.md",
+      "source_id": "markdown_0bb5f16034fda501"
+    },
+    {
+      "chunk_count": 27,
+      "issue_range": "unknown",
+      "source_file": "18_regular_expressions_sp.md",
+      "source_id": "markdown_b71cf554c1b13604"
+    },
+    {
+      "chunk_count": 29,
+      "issue_range": "unknown",
+      "source_file": "19_file_handling_sp.md",
+      "source_id": "markdown_14f9eee3e978382d"
+    },
+    {
+      "chunk_count": 16,
+      "issue_range": "unknown",
+      "source_file": "20_python_package_manager_sp.md",
+      "source_id": "markdown_4268c3dc3621ba2f"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "21_classes_and_objects_sp.md",
+      "source_id": "markdown_1e2f49fd4a4cdebf"
+    },
+    {
+      "chunk_count": 9,
+      "issue_range": "unknown",
+      "source_file": "22_web_scraping_sp.md",
+      "source_id": "markdown_9141acdef1419541"
+    },
+    {
+      "chunk_count": 8,
+      "issue_range": "unknown",
+      "source_file": "23_virtual_environment_sp.md",
+      "source_id": "markdown_dbd8709e6a1230a7"
+    },
+    {
+      "chunk_count": 36,
+      "issue_range": "unknown",
+      "source_file": "24_statistics_sp.md",
+      "source_id": "markdown_f74e8bca4aa20a1a"
+    },
+    {
+      "chunk_count": 27,
+      "issue_range": "unknown",
+      "source_file": "25_pandas_sp.md",
+      "source_id": "markdown_f9decd0be88fcbbd"
+    },
+    {
+      "chunk_count": 43,
+      "issue_range": "unknown",
+      "source_file": "26_python_web_sp.md",
+      "source_id": "markdown_9c5480efda9b26b3"
+    },
+    {
+      "chunk_count": 41,
+      "issue_range": "unknown",
+      "source_file": "27_python_with_mongodb_sp.md",
+      "source_id": "markdown_2f97bcee03bd982e"
+    },
+    {
+      "chunk_count": 17,
+      "issue_range": "unknown",
+      "source_file": "28_API_sp.md",
+      "source_id": "markdown_d487e19946d6b683"
+    },
+    {
+      "chunk_count": 21,
+      "issue_range": "unknown",
+      "source_file": "29_building_API_sp.md",
+      "source_id": "markdown_0e8da67b25668299"
+    },
+    {
+      "chunk_count": 4,
+      "issue_range": "unknown",
+      "source_file": "30_conclusions_sp.md",
+      "source_id": "markdown_58e87532ed623d96"
+    },
+    {
+      "chunk_count": 41,
+      "issue_range": "unknown",
+      "source_file": "README_sp.md",
+      "source_id": "markdown_9679a0224697c55a"
+    },
+    {
+      "chunk_count": 47,
+      "issue_range": "unknown",
+      "source_file": "readme.md",
+      "source_id": "markdown_5cd6d08ee2170a71"
+    },
+    {
+      "chunk_count": 44,
+      "issue_range": "unknown",
+      "source_file": "readme.md",
+      "source_id": "markdown_563c195d54a1974d"
+    },
+    {
+      "chunk_count": 20,
+      "issue_range": "unknown",
+      "source_file": "donald_speech.txt",
+      "source_id": "djvu_text_407f7bb8a03bb0b9"
+    },
+    {
+      "chunk_count": 60,
+      "issue_range": "unknown",
+      "source_file": "numpy.md",
+      "source_id": "markdown_f60972d5a5fa8376"
+    },
+    {
+      "chunk_count": 79,
+      "issue_range": "unknown",
+      "source_file": "readme.md",
+      "source_id": "markdown_5314bd8c2bb0bdd0"
+    },
+    {
+      "chunk_count": 69,
+      "issue_range": "unknown",
+      "source_file": "readme10-12.md",
+      "source_id": "markdown_7600cb00d626496b"
+    },
+    {
+      "chunk_count": 46,
+      "issue_range": "unknown",
+      "source_file": "readme13-15.md",
+      "source_id": "markdown_4a70973a0ab89ef6"
+    },
+    {
+      "chunk_count": 61,
+      "issue_range": "unknown",
+      "source_file": "readme16-18.md",
+      "source_id": "markdown_331f2a29393cfca1"
+    },
+    {
+      "chunk_count": 87,
+      "issue_range": "unknown",
+      "source_file": "readme19-21.md",
+      "source_id": "markdown_a784874aaf40c94c"
+    },
+    {
+      "chunk_count": 26,
+      "issue_range": "unknown",
+      "source_file": "readme22-24.md",
+      "source_id": "markdown_4877963a6be92031"
+    },
+    {
+      "chunk_count": 117,
+      "issue_range": "unknown",
+      "source_file": "readme25-27.md",
+      "source_id": "markdown_0bc0f20a994ca734"
+    },
+    {
+      "chunk_count": 34,
+      "issue_range": "unknown",
+      "source_file": "readme28-30.md",
+      "source_id": "markdown_02408e2927abd6f6"
+    },
+    {
+      "chunk_count": 74,
+      "issue_range": "unknown",
+      "source_file": "readme4-6.md",
+      "source_id": "markdown_af192905d7970ea9"
+    },
+    {
+      "chunk_count": 57,
+      "issue_range": "unknown",
+      "source_file": "readme7-9.md",
+      "source_id": "markdown_1d3d625a405c6374"
+    },
+    {
+      "chunk_count": 54,
+      "issue_range": "unknown",
+      "source_file": "readme.md",
+      "source_id": "markdown_ffeca6f6fbc5ed85"
+    }
+  ]
+}

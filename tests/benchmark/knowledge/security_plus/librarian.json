@@ -1,0 +1,13 @@
+{
+  "collection": "security_plus",
+  "provenance_sources": [
+    {
+      "collection": "security_plus",
+      "source": "CompTIA_SecurityPlus_Objectives.txt"
+    }
+  ],
+  "question": "what domains are on the security plus exam?",
+  "retrieved_chunk_ids": [
+    "comptia_security_plus_unknown_0001"
+  ]
+}

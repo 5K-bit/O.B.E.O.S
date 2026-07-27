@@ -1,0 +1,9 @@
+click==8.1.7
+pydantic==2.6.4
+flask>=3.0.0
+Flask-SocketIO>=5.3.0
+httpx>=0.24.0
+psutil>=5.9.0
+SQLAlchemy==2.0.25
+chromadb>=0.4.22,<0.5
+structlog>=24.0.0

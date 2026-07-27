@@ -1,0 +1,95 @@
+{
+  "collection": "security_plus",
+  "compute_used": "extractive",
+  "confidence": 1.0,
+  "domain": "cybersecurity",
+  "extractive_text": "Summary of collection 'security_plus' (domain: cybersecurity).\nContents: 1 source(s), 1 embedded, 6 chunks, 1 timeline events.\nKey terms: security, weight, percent, domain, practice, core, topics, question, management, answer.\nRepresentative excerpts:\n- (comptia_security_plus_unknown_0005) omain 4: Security Operations (weight 28 percent). Core topics: hardening and baselines, vulnerability management, alerting and monitoring, identity and access management, automation and orchestration, and incident response and forensics. Practice question: Which platform centralizes logs and correlates security events?\n- (comptia_security_plus_unknown_0002) 1: General Security Concepts (weight 12 percent). Core topics: security controls, the CIA triad, AAA (authentication, authorization, and accounting), zero trust, cryptography fundamentals, and change management. Practice question: Which security model includes Confidentiality, Integrity, and Availability? The answer is\n- (comptia_security_plus_unknown_0004) ain 3: Security Architecture (weight 18 percent). Core topics: cloud and hybrid architecture, infrastructure security controls, data protection strategies, and resilience and recovery design. Practice question: Which architecture control helps reduce lateral movement between systems? The answer is network segmentation.\n- (comptia_security_plus_unknown_0003) nerabilities and Mitigations (weight 22 percent). Core topics: threat actors and motivations, social engineering vectors, application vulnerabilities, network attacks, malware families, and mitigation techniques. Practice question: Which attack exploits ARP tables to redirect traffic? The answer is ARP spoofing. ARP sp\n- (comptia_security_plus_unknown_0001) CompTIA Security+ SY0-701 Exam Objectives and Practice Notes  This document summarizes the five exam domains of the CompTIA Security+ SY0-701 certification, their relative weights, the core topics covered in each domain, and one representative practice question per domain. It is intended as study reference material for\n- (comptia_security_plus_unknown_0006) ram Management and Oversight (weight 20 percent). Core topics: governance and policy, risk management, third-party risk, compliance and privacy, audits and assessments, and security awareness programs. Practice question: What metric represents expected yearly loss from a specific risk? The answer is ALE. Annualized Los",
+  "facts": {
+    "embedded": 1,
+    "sequence": {
+      "available": false,
+      "reason": "no numeric ranges to analyze"
+    },
+    "sources": 1,
+    "timeline_events": 1,
+    "total_chunks": 6
+  },
+  "fallback_reason": "mode_deterministic",
+  "found": true,
+  "key_terms": [
+    {
+      "count": 14,
+      "term": "security"
+    },
+    {
+      "count": 10,
+      "term": "weight"
+    },
+    {
+      "count": 10,
+      "term": "percent"
+    },
+    {
+      "count": 8,
+      "term": "domain"
+    },
+    {
+      "count": 7,
+      "term": "practice"
+    },
+    {
+      "count": 7,
+      "term": "core"
+    },
+    {
+      "count": 6,
+      "term": "topics"
+    },
+    {
+      "count": 6,
+      "term": "question"
+    },
+    {
+      "count": 6,
+      "term": "management"
+    },
+    {
+      "count": 5,
+      "term": "answer"
+    },
+    {
+      "count": 4,
+      "term": "arp"
+    },
+    {
+      "count": 4,
+      "term": "architecture"
+    },
+    {
+      "count": 3,
+      "term": "cia"
+    },
+    {
+      "count": 3,
+      "term": "triad"
+    },
+    {
+      "count": 3,
+      "term": "risk"
+    }
+  ],
+  "kind": "collection_summary",
+  "source_ids": [
+    "djvu_text_61d2d69d4831e927"
+  ],
+  "summary_id": "sum_431b0bd152c9d117",
+  "supporting_chunk_ids": [
+    "comptia_security_plus_unknown_0005",
+    "comptia_security_plus_unknown_0002",
+    "comptia_security_plus_unknown_0004",
+    "comptia_security_plus_unknown_0003",
+    "comptia_security_plus_unknown_0001",
+    "comptia_security_plus_unknown_0006"
+  ],
+  "text": "Summary of collection 'security_plus' (domain: cybersecurity).\nContents: 1 source(s), 1 embedded, 6 chunks, 1 timeline events.\nKey terms: security, weight, percent, domain, practice, core, topics, question, management, answer.\nRepresentative excerpts:\n- (comptia_security_plus_unknown_0005) omain 4: Security Operations (weight 28 percent). Core topics: hardening and baselines, vulnerability management, alerting and monitoring, identity and access management, automation and orchestration, and incident response and forensics. Practice question: Which platform centralizes logs and correlates security events?\n- (comptia_security_plus_unknown_0002) 1: General Security Concepts (weight 12 percent). Core topics: security controls, the CIA triad, AAA (authentication, authorization, and accounting), zero trust, cryptography fundamentals, and change management. Practice question: Which security model includes Confidentiality, Integrity, and Availability? The answer is\n- (comptia_security_plus_unknown_0004) ain 3: Security Architecture (weight 18 percent). Core topics: cloud and hybrid architecture, infrastructure security controls, data protection strategies, and resilience and recovery design. Practice question: Which architecture control helps reduce lateral movement between systems? The answer is network segmentation.\n- (comptia_security_plus_unknown_0003) nerabilities and Mitigations (weight 22 percent). Core topics: threat actors and motivations, social engineering vectors, application vulnerabilities, network attacks, malware families, and mitigation techniques. Practice question: Which attack exploits ARP tables to redirect traffic? The answer is ARP spoofing. ARP sp\n- (comptia_security_plus_unknown_0001) CompTIA Security+ SY0-701 Exam Objectives and Practice Notes  This document summarizes the five exam domains of the CompTIA Security+ SY0-701 certification, their relative weights, the core topics covered in each domain, and one representative practice question per domain. It is intended as study reference material for\n- (comptia_security_plus_unknown_0006) ram Management and Oversight (weight 20 percent). Core topics: governance and policy, risk management, third-party risk, compliance and privacy, audits and assessments, and security awareness programs. Practice question: What metric represents expected yearly loss from a specific risk? The answer is ALE. Annualized Los"
+}

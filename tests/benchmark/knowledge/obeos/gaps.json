@@ -1,0 +1,52 @@
+{
+  "collection": "obeos",
+  "domain": "architecture",
+  "found": true,
+  "gap_count": 1,
+  "gaps": [
+    {
+      "affected_chunks": [],
+      "affected_sources": [
+        "markdown_328565c1fbf5564f",
+        "markdown_c7a60f55b3f06848",
+        "markdown_95f888d0c3453361",
+        "markdown_a17a196723ecadb9",
+        "markdown_0bad3fb25f706e51"
+      ],
+      "evidence": {
+        "sources": [
+          {
+            "chunk_count": 1,
+            "source_id": "markdown_328565c1fbf5564f"
+          },
+          {
+            "chunk_count": 1,
+            "source_id": "markdown_c7a60f55b3f06848"
+          },
+          {
+            "chunk_count": 1,
+            "source_id": "markdown_95f888d0c3453361"
+          },
+          {
+            "chunk_count": 1,
+            "source_id": "markdown_a17a196723ecadb9"
+          },
+          {
+            "chunk_count": 1,
+            "source_id": "markdown_0bad3fb25f706e51"
+          }
+        ],
+        "threshold": 3
+      },
+      "gap_type": "low_chunk_count",
+      "reason": "5 embedded source(s) have fewer than 3 chunks, which may indicate truncated or under-extracted content",
+      "severity": "low"
+    }
+  ],
+  "summary_by_severity": {
+    "low": 1
+  },
+  "summary_by_type": {
+    "low_chunk_count": 1
+  }
+}

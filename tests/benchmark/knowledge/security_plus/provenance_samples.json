@@ -1,0 +1,34 @@
+{
+  "samples": [
+    {
+      "chunk_id": "comptia_security_plus_unknown_0001",
+      "collection": "security_plus",
+      "confidence": 1.0,
+      "domain": "cybersecurity",
+      "found": true,
+      "section": "",
+      "source_file": "CompTIA_SecurityPlus_Objectives.txt",
+      "source_type": "djvu_text"
+    },
+    {
+      "chunk_id": "comptia_security_plus_unknown_0004",
+      "collection": "security_plus",
+      "confidence": 1.0,
+      "domain": "cybersecurity",
+      "found": true,
+      "section": "",
+      "source_file": "CompTIA_SecurityPlus_Objectives.txt",
+      "source_type": "djvu_text"
+    },
+    {
+      "chunk_id": "comptia_security_plus_unknown_0006",
+      "collection": "security_plus",
+      "confidence": 1.0,
+      "domain": "cybersecurity",
+      "found": true,
+      "section": "",
+      "source_file": "CompTIA_SecurityPlus_Objectives.txt",
+      "source_type": "djvu_text"
+    }
+  ]
+}

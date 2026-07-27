@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Thoughtglass HUD</title>
+  <link rel="stylesheet" href="/hud-static/dashboard.css?v=20260430-docker-hud-stable">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-kicker">BLACKFONG WORKSPACE // BROWSER COCKPIT</div>
+        <h1 class="brand-title">Thoughtglass HUD</h1>
+        <div class="brand-copy">Secondary O.B.E.O.S. cockpit for D.A.I.S.E., shared session memory, and live cognition.</div>
+      </div>
+
+      <div class="topbar-right">
+        <div class="toolbar-row">
+          <button class="button button-subtle topbar-button" id="toggleLeftRailButton">Toggle Rail</button>
+          <button class="button button-subtle topbar-button" id="toggleRightRailButton">Toggle Drawer</button>
+          <button class="button button-subtle topbar-button" id="refreshButton">Refresh</button>
+          <button class="button button-subtle topbar-button" id="resetLayoutButton">Reset Layout</button>
+        </div>
+
+        <div class="workbench-tabs" role="tablist" aria-label="Workspace tabs">
+          <button class="mode-chip active" data-workspace-tab="chat">Operator</button>
+          <button class="mode-chip" data-workspace-tab="thoughtglass">Thoughtglass</button>
+          <button class="mode-chip" data-workspace-tab="tiny">Tiny</button>
+          <button class="mode-chip" data-workspace-tab="files">Files</button>
+          <button class="mode-chip" data-workspace-tab="security">Security</button>
+          <button class="mode-chip" data-workspace-tab="queue">Queue</button>
+          <button class="mode-chip" data-workspace-tab="trace">Trace</button>
+        </div>
+
+        <div class="chip-row">
+          <div id="linkedSessionChip" class="status-chip" hidden></div>
+          <div id="statusChip" class="status-chip">D.A.I.S.E idle</div>
+          <div id="backendChip" class="status-chip">backend unknown</div>
+          <div id="layerChip" class="status-chip">layer live brain</div>
+          <div id="transportChip" class="status-chip">transport polling</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="main-grid">
+      <aside class="panel left-rail" id="leftRail">
+        <div class="rail-header">
+          <div>
+            <div class="section-kicker">Navigator</div>
+            <h2>Sessions</h2>
+          </div>
+          <div class="button-row tight">
+            <button class="button button-subtle rail-toggle" id="floatLeftRailButton" type="button">Float</button>
+            <button class="button button-subtle rail-toggle" id="dockLeftRailButton" type="button">Dock</button>
+            <button class="button button-subtle rail-toggle" id="leftRailToggle">Hide</button>
+          </div>
+        </div>
+
+        <div class="rail-body">
+          <section class="panel-section grow" data-resizable-section="memory">
+            <div class="section-head">
+              <div>
+                <div class="section-kicker">Memory</div>
+                <h3>Session + Recall</h3>
+              </div>
+              <button class="button button-subtle" id="newSessionButton">New Session</button>
+            </div>
+            <div id="memoryPanel" class="scroll-stack"></div>
+          </section>
+
+          <section class="panel-section grow" data-resizable-section="sessions">
+            <div class="section-head">
+              <div>
+                <div class="section-kicker">Sessions</div>
+                <h3>Recent Threads</h3>
+              </div>
+              <div id="sessionMeta" class="micro-copy">No session selected</div>
+            </div>
+            <div id="sessionsPanel" class="scroll-stack"></div>
+          </section>
+
+          <section class="panel-section" data-resizable-section="keyboard_shortcuts">
+            <div class="section-head compact">
+              <div>
+                <div class="section-kicker">Settings</div>
+                <h3>Keyboard</h3>
+              </div>
+            </div>
+            <div id="keyboardShortcutsPanel" class="scroll-stack compact-stack"></div>
+          </section>
+
+          <section class="panel-section" data-resizable-section="file_scope_summary">
+            <div class="section-head compact">
+              <div>
+                <div class="section-kicker">File Scope</div>
+                <h3>Roots + Approval</h3>
+              </div>
+              <button class="button button-subtle" id="openFilesWorkspaceButton">Open Files</button>
+            </div>
+            <div id="scopeSummaryPanel" class="scroll-stack compact-stack"></div>
+          </section>
+        </div>
+      </aside>
+
+      <div class="column-resizer" data-column-resizer="left" role="separator" aria-orientation="vertical" aria-label="Resize left rail"></div>
+
+      <main class="panel center-rail">
+        <section class="panel-section workspace-header" data-resizable-section="workspace_header">
+          <div class="section-head">
+            <div>
+              <div class="section-kicker">Workspace</div>
+              <h2 id="workspaceTitle">Chat</h2>
+              <div id="workspaceSubhead" class="micro-copy">Conversation stays center-stage. Trace and diagnostics stay close by.</div>
+            </div>
+            <div id="metricsGrid" class="metric-grid"></div>
+          </div>
+        </section>
+
+        <section class="workspace-body">
+          <section id="operatorMode" class="workbench-panel active">
+            <section class="panel-section ribbon-block" data-resizable-section="chat_ribbon">
+              <div class="section-head compact">
+                <div>
+                  <div class="section-kicker">Trace Ribbon</div>
+                  <h3>Live Workflow</h3>
+                </div>
+                <div class="button-row tight">
+                  <button class="button button-subtle" id="traceButton">Trace</button>
+                  <button class="button button-subtle" id="pinButton">Pin</button>
+                </div>
+              </div>
+              <div id="operatorRibbon" class="trace-ribbon"></div>
+              <div id="chatTraceSummary" class="trace-summary-strip"></div>
+              <div id="pendingBanner" class="pending-banner hidden">
+                <div class="pulse-dot"></div>
+                <div>
+                  <strong id="pendingLabel">Working</strong>
+                  <div id="pendingDetail" class="micro-copy">D.A.I.S.E is routing, recalling, and evaluating.</div>
+                </div>
+                <div id="pendingBadge" class="micro-copy">idle</div>
+              </div>
+              <div id="chatBrainPanel" class="chat-brain-panel">
+                <div class="section-kicker">Thoughtglass</div>
+                <strong>Live Brain</strong>
+                <div class="micro-copy">Cognition will appear here as D.A.I.S.E warms up.</div>
+              </div>
+            </section>
+
+            <section class="chat-workspace grow">
+              <section class="panel-section grow conversation-panel" data-resizable-section="chat_messages">
+                <div class="section-head compact">
+                  <div>
+                    <div class="section-kicker">Conversation</div>
+                    <h3>Messages</h3>
+                  </div>
+                </div>
+                <div id="messagesPanel" class="messages-panel"></div>
+              </section>
+
+              <section class="panel-section composer-shell sticky-composer" data-resizable-section="chat_composer">
+                <label class="section-kicker" for="chatInput">Compose</label>
+                <textarea id="chatInput" rows="5" placeholder="Talk to D.A.I.S.E or enter slash commands like /status, /trace, /cognition forge, /tiny live. You can also say: Create file `path` with content: ..."></textarea>
+                <div class="composer-row">
+                  <select id="agentSelect">
+                    <option value="">Auto route (D.A.I.S.E decides)</option>
+                    <option value="daise">D.A.I.S.E</option>
+                    <option value="coding">Coding</option>
+                    <option value="lilo">Lilo</option>
+                    <option value="stitch">Stitch</option>
+                    <option value="voice">Voice</option>
+                  </select>
+                  <select id="analysisSelect">
+                    <option value="fast" selected>Fast</option>
+                    <option value="standard">Standard</option>
+                    <option value="deep">Deep</option>
+                  </select>
+                  <button class="button button-subtle" id="whatChangedButton">What Changed</button>
+                  <button class="button button-primary" id="sendButton">Send</button>
+                </div>
+              </section>
+            </section>
+          </section>
+
+          <section id="thoughtglassMode" class="workbench-panel">
+            <section class="panel-section" data-resizable-section="thoughtglass_header">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">Thoughtglass</div>
+                  <h3>Mechanical Constellation</h3>
+                </div>
+                <div class="layer-switch" role="tablist" aria-label="Thoughtglass layer">
+                  <button class="layer-chip active" data-layer="live_brain">Live Brain</button>
+                  <button class="layer-chip" data-layer="memory">Memory</button>
+                  <button class="layer-chip" data-layer="tasks">Tasks</button>
+                  <button class="layer-chip" data-layer="sensors">Sensors</button>
+                  <button class="layer-chip" data-layer="faults">Faults</button>
+                  <button class="layer-chip" data-layer="forge">Forge</button>
+                </div>
+              </div>
+              <div id="thoughtglassRibbon" class="trace-ribbon"></div>
+              <div id="thoughtglassTraceSummary" class="trace-summary-strip"></div>
+            </section>
+
+            <section class="panel-section thoughtglass-workspace grow" data-resizable-section="thoughtglass_stage">
+              <div class="thoughtglass-stage" id="thoughtglassStage">
+                <canvas id="thoughtglassFx" width="900" height="620"></canvas>
+                <svg id="thoughtglassGraph" viewBox="0 0 900 620" aria-label="Blackfong Thoughtglass graph"></svg>
+                <div id="thoughtglassFocusBadge" class="focus-badge">No focus</div>
+              </div>
+              <div id="thoughtglassCards" class="overlay-grid"></div>
+            </section>
+          </section>
+
+          <section id="workspaceTiny" class="workbench-panel">
+            <section class="panel-section grow">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">Companion</div>
+                  <h3>TinyProgrammer</h3>
+                </div>
+                <div class="button-grid tiny-grid">
+                  <button class="button button-subtle" data-tiny-action="status">Status</button>
+                  <button class="button button-subtle" data-tiny-action="launch">Launch</button>
+                  <button class="button button-subtle" data-tiny-action="native">Native</button>
+                  <button class="button button-subtle" data-tiny-action="open">Open</button>
+                  <button class="button button-subtle" data-tiny-action="live">Live</button>
+                  <button class="button button-subtle" data-tiny-action="recent">Recent</button>
+                  <button class="button button-subtle" data-tiny-action="bbs">BBS</button>
+                  <button class="button button-subtle" data-tiny-action="log">Log</button>
+                </div>
+              </div>
+              <div id="tinyPanel" class="scroll-stack panel-fill"></div>
+            </section>
+          </section>
+
+          <section id="workspaceFiles" class="workbench-panel">
+            <section class="panel-section grow">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">Files + Scope</div>
+                  <h3>Read + Map</h3>
+                </div>
+                <button class="button button-subtle" id="focusFilesDrawerButton">Open Detail Drawer</button>
+              </div>
+              <input id="scopePathInput" class="mini-input" type="text" placeholder="Path for approve, map, or read">
+              <div class="button-grid files-grid">
+                <button class="button button-subtle" data-file-scope-action="roots">Roots</button>
+                <button class="button button-subtle" data-file-scope-action="approve">Approve Root</button>
+                <button class="button button-subtle" data-file-scope-action="map">Map Path</button>
+                <button class="button button-subtle" data-file-scope-action="read">Read Path</button>
+              </div>
+              <div id="scopePanel" class="scroll-stack panel-fill"></div>
+            </section>
+          </section>
+
+          <section id="workspaceSecurity" class="workbench-panel">
+            <section class="security-grid grow">
+              <section class="panel-section grow">
+                <div class="section-head">
+                  <div>
+                    <div class="section-kicker">Verification</div>
+                    <h3>Graphical-First Health</h3>
+                  </div>
+                  <div class="button-grid security-button-grid">
+                    <button class="button button-subtle" data-verify-mode="surfaces">Surfaces</button>
+                    <button class="button button-subtle" data-verify-mode="integrations">Integrations</button>
+                    <button class="button button-subtle" data-verify-mode="full">Full</button>
+                    <button class="button button-subtle" data-verify-mode="bundle">Bundle</button>
+                  </div>
+                </div>
+                <div id="verificationPanel" class="scroll-stack panel-fill"></div>
+              </section>
+
+              <section class="panel-section grow">
+                <div class="section-head">
+                  <div>
+                    <div class="section-kicker">Security Workflow</div>
+                    <h3>RedAmon Mode</h3>
+                  </div>
+                  <div class="button-grid security-button-grid">
+                    <button class="button button-subtle" data-redamon-action="status">Status</button>
+                    <button class="button button-subtle" data-redamon-action="enter">Enter</button>
+                    <button class="button button-subtle" data-redamon-action="propose">Propose</button>
+                    <button class="button button-subtle" data-redamon-action="launch">Launch</button>
+                  </div>
+                </div>
+                <input id="redamonObjectiveInput" class="mini-input" type="text" placeholder="Objective for reviewed security mode">
+                <input id="redamonTargetInput" class="mini-input" type="text" placeholder="Target label or scope">
+                <div id="redamonPanel" class="scroll-stack panel-fill"></div>
+              </section>
+
+              <section class="panel-section grow">
+                <div class="section-head">
+                  <div>
+                    <div class="section-kicker">Optional Projects</div>
+                    <h3>External Integrations</h3>
+                  </div>
+                  <button class="button button-subtle" id="refreshIntegrationsButton">Refresh</button>
+                </div>
+                <div id="integrationPanel" class="scroll-stack panel-fill"></div>
+              </section>
+            </section>
+          </section>
+
+          <section id="workspaceQueue" class="workbench-panel">
+            <section class="panel-section grow">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">Queue</div>
+                  <h3>Operator Actions</h3>
+                </div>
+              </div>
+              <div id="actionsPanel" class="scroll-stack panel-half"></div>
+              <div class="section-head compact">
+                <div>
+                  <div class="section-kicker">History</div>
+                  <h3>Command Results</h3>
+                </div>
+              </div>
+              <div id="commandHistory" class="scroll-stack panel-half"></div>
+            </section>
+          </section>
+
+          <section id="workspaceTrace" class="workbench-panel">
+            <section class="panel-section grow">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">Trace</div>
+                  <h3>Request Detail</h3>
+                </div>
+              </div>
+              <div id="tracePanel" class="scroll-stack panel-fill"></div>
+            </section>
+          </section>
+        </section>
+      </main>
+
+      <div class="column-resizer" data-column-resizer="right" role="separator" aria-orientation="vertical" aria-label="Resize right drawer"></div>
+
+      <aside class="panel right-rail" id="rightRail">
+        <div class="rail-header">
+          <div>
+            <div class="section-kicker">Drawer</div>
+            <h2>Detail + Utilities</h2>
+          </div>
+          <div class="button-row tight">
+            <button class="button button-subtle rail-toggle" id="floatRightRailButton" type="button">Float</button>
+            <button class="button button-subtle rail-toggle" id="dockRightRailButton" type="button">Dock</button>
+            <button class="button button-subtle rail-toggle" id="rightRailToggle">Hide</button>
+          </div>
+        </div>
+
+        <div class="rail-body">
+          <div class="drawer-tabs" role="tablist" aria-label="Drawer tabs">
+            <button class="status-chip active" data-drawer-tab="detail">Detail</button>
+            <button class="status-chip" data-drawer-tab="notifications">Inbox</button>
+            <button class="status-chip" data-drawer-tab="commands">Deck</button>
+          </div>
+
+          <section id="drawerDetailPanel" class="drawer-panel active">
+            <div id="drawerTraceSummary" class="detail-card">
+              <div class="section-kicker">Live Detail</div>
+              <h3>Request Summary</h3>
+              <p>Trace detail will appear here during active work.</p>
+            </div>
+            <div id="scopeDetailPanel" class="detail-card">
+              <div class="section-kicker">Files</div>
+              <h3>Latest Scope Result</h3>
+              <p>Approve, map, or read a path to pin file detail here.</p>
+            </div>
+            <div id="thoughtglassDetails" class="detail-card">
+              <div class="section-kicker">Inspection</div>
+              <h3>Nothing selected</h3>
+              <p>Click a node or switch layers to inspect the live system state.</p>
+            </div>
+            <div id="tinyLogPanel" class="detail-card">
+              <div class="section-kicker">Tiny Log</div>
+              <h3>Managed Companion Log</h3>
+              <p>Launch TinyProgrammer or open the Tiny tab to inspect the current runtime log.</p>
+            </div>
+          </section>
+
+          <section id="drawerNotificationsPanel" class="drawer-panel">
+            <div class="section-head compact">
+              <div>
+                <div class="section-kicker">Notifications</div>
+                <h3>Inbox</h3>
+              </div>
+              <div class="button-row tight">
+                <button class="button button-subtle" id="notificationsReadAllButton">Read All</button>
+                <button class="button button-subtle" id="testToastButton">Test</button>
+              </div>
+            </div>
+            <div id="notificationsPanel" class="scroll-stack panel-fill"></div>
+          </section>
+
+          <section id="drawerCommandsPanel" class="drawer-panel">
+            <div class="section-head compact">
+              <div>
+                <div class="section-kicker">Command Deck</div>
+                <h3>Palette</h3>
+              </div>
+            </div>
+            <input id="commandSearchInput" class="command-search" type="search" placeholder="Search commands or type /status">
+            <div id="commandPalette" class="button-grid"></div>
+          </section>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script src="/hud-static/dashboard.js?v=20260430-docker-hud-stable"></script>
+</body>
+</html>

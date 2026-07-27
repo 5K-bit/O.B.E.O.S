@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}QuietDrop – {{ item.filename }}{% endblock %}
+{% block content %}
+  <section class="panel">
+    <div class="panel__head">
+      <h1 class="h1">{{ item.filename }}</h1>
+      <div class="muted">id {{ item.id }} • <span class="pill pill--{{ item.status }}">{{ item.status }}</span></div>
+    </div>
+
+    <div class="kv">
+      <div class="kv__row"><div class="kv__k">path</div><div class="kv__v mono">{{ item.path }}</div></div>
+      <div class="kv__row"><div class="kv__k">size</div><div class="kv__v mono">{{ item.size }}</div></div>
+      <div class="kv__row"><div class="kv__k">mtime</div><div class="kv__v mono">{{ item.mtime }}</div></div>
+      <div class="kv__row"><div class="kv__k">first_seen</div><div class="kv__v mono">{{ item.first_seen }}</div></div>
+      <div class="kv__row"><div class="kv__k">tags</div><div class="kv__v mono">{{ item.tags }}</div></div>
+    </div>
+
+    <div class="actions">
+      <form method="post" action="/items/{{ item.id }}/review">
+        <button class="btn" type="submit">mark reviewed</button>
+      </form>
+      <form method="post" action="/items/{{ item.id }}/archive">
+        <button class="btn" type="submit">archive (move)</button>
+      </form>
+      <form method="post" action="/items/{{ item.id }}/reject">
+        <button class="btn btn--danger" type="submit">reject</button>
+      </form>
+    </div>
+
+    <div class="rename">
+      <form method="post" action="/items/{{ item.id }}/rename">
+        <label class="muted" for="new_name">rename</label>
+        <div class="row">
+          <input id="new_name" name="new_name" class="input" placeholder="new filename.ext" />
+          <button class="btn" type="submit">rename</button>
+        </div>
+      </form>
+    </div>
+  </section>
+{% endblock %}
+

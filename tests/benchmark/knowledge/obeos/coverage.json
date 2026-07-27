@@ -1,0 +1,16 @@
+{
+  "collection": "obeos",
+  "domain": "architecture",
+  "embedded_ratio": 0.9524,
+  "embedded_sources": 20,
+  "found": true,
+  "graph_present": false,
+  "reference_only_sources": [],
+  "sequence": {
+    "available": false,
+    "reason": "no numeric ranges to analyze"
+  },
+  "timeline_present": false,
+  "total_chunks": 280,
+  "total_sources": 21
+}

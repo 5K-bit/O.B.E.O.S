@@ -1,0 +1,65 @@
+{
+  "collection": "spawn",
+  "domain": "comics",
+  "found": true,
+  "gap_count": 2,
+  "gaps": [
+    {
+      "affected_chunks": [],
+      "affected_sources": [],
+      "evidence": {
+        "embedded": 11,
+        "embedded_ratio": 0.3333,
+        "threshold": 0.5,
+        "total_sources": 33
+      },
+      "gap_type": "thin_source_coverage",
+      "reason": "only 11 of 33 sources are embedded (ratio 0.33); large portions of the collection are not yet searchable",
+      "severity": "medium"
+    },
+    {
+      "affected_chunks": [],
+      "affected_sources": [
+        "epub_77c7ab6b0ab136e1",
+        "pdf_text_c0bfcf9c8ab17a10",
+        "epub_133faba2e4ee0790",
+        "pdf_text_6d15ee46634cde2d",
+        "epub_11ef81b0769f990f",
+        "pdf_text_50707a040092826d",
+        "epub_c50d87ada2c6c4db",
+        "pdf_text_07d8bb3f6147e7b5",
+        "epub_642ad2140c843cba",
+        "pdf_text_a654a8fb6cc73c74",
+        "epub_8dec2be8c04abddf",
+        "pdf_text_c0b10c57b32c016a",
+        "epub_590576239cd5d7df",
+        "pdf_text_1804ad764582cba4",
+        "epub_83be8c7ecbbf3583",
+        "pdf_text_795fa5f8cc2f9979",
+        "epub_a0ffead572a4ff88",
+        "pdf_text_faea468d38539eb3",
+        "epub_4d6afa0396cdb231",
+        "pdf_text_185e4b5ad79c0d28",
+        "epub_ac5c9964a1722456",
+        "pdf_text_5448992bd41018c5"
+      ],
+      "evidence": {
+        "source_types": [
+          "epub",
+          "pdf_text"
+        ]
+      },
+      "gap_type": "reference_only_not_embedded",
+      "reason": "22 source(s) are registered as reference-only and have not been embedded; their content is not searchable",
+      "severity": "info"
+    }
+  ],
+  "summary_by_severity": {
+    "info": 1,
+    "medium": 1
+  },
+  "summary_by_type": {
+    "reference_only_not_embedded": 1,
+    "thin_source_coverage": 1
+  }
+}

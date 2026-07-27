@@ -1,0 +1,38 @@
+{
+  "by_role": {
+    "canonical": 1
+  },
+  "by_source_type": {
+    "djvu_text": 1
+  },
+  "by_status": {
+    "embedded": 1
+  },
+  "collection": "security_plus",
+  "domain": "cybersecurity",
+  "domains": [
+    "cybersecurity"
+  ],
+  "embedded": 1,
+  "failed": 0,
+  "found": true,
+  "issue_ranges": [
+    "unknown"
+  ],
+  "pending_processing": 0,
+  "reference_only": 0,
+  "source_detail": [
+    {
+      "chunk_count": 6,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "CompTIA_SecurityPlus_Objectives.txt",
+      "source_id": "djvu_text_61d2d69d4831e927",
+      "source_type": "djvu_text"
+    }
+  ],
+  "sources": 1,
+  "total_chunks": 6
+}

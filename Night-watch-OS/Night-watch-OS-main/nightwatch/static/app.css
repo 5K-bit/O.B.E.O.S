@@ -1,0 +1,352 @@
+:root {
+  --bg: #0b0c0e;
+  --panel: #0f1114;
+  --text: #e9e6df;
+  --muted: #a6a19a;
+  --line: #22262c;
+  --soft: #15181d;
+  --red: #d14d4d;
+  --ok: #e9e6df;
+  --shadow: rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+    "Segoe UI Emoji";
+  background: radial-gradient(1200px 600px at 20% 0%, #0f1116 0%, var(--bg) 55%);
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+
+.shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 18px 16px 20px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 2px 18px;
+}
+
+.brand__title {
+  font-weight: 650;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  font-size: 14px;
+}
+.brand__subtitle {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.clock {
+  text-align: right;
+  line-height: 1.1;
+}
+.clock__time {
+  font-size: 18px;
+  font-weight: 650;
+}
+.clock__date {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: linear-gradient(180deg, var(--panel), #0c0e12);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 18px 55px var(--shadow);
+  overflow: hidden;
+}
+
+.panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.panel__title {
+  font-weight: 650;
+  font-size: 13px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.panel__meta {
+  font-size: 12px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel__body {
+  padding: 14px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.row--right {
+  justify-content: flex-end;
+}
+
+.divider {
+  height: 1px;
+  background: var(--line);
+  margin: 12px 0;
+}
+
+.btn {
+  border: 1px solid var(--line);
+  background: #101318;
+  color: var(--text);
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 60ms ease;
+  user-select: none;
+}
+.btn:hover {
+  background: #121720;
+  border-color: #2a313a;
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn--danger {
+  border-color: rgba(209, 77, 77, 0.45);
+  color: var(--text);
+}
+.btn--danger:hover {
+  border-color: rgba(209, 77, 77, 0.9);
+}
+.btn--ghost {
+  background: transparent;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: auto;
+  text-align: right;
+}
+
+.label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 160px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0c0f14;
+  color: var(--text);
+  padding: 10px 12px;
+  resize: vertical;
+  outline: none;
+}
+.textarea:focus {
+  border-color: #2a313a;
+}
+.textarea:disabled {
+  opacity: 0.6;
+}
+
+.input {
+  flex: 1;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0c0f14;
+  color: var(--text);
+  padding: 10px 12px;
+  outline: none;
+}
+.input:focus {
+  border-color: #2a313a;
+}
+
+.tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.task__check {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--text);
+}
+
+.task__title {
+  flex: 1;
+  font-size: 13px;
+}
+.task--done .task__title {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.task__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.iconbtn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 7px 9px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.iconbtn:hover {
+  color: var(--text);
+  border-color: #2a313a;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+@media (max-width: 900px) {
+  .stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.stat {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.15);
+}
+.stat__k {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+.stat__v {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 99px;
+  display: inline-block;
+  background: var(--red);
+  box-shadow: 0 0 0 3px rgba(209, 77, 77, 0.12);
+}
+.dot--ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(233, 230, 223, 0.1);
+}
+
+.foot {
+  padding: 14px 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.muted {
+  color: var(--muted);
+}
+
+/* Focus Mode: blackout but keep clock + tasks + heartbeat */
+body.focus {
+  background: #000;
+}
+body.focus .brand__subtitle,
+body.focus #panelShift,
+body.focus #panelSystem .stats .stat:not(:last-child),
+body.focus .foot {
+  display: none;
+}
+body.focus .grid {
+  grid-template-columns: 1fr;
+}
+body.focus #panelTasks {
+  order: 1;
+}
+body.focus #panelSystem {
+  order: 2;
+}
+body.focus #panelSystem .panel__body {
+  padding: 10px 14px 14px;
+}
+body.focus #panelSystem .stats {
+  grid-template-columns: 1fr;
+}
+

@@ -1,0 +1,13 @@
+{
+  "chunk_count": 6,
+  "collection": "security_plus",
+  "domain": "cybersecurity",
+  "sources": [
+    {
+      "chunk_count": 6,
+      "issue_range": "unknown",
+      "source_file": "CompTIA_SecurityPlus_Objectives.txt",
+      "source_id": "djvu_text_61d2d69d4831e927"
+    }
+  ]
+}

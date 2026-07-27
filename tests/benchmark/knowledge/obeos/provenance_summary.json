@@ -1,0 +1,127 @@
+{
+  "chunk_count": 280,
+  "collection": "obeos",
+  "domain": "architecture",
+  "sources": [
+    {
+      "chunk_count": 25,
+      "issue_range": "unknown",
+      "source_file": "OBEOS user guide.md",
+      "source_id": "markdown_3d4552d850610392"
+    },
+    {
+      "chunk_count": 37,
+      "issue_range": "unknown",
+      "source_file": "PHASE2_COMPLETION.md",
+      "source_id": "markdown_1763221952204949"
+    },
+    {
+      "chunk_count": 23,
+      "issue_range": "unknown",
+      "source_file": "PHASE3_COMPLETION.md",
+      "source_id": "markdown_3b106f10268be953"
+    },
+    {
+      "chunk_count": 24,
+      "issue_range": "unknown",
+      "source_file": "PHASE4_COMPLETION.md",
+      "source_id": "markdown_7129431f7f2a6f96"
+    },
+    {
+      "chunk_count": 16,
+      "issue_range": "unknown",
+      "source_file": "README.md",
+      "source_id": "markdown_05bd47fafe9a4101"
+    },
+    {
+      "chunk_count": 22,
+      "issue_range": "unknown",
+      "source_file": "TOOLING_MATRIX.md",
+      "source_id": "markdown_b6d8fde946e3a8f6"
+    },
+    {
+      "chunk_count": 4,
+      "issue_range": "unknown",
+      "source_file": "README.md",
+      "source_id": "markdown_a1f53e7a2425ccc8"
+    },
+    {
+      "chunk_count": 1,
+      "issue_range": "unknown",
+      "source_file": "degraded_boot_fallback.md",
+      "source_id": "markdown_328565c1fbf5564f"
+    },
+    {
+      "chunk_count": 1,
+      "issue_range": "unknown",
+      "source_file": "session_authority.md",
+      "source_id": "markdown_c7a60f55b3f06848"
+    },
+    {
+      "chunk_count": 10,
+      "issue_range": "unknown",
+      "source_file": "vm_checklist.md",
+      "source_id": "markdown_0b77d21593307ac0"
+    },
+    {
+      "chunk_count": 1,
+      "issue_range": "unknown",
+      "source_file": "README.md",
+      "source_id": "markdown_95f888d0c3453361"
+    },
+    {
+      "chunk_count": 1,
+      "issue_range": "unknown",
+      "source_file": "README.md",
+      "source_id": "markdown_a17a196723ecadb9"
+    },
+    {
+      "chunk_count": 20,
+      "issue_range": "unknown",
+      "source_file": "branding-doctrine.md",
+      "source_id": "markdown_f42ef08177974306"
+    },
+    {
+      "chunk_count": 35,
+      "issue_range": "unknown",
+      "source_file": "obeos-packaging-readiness-plan.md",
+      "source_id": "markdown_6458a4aa4f376e07"
+    },
+    {
+      "chunk_count": 7,
+      "issue_range": "unknown",
+      "source_file": "operator-env.md",
+      "source_id": "markdown_ad5fcb7b996b9847"
+    },
+    {
+      "chunk_count": 12,
+      "issue_range": "unknown",
+      "source_file": "release-artifacts.md",
+      "source_id": "markdown_3e2e8123ed4e26f9"
+    },
+    {
+      "chunk_count": 11,
+      "issue_range": "unknown",
+      "source_file": "release-checklist-v1.md",
+      "source_id": "markdown_0e482d6edbd93dad"
+    },
+    {
+      "chunk_count": 17,
+      "issue_range": "unknown",
+      "source_file": "release-screenshot-shotlist.md",
+      "source_id": "markdown_2a757dcdd1f42e62"
+    },
+    {
+      "chunk_count": 12,
+      "issue_range": "unknown",
+      "source_file": "release-surface-hierarchy.md",
+      "source_id": "markdown_f4e77478e52a13ed"
+    },
+    {
+      "chunk_count": 1,
+      "issue_range": "unknown",
+      "source_file": "README-obeos-vm.md",
+      "source_id": "markdown_0bad3fb25f706e51"
+    }
+  ]
+}

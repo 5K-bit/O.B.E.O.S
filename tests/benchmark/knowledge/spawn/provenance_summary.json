@@ -1,0 +1,73 @@
+{
+  "chunk_count": 3122,
+  "collection": "spawn",
+  "domain": "comics",
+  "sources": [
+    {
+      "chunk_count": 250,
+      "issue_range": "1-8",
+      "source_file": "Spaw1to8_djvu.txt",
+      "source_id": "djvu_text_6f2ba15969e70e86"
+    },
+    {
+      "chunk_count": 290,
+      "issue_range": "9-17",
+      "source_file": "Spawn9to17_djvu.txt",
+      "source_id": "djvu_text_d9a9c3347aca7bc8"
+    },
+    {
+      "chunk_count": 329,
+      "issue_range": "18-26",
+      "source_file": "Spawn18to26_djvu.txt",
+      "source_id": "djvu_text_ed57e92b7833cb90"
+    },
+    {
+      "chunk_count": 281,
+      "issue_range": "27-35",
+      "source_file": "Spawn27to35_djvu.txt",
+      "source_id": "djvu_text_04d19a17b7f81d6b"
+    },
+    {
+      "chunk_count": 276,
+      "issue_range": "36-44",
+      "source_file": "Spawn36to44_djvu.txt",
+      "source_id": "djvu_text_e0229d80f9032920"
+    },
+    {
+      "chunk_count": 292,
+      "issue_range": "45-52",
+      "source_file": "Spawn45to52_djvu.txt",
+      "source_id": "djvu_text_3d43baadee943f37"
+    },
+    {
+      "chunk_count": 294,
+      "issue_range": "53-61",
+      "source_file": "Spawn53to61_djvu.txt",
+      "source_id": "djvu_text_de5ec6054418331f"
+    },
+    {
+      "chunk_count": 292,
+      "issue_range": "62-70",
+      "source_file": "Spawn62to70_djvu.txt",
+      "source_id": "djvu_text_ed7644ba097a2fa4"
+    },
+    {
+      "chunk_count": 292,
+      "issue_range": "71-79",
+      "source_file": "Spawn71to79_djvu.txt",
+      "source_id": "djvu_text_a3ffb2e9ea195907"
+    },
+    {
+      "chunk_count": 296,
+      "issue_range": "80-89",
+      "source_file": "Spawn80to89_djvu.txt",
+      "source_id": "djvu_text_796118b7842c2957"
+    },
+    {
+      "chunk_count": 230,
+      "issue_range": "90-99",
+      "source_file": "Spawn90to99_djvu.txt",
+      "source_id": "djvu_text_e12d4a9db459872e"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}QuietDrop{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <a class="brand__link" href="/">QuietDrop</a>
+      </div>
+      <nav class="nav">
+        <a class="nav__link" href="/?status=new">new</a>
+        <a class="nav__link" href="/?status=reviewed">reviewed</a>
+        <a class="nav__link" href="/?status=archived">archived</a>
+        <a class="nav__link" href="/?status=rejected">rejected</a>
+        <a class="nav__link" href="/">all</a>
+      </nav>
+    </header>
+
+    <main class="main">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="foot">
+      <div class="muted">local-first • filesystem is truth</div>
+    </footer>
+  </body>
+</html>
+

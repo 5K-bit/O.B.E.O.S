@@ -1,0 +1,34 @@
+{
+  "samples": [
+    {
+      "chunk_id": "markdown_05bd47fafe9a4101_0001",
+      "collection": "obeos",
+      "confidence": 1.0,
+      "domain": "architecture",
+      "found": true,
+      "section": "O.B.E.O.S. / Blackfong",
+      "source_file": "README.md",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_id": "markdown_3d4552d850610392_0025",
+      "collection": "obeos",
+      "confidence": 1.0,
+      "domain": "architecture",
+      "found": true,
+      "section": "Related Docs",
+      "source_file": "OBEOS user guide.md",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_id": "markdown_f4e77478e52a13ed_0012",
+      "collection": "obeos",
+      "confidence": 1.0,
+      "domain": "architecture",
+      "found": true,
+      "section": "Packaging Implication",
+      "source_file": "release-surface-hierarchy.md",
+      "source_type": "markdown"
+    }
+  ]
+}

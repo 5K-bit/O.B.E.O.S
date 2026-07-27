@@ -1,0 +1,26 @@
+{
+  "collection": "python",
+  "domain": "programming",
+  "embedded_ratio": 0.9219,
+  "embedded_sources": 118,
+  "found": true,
+  "graph_present": false,
+  "reference_only_sources": [
+    "djvu_text_71897125698540a1",
+    "djvu_text_c6f271b62501012a",
+    "djvu_text_1da89bf8e28ececa",
+    "djvu_text_f3d5f412b7ab6599",
+    "djvu_text_fbba39ec03621aab",
+    "djvu_text_f42f3ce8db7c4144",
+    "djvu_text_36f60516bc2e2fe4",
+    "djvu_text_bb2494bb1402790c",
+    "djvu_text_cbb9b6c91c200f41"
+  ],
+  "sequence": {
+    "available": false,
+    "reason": "no numeric ranges to analyze"
+  },
+  "timeline_present": false,
+  "total_chunks": 3203,
+  "total_sources": 128
+}

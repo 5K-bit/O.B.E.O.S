@@ -1,0 +1,12 @@
+{
+  "name": "Legion O.B.E.O.S Cockpit",
+  "short_name": "Legion OBEOS",
+  "description": "Local Blackcomputer and Sentinel cockpit for O.B.E.O.S.",
+  "start_url": "/legion",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#07090c",
+  "theme_color": "#07090c",
+  "categories": ["productivity", "utilities"]
+}

@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Blackcomputer
+Description=OBEOS Blackcomputer boot animation theme
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/blackcomputer
+ScriptFile=/usr/share/plymouth/themes/blackcomputer/blackcomputer.script

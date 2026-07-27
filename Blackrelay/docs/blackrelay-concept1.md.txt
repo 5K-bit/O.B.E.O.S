@@ -1,0 +1,273 @@
+# BLACKRELAY_CONCEPT_001
+
+## Status
+
+Planned.
+
+BlackRelay is intended to be a local-first workflow automation and routing tool for the Blackfong software ecosystem.
+
+It is separate from BlackBus.
+
+BlackBus moves events.
+
+BlackRelay reacts to events.
+
+---
+
+## Core Purpose
+
+BlackRelay watches for local events and triggers local actions.
+
+Example:
+
+```text
+3000 saves a motion snapshot
+↓
+BlackRelay detects the new event or file
+↓
+BlackRelay routes it to QuietDrop
+↓
+BlackRelay creates/logs an alert for Nightwatch
+```
+
+---
+
+## Relationship to BlackBus
+
+BlackBus is the event highway.
+
+BlackRelay is the dispatcher.
+
+BlackRelay can work in two modes:
+
+1. Folder watcher mode
+2. BlackBus subscriber mode
+
+MVP should start with folder watcher mode because it is simpler.
+
+Later, BlackRelay should subscribe to BlackBus events.
+
+---
+
+## Initial Project Goal
+
+Build a local automation router that can watch folders, detect new files/events, log relay activity, and run dry-run adapters for other Blackfong tools.
+
+No cloud.
+
+No AI.
+
+No required dependency on QuietDrop or Nightwatch yet.
+
+---
+
+## MVP Commands
+
+```bash
+blackrelay init
+blackrelay watch
+blackrelay status
+blackrelay test-event
+blackrelay routes
+```
+
+---
+
+## MVP Behavior
+
+1. Create config file:
+
+```text
+blackrelay.toml
+```
+
+2. Watch configured folders.
+
+3. Detect new files.
+
+4. Classify basic file event:
+
+```text
+snapshot.created
+file.created
+log.created
+```
+
+5. Write relay event to SQLite.
+
+6. Print Rich terminal alert.
+
+7. Route to dry-run adapters:
+
+```text
+QuietDrop adapter
+Nightwatch adapter
+```
+
+8. Do not require those tools to actually exist yet.
+
+---
+
+## MVP Architecture
+
+```text
+blackrelay/
+├── cli.py
+├── config.py
+├── watcher.py
+├── relay.py
+├── event.py
+├── storage.py
+├── routes.py
+├── adapters/
+│   ├── __init__.py
+│   ├── quietdrop.py
+│   └── nightwatch.py
+└── tests/
+```
+
+---
+
+## Example Config
+
+```toml
+[watch]
+paths = ["data/snapshots"]
+
+[routes.snapshot_created]
+source = "3000"
+match = "*.jpg"
+adapters = ["quietdrop", "nightwatch"]
+
+[adapters.quietdrop]
+mode = "dry_run"
+
+[adapters.nightwatch]
+mode = "dry_run"
+```
+
+---
+
+## Relay Event Schema
+
+```json
+{
+  "id": "uuid",
+  "timestamp": "utc iso timestamp",
+  "source": "blackrelay",
+  "event_type": "snapshot.created",
+  "input_path": "data/snapshots/example.jpg",
+  "routes": ["quietdrop", "nightwatch"],
+  "status": "processed",
+  "metadata": {}
+}
+```
+
+---
+
+## Storage
+
+MVP storage:
+
+```text
+SQLite
+```
+
+Default path:
+
+```text
+data/blackrelay.sqlite3
+```
+
+Tables:
+
+```text
+relay_events
+route_results
+```
+
+---
+
+## What BlackRelay Is Not
+
+BlackRelay is not:
+
+* the event bus
+* OBEOS
+* DAISE
+* a full automation platform yet
+* a GUI
+* a cloud workflow tool
+* Zapier clone with accounts
+
+It is a local workflow dispatcher.
+
+---
+
+## Future Integration
+
+Future BlackRelay should support:
+
+* BlackBus subscription
+* real QuietDrop archive action
+* real Nightwatch task/log creation
+* shell command adapters
+* Python function adapters
+* retry logic
+* failed route queue
+* rule validation
+* route dry-run previews
+
+---
+
+## MVP Rules
+
+Do not add:
+
+* AI
+* cloud sync
+* remote APIs
+* authentication
+* GUI
+* complex rule engine
+* dependency on OBEOS
+
+Keep it small and testable.
+
+---
+
+## Portfolio Value
+
+BlackRelay demonstrates:
+
+* local automation
+* event routing
+* file watchers
+* adapter architecture
+* SQLite logging
+* CLI workflows
+* integration design
+
+---
+
+## Resume Point
+
+BlackRelay is a local-first workflow router that watches files/events and dispatches actions through modular adapters.
+
+---
+
+## Next Step
+
+Build MVP as standalone repo.
+
+Start with:
+
+```text
+CLI → config → file watcher → SQLite relay log → dry-run adapters → tests → CI
+```
+
+Planned:
+2026-06-02
+
+Checkpoint:
+001

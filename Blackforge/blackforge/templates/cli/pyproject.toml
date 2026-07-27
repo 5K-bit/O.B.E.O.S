@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "{{ project_name }}"
+version = "0.1.0"
+description = "CLI project scaffolded by BlackForge."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "rich>=14.0.0",
+  "typer>=0.16.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4.0"]
+
+[project.scripts]
+{{ package_name }} = "{{ package_name }}.cli:app"

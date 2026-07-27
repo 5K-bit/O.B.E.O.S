@@ -1,0 +1,13 @@
+# Nightwatch configuration (TOML)
+# This file is optional. Env vars override it.
+
+[nightwatch]
+# host = "127.0.0.1"
+# port = 8037
+
+# data_dir = "~/.local/share/nightwatch"
+# db_path = "~/.local/share/nightwatch/nightwatch.db"
+
+# Prefer /backups/ (falls back to data_dir/backups if not writable)
+# backups_dir = "/backups"
+

@@ -1,0 +1,240 @@
+{
+  "by_role": {
+    "canonical": 20,
+    "reference": 1
+  },
+  "by_source_type": {
+    "markdown": 21
+  },
+  "by_status": {
+    "embedded": 20,
+    "failed": 1
+  },
+  "collection": "obeos",
+  "domain": "architecture",
+  "domains": [
+    "architecture"
+  ],
+  "embedded": 20,
+  "failed": 1,
+  "found": true,
+  "issue_ranges": [
+    "unknown"
+  ],
+  "pending_processing": 0,
+  "reference_only": 0,
+  "source_detail": [
+    {
+      "chunk_count": 25,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "OBEOS user guide.md",
+      "source_id": "markdown_3d4552d850610392",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 37,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "PHASE2_COMPLETION.md",
+      "source_id": "markdown_1763221952204949",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 23,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "PHASE3_COMPLETION.md",
+      "source_id": "markdown_3b106f10268be953",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 24,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "PHASE4_COMPLETION.md",
+      "source_id": "markdown_7129431f7f2a6f96",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 16,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "README.md",
+      "source_id": "markdown_05bd47fafe9a4101",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 22,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "TOOLING_MATRIX.md",
+      "source_id": "markdown_b6d8fde946e3a8f6",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 4,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "README.md",
+      "source_id": "markdown_a1f53e7a2425ccc8",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 1,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "degraded_boot_fallback.md",
+      "source_id": "markdown_328565c1fbf5564f",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 1,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "session_authority.md",
+      "source_id": "markdown_c7a60f55b3f06848",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 10,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "vm_checklist.md",
+      "source_id": "markdown_0b77d21593307ac0",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 1,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "README.md",
+      "source_id": "markdown_95f888d0c3453361",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 0,
+      "embedded": false,
+      "issue_range": "unknown",
+      "processing_status": "failed",
+      "role": "reference",
+      "source_file": "README.md",
+      "source_id": "markdown_a28a7056f9498832",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 1,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "README.md",
+      "source_id": "markdown_a17a196723ecadb9",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 20,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "branding-doctrine.md",
+      "source_id": "markdown_f42ef08177974306",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 35,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "obeos-packaging-readiness-plan.md",
+      "source_id": "markdown_6458a4aa4f376e07",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 7,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "operator-env.md",
+      "source_id": "markdown_ad5fcb7b996b9847",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 12,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "release-artifacts.md",
+      "source_id": "markdown_3e2e8123ed4e26f9",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 11,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "release-checklist-v1.md",
+      "source_id": "markdown_0e482d6edbd93dad",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 17,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "release-screenshot-shotlist.md",
+      "source_id": "markdown_2a757dcdd1f42e62",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 12,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "release-surface-hierarchy.md",
+      "source_id": "markdown_f4e77478e52a13ed",
+      "source_type": "markdown"
+    },
+    {
+      "chunk_count": 1,
+      "embedded": true,
+      "issue_range": "unknown",
+      "processing_status": "embedded",
+      "role": "canonical",
+      "source_file": "README-obeos-vm.md",
+      "source_id": "markdown_0bad3fb25f706e51",
+      "source_type": "markdown"
+    }
+  ],
+  "sources": 21,
+  "total_chunks": 280
+}

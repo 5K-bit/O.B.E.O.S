@@ -1,0 +1,23 @@
+{
+  "collection": "python",
+  "provenance_sources": [
+    {
+      "collection": "python",
+      "source": "readme.md"
+    },
+    {
+      "collection": "python",
+      "source": "03_operators.md"
+    },
+    {
+      "collection": "python",
+      "source": "02_variables_builtin_functions.md"
+    }
+  ],
+  "question": "how do variables work in python?",
+  "retrieved_chunk_ids": [
+    "markdown_5314bd8c2bb0bdd0_0064",
+    "markdown_d002a394a1e38911_0005",
+    "markdown_a7593ce99d49272f_0008"
+  ]
+}

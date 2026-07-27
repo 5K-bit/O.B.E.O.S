@@ -1,0 +1,16 @@
+{
+  "collection": "security_plus",
+  "domain": "cybersecurity",
+  "embedded_ratio": 1.0,
+  "embedded_sources": 1,
+  "found": true,
+  "graph_present": false,
+  "reference_only_sources": [],
+  "sequence": {
+    "available": false,
+    "reason": "no numeric ranges to analyze"
+  },
+  "timeline_present": false,
+  "total_chunks": 6,
+  "total_sources": 1
+}

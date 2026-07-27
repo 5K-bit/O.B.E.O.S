@@ -1,0 +1,18 @@
+[Unit]
+Description=O.B.E.O.S Sentinel Pi agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/obeos
+Environment=BLACKFONG_HUB_URL=http://blackcomputer:8080
+Environment=BLACKFONG_SENTINEL_AGENT_TOKEN=replace-with-legion-token
+Environment=BLACKFONG_SENTINEL_DEVICE_ID=sentinel
+Environment=BLACKFONG_SENTINEL_DEVICE_LABEL=Sentinel
+ExecStart=/usr/bin/env bash /opt/obeos/tools/start-sentinel-agent.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

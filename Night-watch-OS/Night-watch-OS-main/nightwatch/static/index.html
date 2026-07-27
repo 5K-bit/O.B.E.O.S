@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nightwatch</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <div class="shell" id="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand__title">Nightwatch</div>
+          <div class="brand__subtitle">command-center</div>
+        </div>
+        <div class="topbar__right">
+          <div class="clock">
+            <div class="clock__time" id="clockTime">--:--</div>
+            <div class="clock__date" id="clockDate">----</div>
+          </div>
+          <button class="btn btn--ghost" id="focusToggle" type="button" aria-pressed="false">
+            Focus
+          </button>
+        </div>
+      </header>
+
+      <main class="grid">
+        <section class="panel" id="panelShift">
+          <div class="panel__head">
+            <div class="panel__title">Shift Console</div>
+            <div class="panel__meta" id="shiftMeta">No active shift.</div>
+          </div>
+
+          <div class="panel__body">
+            <div class="row">
+              <button class="btn" id="shiftStart" type="button">Start shift</button>
+              <button class="btn btn--danger" id="shiftEnd" type="button" disabled>End shift</button>
+              <div class="hint" id="shiftHint"></div>
+            </div>
+
+            <div class="divider"></div>
+
+            <label class="label" for="shiftNotes">Notes (markdown/plain text)</label>
+            <textarea
+              class="textarea"
+              id="shiftNotes"
+              placeholder="Keep it short. Keep it true."
+              spellcheck="false"
+              disabled
+            ></textarea>
+            <div class="row row--right">
+              <button class="btn btn--ghost" id="saveNotes" type="button" disabled>Save notes</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="panelTasks">
+          <div class="panel__head">
+            <div class="panel__title">Task Ledger</div>
+            <div class="panel__meta" id="taskMeta">—</div>
+          </div>
+          <div class="panel__body">
+            <form class="row" id="taskForm">
+              <input class="input" id="taskTitle" placeholder="Add a task…" autocomplete="off" />
+              <button class="btn" type="submit">Add</button>
+            </form>
+            <div class="divider"></div>
+            <ul class="tasks" id="taskList"></ul>
+          </div>
+        </section>
+
+        <section class="panel" id="panelSystem">
+          <div class="panel__head">
+            <div class="panel__title">System Watch</div>
+            <div class="panel__meta">
+              <span class="dot" id="hbDot" title="heartbeat"></span>
+              <span id="systemMeta">—</span>
+            </div>
+          </div>
+          <div class="panel__body">
+            <div class="stats">
+              <div class="stat">
+                <div class="stat__k">CPU</div>
+                <div class="stat__v" id="cpuVal">—</div>
+              </div>
+              <div class="stat">
+                <div class="stat__k">RAM</div>
+                <div class="stat__v" id="ramVal">—</div>
+              </div>
+              <div class="stat">
+                <div class="stat__k">Disk</div>
+                <div class="stat__v" id="diskVal">—</div>
+              </div>
+              <div class="stat">
+                <div class="stat__k">Temp</div>
+                <div class="stat__v" id="tempVal">—</div>
+              </div>
+              <div class="stat">
+                <div class="stat__k">Net</div>
+                <div class="stat__v" id="netVal">—</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="foot">
+        <span class="muted">Local-first. No accounts. No noise.</span>
+      </footer>
+    </div>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
+

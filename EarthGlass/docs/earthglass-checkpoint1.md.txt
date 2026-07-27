@@ -1,0 +1,243 @@
+# EARTHGLASS_CHECKPOINT_001
+
+## Status
+
+Project paused.
+
+EarthGlass is intended to be a standalone local-first geospatial intelligence dashboard.
+
+No integration with:
+
+* OBEOS
+* Nightwatch
+* QuietDrop
+* 3000
+* Blackfong event systems
+
+at this stage.
+
+The goal is to build EarthGlass independently first.
+
+---
+
+## Vision
+
+EarthGlass is a local-first digital Earth viewer.
+
+Initial focus:
+
+* Earthquake events
+* Geospatial visualization
+* Interactive map
+* Local data storage
+* Layer-based architecture
+
+Future possibilities:
+
+* Weather
+* Air quality
+* Wildfires
+* Environmental monitoring
+* Satellite-derived datasets
+* 3D globe
+
+Not currently planned:
+
+* AI
+* LLM integration
+* OBEOS integration
+* Agent orchestration
+
+---
+
+## Current State
+
+Generated from BlackForge FastAPI scaffold.
+
+Current structure:
+
+```text
+EarthGlass/
+├── app/
+├── tests/
+├── pyproject.toml
+└── README.md
+```
+
+Packaging currently fails.
+
+Error:
+
+```text
+Hatchling cannot determine package contents because project name and package structure do not match.
+```
+
+Current project name:
+
+```text
+EarthGlass
+```
+
+Current package folder:
+
+```text
+app/
+```
+
+---
+
+## Required Packaging Fix
+
+Before any feature work:
+
+1. Rename package folder:
+
+```text
+app/
+```
+
+to:
+
+```text
+earthglass/
+```
+
+2. Add:
+
+```text
+earthglass/__init__.py
+```
+
+3. Update `pyproject.toml`.
+
+4. Verify:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+passes.
+
+5. Verify:
+
+```bash
+pytest
+```
+
+passes.
+
+6. Verify:
+
+```bash
+earthglass --help
+```
+
+works.
+
+No additional development should occur until packaging is fixed.
+
+---
+
+## Intended Milestone 1
+
+Goal:
+
+```text
+CLI → FastAPI → Jinja → Leaflet → Tests → CI
+```
+
+Features:
+
+```bash
+earthglass serve
+earthglass layers
+earthglass cache status
+```
+
+Routes:
+
+```text
+GET /health
+GET /
+GET /api/layers
+```
+
+UI:
+
+* Leaflet map
+* Earth centered
+* Earthquake layer toggle
+
+No database.
+
+No ingestion.
+
+No live APIs.
+
+No AI.
+
+No Cesium.
+
+---
+
+## Intended Milestone 2
+
+Add SQLite storage.
+
+Create geospatial event model.
+
+Store:
+
+* id
+* source
+* event_type
+* title
+* latitude
+* longitude
+* timestamp
+* raw_json
+
+---
+
+## Intended Milestone 3
+
+Add mock earthquake ingestion.
+
+No internet required.
+
+Provider interface must remain replaceable.
+
+---
+
+## Decision Log
+
+EarthGlass remains a standalone project.
+
+Reason:
+
+Standalone architecture is simpler to complete and easier to showcase in a portfolio.
+
+Blackfong ecosystem integration can be evaluated later.
+
+---
+
+## Resume Point
+
+EarthGlass demonstrates:
+
+* FastAPI
+* Geospatial systems
+* Leaflet
+* SQLite
+* REST APIs
+* Testing
+* GitHub Actions
+* Local-first architecture
+
+---
+
+Paused:
+2026-06-01
+
+Checkpoint:
+001

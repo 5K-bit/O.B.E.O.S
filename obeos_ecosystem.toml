@@ -1,0 +1,273 @@
+[ecosystem]
+name = "O.B.E.O.S"
+description = "Official Blackfong Ecosystem Operating System first-party project manifest."
+version = 1
+workspace_root = "."
+offline_first = true
+manifest_owner = "blackfong_ecosystem"
+
+[[projects]]
+id = "3000"
+path = "3000-main"
+aliases = ["3000", "project3000", "three_thousand"]
+roles = ["local_first_vision_sentinel", "motion_event_source"]
+description = "Local-first computer vision sentinel that records motion snapshots and publishes normalized OBEOS motion events."
+ports = []
+commands = [
+  { name = "status", command = "3000 status", cwd = "3000-main", mode = "read_only" },
+  { name = "snapshot", command = "3000 snapshot", cwd = "3000-main", mode = "write_local_artifact" },
+  { name = "watch", command = "3000 watch", cwd = "3000-main", mode = "long_running" }
+]
+health_checks = [
+  { name = "camera_status", type = "command", command = "3000 status", cwd = "3000-main", timeout_seconds = 5 },
+  { name = "project_path", type = "path_exists", path = "3000-main/three_thousand" }
+]
+event_sources = [
+  { source = "project3000", event_types = ["motion_spike"], publisher = "three_thousand.adapters.obeos" }
+]
+data_paths = [
+  { name = "local_events", path = "3000-main/data/events.sqlite3" },
+  { name = "snapshots", path = "3000-main/data/snapshots" }
+]
+offline_capabilities = ["camera_status", "snapshot_capture", "motion_watch", "local_sqlite_event_log"]
+online_capabilities = []
+launch_policy = { managed = false, autostart = false, approval_required = true, health_required = true, restart = "manual", notes = "Camera watch requires local device access and operator approval." }
+[projects.knowledge]
+collection = "3000"
+series = "3000"
+domain = "obeos_ecosystem"
+category = "vision"
+description = "3000 local-first camera sentinel and motion-event integration materials."
+
+[[projects]]
+id = "quietdrop"
+path = "QuietDrop/QuietDrop-main"
+aliases = ["QuietDrop", "quietdrop"]
+roles = ["local_file_intake", "review_queue", "archive_adapter"]
+description = "Local-first watched-folder intake and review/archive workflow."
+ports = [
+  { name = "web", port = 8844, protocol = "http", bind = "127.0.0.1" }
+]
+commands = [
+  { name = "init", command = "quietdrop init", cwd = "QuietDrop/QuietDrop-main", mode = "writes_config" },
+  { name = "status", command = "quietdrop status", cwd = "QuietDrop/QuietDrop-main", mode = "read_only" },
+  { name = "scan", command = "quietdrop scan", cwd = "QuietDrop/QuietDrop-main", mode = "local_scan" },
+  { name = "serve", command = "quietdrop serve --host 127.0.0.1 --port 8844", cwd = "QuietDrop/QuietDrop-main", mode = "long_running" }
+]
+health_checks = [
+  { name = "project_path", type = "path_exists", path = "QuietDrop/QuietDrop-main/quietdrop" },
+  { name = "status", type = "command", command = "quietdrop status", cwd = "QuietDrop/QuietDrop-main", timeout_seconds = 5 }
+]
+event_sources = [
+  { source = "quietdrop", event_types = ["knowledge_source_added", "file_workflow_state"], publisher = "future_adapter" }
+]
+data_paths = [
+  { name = "config", path = "$XDG_CONFIG_HOME/quietdrop/config.toml", env = "QUIETDROP_CONFIG" },
+  { name = "database", path = "$XDG_DATA_HOME/quietdrop/quietdrop.db", env = "QUIETDROP_DB" },
+  { name = "archive", path = "$HOME/QuietDropArchive" }
+]
+offline_capabilities = ["watch_folders", "scan_once", "review_queue", "archive_files"]
+online_capabilities = []
+launch_policy = { managed = false, autostart = false, approval_required = true, health_required = true, restart = "manual", notes = "File watcher should only launch for operator-approved folders." }
+[projects.knowledge]
+collection = "quietdrop"
+series = "QuietDrop"
+domain = "obeos_ecosystem"
+category = "transfer"
+description = "QuietDrop local intake, staging, review, and archive workflow."
+
+[[projects]]
+id = "nightwatch"
+path = "Night-watch-OS"
+aliases = ["Nightwatch", "Night Watch OS", "nightwatch-os"]
+roles = ["operator_dashboard", "system_snapshot", "overnight_shift_console"]
+description = "Local-first operator dashboard for shifts, tasks, and system telemetry."
+ports = [
+  { name = "web", port = 8037, protocol = "http", bind = "127.0.0.1" }
+]
+commands = [
+  { name = "serve", command = "nightwatch serve --host 127.0.0.1 --port 8037", cwd = "Night-watch-OS", mode = "long_running" },
+  { name = "status", command = "nightwatch status", cwd = "Night-watch-OS", mode = "read_only" },
+  { name = "tasks", command = "nightwatch tasks", cwd = "Night-watch-OS", mode = "read_only" }
+]
+health_checks = [
+  { name = "project_path", type = "path_exists", path = "Night-watch-OS/nightwatch" },
+  { name = "http_health", type = "http", url = "http://127.0.0.1:8037/health", timeout_seconds = 2, optional = true },
+  { name = "offline_status", type = "command", command = "nightwatch status", cwd = "Night-watch-OS", timeout_seconds = 5 }
+]
+event_sources = [
+  { source = "system", event_types = ["environment_snapshot", "performance_snapshot"], publisher = "future_adapter" }
+]
+data_paths = [
+  { name = "database", path = "$XDG_DATA_HOME/nightwatch/nightwatch.db", env = "NIGHTWATCH_DB_PATH" },
+  { name = "config", path = "$XDG_CONFIG_HOME/nightwatch/nightwatch.toml", env = "NIGHTWATCH_CONFIG" },
+  { name = "backups", path = "$XDG_DATA_HOME/nightwatch/backups", env = "NIGHTWATCH_BACKUPS_DIR" }
+]
+offline_capabilities = ["shift_tracking", "task_tracking", "local_system_snapshot", "offline_network_check"]
+online_capabilities = ["route_based_network_status"]
+launch_policy = { managed = false, autostart = false, approval_required = false, health_required = true, restart = "manual", notes = "Offline mode must not block on internet reachability checks." }
+[projects.knowledge]
+collection = "nightwatch"
+series = "Nightwatch"
+domain = "obeos_ecosystem"
+category = "runtime"
+description = "Nightwatch OS runtime, diagnostics, local dashboard, and operator surface."
+
+[[projects]]
+id = "blackforge"
+path = "Blackforge"
+aliases = ["BlackForge", "Blackforge", "forge"]
+roles = ["project_scaffolder", "proposal_generator", "developer_tooling"]
+description = "Local-first project scaffolder with guarded output paths and preview/proposal mode."
+ports = []
+commands = [
+  { name = "list_templates", command = "blackforge list-templates", cwd = "Blackforge", mode = "read_only" },
+  { name = "new_cli", command = "blackforge new cli <project-name>", cwd = "Blackforge", mode = "proposal_or_write" },
+  { name = "new_fastapi", command = "blackforge new fastapi <project-name>", cwd = "Blackforge", mode = "proposal_or_write" },
+  { name = "new_python_package", command = "blackforge new python-package <project-name>", cwd = "Blackforge", mode = "proposal_or_write" }
+]
+health_checks = [
+  { name = "project_path", type = "path_exists", path = "Blackforge/blackforge" },
+  { name = "templates", type = "path_exists", path = "Blackforge/blackforge/templates" },
+  { name = "list_templates", type = "command", command = "blackforge list-templates", cwd = "Blackforge", timeout_seconds = 5 }
+]
+event_sources = [
+  { source = "forge", event_types = ["file_proposal_created", "file_change_applied"], publisher = "future_adapter" }
+]
+data_paths = [
+  { name = "templates", path = "Blackforge/blackforge/templates" },
+  { name = "generated_output", path = "<operator-approved-output-dir>" }
+]
+offline_capabilities = ["template_listing", "preview_generation_plan", "guarded_local_project_generation"]
+online_capabilities = []
+launch_policy = { managed = false, autostart = false, approval_required = true, health_required = true, restart = "manual", notes = "Writes must stay inside the approved output root; preview mode is preferred by adapters." }
+[projects.knowledge]
+collection = "blackforge"
+series = "BlackForge"
+domain = "obeos_ecosystem"
+category = "tooling"
+description = "BlackForge project scaffolding, templates, proposal mode, and guarded output policy."
+
+[[projects]]
+id = "maxpayne"
+path = "Max-Payne"
+aliases = ["MaxPayne", "Max Payne", "maxpayne"]
+roles = ["doctor_scan", "healing_advisor", "approval_gated_remediator"]
+description = "Local diagnostics and healing assistant with dry-run/approval defaults."
+ports = []
+commands = [
+  { name = "doctor", command = "maxpayne doctor", cwd = "Max-Payne", mode = "read_only" },
+  { name = "heal", command = "maxpayne heal", cwd = "Max-Payne", mode = "dry_run_default" },
+  { name = "explain", command = "maxpayne explain <file>", cwd = "Max-Payne", mode = "read_only" }
+]
+health_checks = [
+  { name = "project_path", type = "path_exists", path = "Max-Payne/maxpayne" },
+  { name = "doctor", type = "command", command = "maxpayne doctor", cwd = "Max-Payne", timeout_seconds = 10 }
+]
+event_sources = [
+  { source = "system", event_types = ["operator_action_result", "policy_decision"], publisher = "future_adapter" }
+]
+data_paths = [
+  { name = "project_env", path = "Max-Payne/.env" },
+  { name = "doctor_reports", path = "Max-Payne/.maxpayne/reports" }
+]
+offline_capabilities = ["doctor_checks", "dry_run_heal_plan", "local_log_explanation"]
+online_capabilities = ["dependency_install_when_approved"]
+launch_policy = { managed = false, autostart = false, approval_required = true, health_required = false, restart = "manual", notes = "Heal operations default to dry-run and require explicit approval to execute destructive changes." }
+[projects.knowledge]
+collection = "maxpayne"
+series = "MaxPayne"
+domain = "obeos_ecosystem"
+category = "doctor"
+description = "MaxPayne diagnostics, dry-run healing, and approval-gated remediation."
+
+[[projects]]
+id = "earthglass"
+path = "Blackforge/earthglass"
+aliases = ["EarthGlass", "earthglass", "earthglass-full"]
+roles = ["geospatial_dashboard", "offline_asset_adapter", "layer_catalog"]
+description = "Layered geospatial dashboard with local/offline asset mode and degraded online-state reporting."
+ports = [
+  { name = "web", port = 8000, protocol = "http", bind = "127.0.0.1" }
+]
+commands = [
+  { name = "serve", command = "earthglass serve --host 127.0.0.1 --port 8000", cwd = "Blackforge/earthglass", mode = "long_running" },
+  { name = "layers", command = "earthglass layers", cwd = "Blackforge/earthglass", mode = "read_only" },
+  { name = "cache_status", command = "earthglass cache status", cwd = "Blackforge/earthglass", mode = "read_only" }
+]
+health_checks = [
+  { name = "project_path", type = "path_exists", path = "Blackforge/earthglass/earthglass" },
+  { name = "http_health", type = "http", url = "http://127.0.0.1:8000/health", timeout_seconds = 2, optional = true },
+  { name = "root_scaffold", type = "path_exists", path = "EarthGlass/app/main.py", optional = true }
+]
+event_sources = [
+  { source = "system", event_types = ["adapter_health_observation"], publisher = "future_adapter" }
+]
+data_paths = [
+  { name = "static_assets", path = "Blackforge/earthglass/earthglass/web/static" },
+  { name = "layer_catalog", path = "Blackforge/earthglass/earthglass/web/app.py" },
+  { name = "root_scaffold", path = "EarthGlass" }
+]
+offline_capabilities = ["local_layer_catalog", "offline_asset_mode", "degraded_map_status"]
+online_capabilities = ["openstreetmap_tiles_when_enabled"]
+launch_policy = { managed = false, autostart = false, approval_required = false, health_required = true, restart = "manual", notes = "Default UI must report degraded state instead of silently fetching online map assets." }
+[projects.knowledge]
+collection = "earthglass"
+series = "EarthGlass"
+domain = "obeos_ecosystem"
+category = "geospatial"
+description = "EarthGlass geospatial dashboard, layer catalog, local assets, and degraded online-state behavior."
+
+[[projects]]
+id = "blackrelay"
+path = "Blackrelay"
+aliases = ["BlackRelay", "blackrelay"]
+roles = ["relay_concept", "future_message_bus_adapter"]
+description = "First-party relay concept area reserved for local message routing and ecosystem bridge design."
+ports = []
+commands = []
+health_checks = [
+  { name = "docs", type = "path_exists", path = "Blackrelay/docs/blackrelay-concept1.md.txt" }
+]
+event_sources = [
+  { source = "blackfong", event_types = ["service_registration", "routing_decision"], publisher = "future_adapter" }
+]
+data_paths = [
+  { name = "concept_docs", path = "Blackrelay/docs" }
+]
+offline_capabilities = ["concept_docs"]
+online_capabilities = []
+launch_policy = { managed = false, autostart = false, approval_required = true, health_required = false, restart = "none", notes = "No launchable runtime is present yet; keep as documented first-party placeholder." }
+[projects.knowledge]
+collection = "blackrelay"
+series = "BlackRelay"
+domain = "obeos_ecosystem"
+category = "relay"
+description = "BlackRelay concept docs and future local message bridge design."
+
+[[projects]]
+id = "pybus"
+path = "PYBUS"
+aliases = ["PYBUS", "pybus"]
+roles = ["bus_concept", "future_python_message_bus"]
+description = "First-party Python bus concept area for future local event and command routing."
+ports = []
+commands = []
+health_checks = [
+  { name = "docs", type = "path_exists", path = "PYBUS/docs/pybus-concept1.md.txt" }
+]
+event_sources = [
+  { source = "blackfong", event_types = ["service_registration", "tool_request", "tool_response"], publisher = "future_adapter" }
+]
+data_paths = [
+  { name = "concept_docs", path = "PYBUS/docs" }
+]
+offline_capabilities = ["concept_docs"]
+online_capabilities = []
+launch_policy = { managed = false, autostart = false, approval_required = true, health_required = false, restart = "none", notes = "No launchable runtime is present yet; keep as documented first-party placeholder." }
+[projects.knowledge]
+collection = "pybus"
+series = "PYBUS"
+domain = "obeos_ecosystem"
+category = "bus"
+description = "PYBUS concept docs and future Python message bus design."

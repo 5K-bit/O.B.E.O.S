@@ -1,0 +1,36 @@
+{
+  "collection": "python",
+  "domain": "programming",
+  "found": true,
+  "gap_count": 1,
+  "gaps": [
+    {
+      "affected_chunks": [],
+      "affected_sources": [
+        "djvu_text_71897125698540a1",
+        "djvu_text_c6f271b62501012a",
+        "djvu_text_1da89bf8e28ececa",
+        "djvu_text_f3d5f412b7ab6599",
+        "djvu_text_fbba39ec03621aab",
+        "djvu_text_f42f3ce8db7c4144",
+        "djvu_text_36f60516bc2e2fe4",
+        "djvu_text_bb2494bb1402790c",
+        "djvu_text_cbb9b6c91c200f41"
+      ],
+      "evidence": {
+        "source_types": [
+          "djvu_text"
+        ]
+      },
+      "gap_type": "reference_only_not_embedded",
+      "reason": "9 source(s) are registered as reference-only and have not been embedded; their content is not searchable",
+      "severity": "info"
+    }
+  ],
+  "summary_by_severity": {
+    "info": 1
+  },
+  "summary_by_type": {
+    "reference_only_not_embedded": 1
+  }
+}

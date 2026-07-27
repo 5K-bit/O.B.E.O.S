@@ -1,0 +1,90 @@
+// BLACKCOMPUTER Plymouth Theme
+// Asset pack generated for OBEOS / Blackcomputer.
+// Lightweight architecture: static background + centered transparent logo animation.
+
+Window.SetBackgroundTopColor(0.0, 0.0, 0.0);
+Window.SetBackgroundBottomColor(0.0, 0.0, 0.0);
+
+screen_w = Window.GetWidth();
+screen_h = Window.GetHeight();
+
+bg = Image("background.png");
+bg_sprite = Sprite(bg);
+bg_sprite.SetX((screen_w - bg.GetWidth()) / 2);
+bg_sprite.SetY((screen_h - bg.GetHeight()) / 2);
+bg_sprite.SetZ(-10);
+
+frames[0] = Image("frames/blackcomputer_000.png");
+frames[1] = Image("frames/blackcomputer_001.png");
+frames[2] = Image("frames/blackcomputer_002.png");
+frames[3] = Image("frames/blackcomputer_003.png");
+frames[4] = Image("frames/blackcomputer_004.png");
+frames[5] = Image("frames/blackcomputer_005.png");
+frames[6] = Image("frames/blackcomputer_006.png");
+frames[7] = Image("frames/blackcomputer_007.png");
+frames[8] = Image("frames/blackcomputer_008.png");
+frames[9] = Image("frames/blackcomputer_009.png");
+frames[10] = Image("frames/blackcomputer_010.png");
+frames[11] = Image("frames/blackcomputer_011.png");
+frames[12] = Image("frames/blackcomputer_012.png");
+frames[13] = Image("frames/blackcomputer_013.png");
+frames[14] = Image("frames/blackcomputer_014.png");
+frames[15] = Image("frames/blackcomputer_015.png");
+frames[16] = Image("frames/blackcomputer_016.png");
+frames[17] = Image("frames/blackcomputer_017.png");
+frames[18] = Image("frames/blackcomputer_018.png");
+frames[19] = Image("frames/blackcomputer_019.png");
+frames[20] = Image("frames/blackcomputer_020.png");
+frames[21] = Image("frames/blackcomputer_021.png");
+frames[22] = Image("frames/blackcomputer_022.png");
+frames[23] = Image("frames/blackcomputer_023.png");
+frames[24] = Image("frames/blackcomputer_024.png");
+frames[25] = Image("frames/blackcomputer_025.png");
+frames[26] = Image("frames/blackcomputer_026.png");
+frames[27] = Image("frames/blackcomputer_027.png");
+frames[28] = Image("frames/blackcomputer_028.png");
+frames[29] = Image("frames/blackcomputer_029.png");
+frames[30] = Image("frames/blackcomputer_030.png");
+frames[31] = Image("frames/blackcomputer_031.png");
+frames[32] = Image("frames/blackcomputer_032.png");
+frames[33] = Image("frames/blackcomputer_033.png");
+frames[34] = Image("frames/blackcomputer_034.png");
+frames[35] = Image("frames/blackcomputer_035.png");
+frames[36] = Image("frames/blackcomputer_036.png");
+frames[37] = Image("frames/blackcomputer_037.png");
+frames[38] = Image("frames/blackcomputer_038.png");
+frames[39] = Image("frames/blackcomputer_039.png");
+frames[40] = Image("frames/blackcomputer_040.png");
+frames[41] = Image("frames/blackcomputer_041.png");
+frames[42] = Image("frames/blackcomputer_042.png");
+frames[43] = Image("frames/blackcomputer_043.png");
+frames[44] = Image("frames/blackcomputer_044.png");
+frames[45] = Image("frames/blackcomputer_045.png");
+frames[46] = Image("frames/blackcomputer_046.png");
+frames[47] = Image("frames/blackcomputer_047.png");
+frames[48] = Image("frames/blackcomputer_048.png");
+frames[49] = Image("frames/blackcomputer_049.png");
+frames[50] = Image("frames/blackcomputer_050.png");
+frames[51] = Image("frames/blackcomputer_051.png");
+frames[52] = Image("frames/blackcomputer_052.png");
+frames[53] = Image("frames/blackcomputer_053.png");
+frames[54] = Image("frames/blackcomputer_054.png");
+frames[55] = Image("frames/blackcomputer_055.png");
+frames[56] = Image("frames/blackcomputer_056.png");
+frames[57] = Image("frames/blackcomputer_057.png");
+frames[58] = Image("frames/blackcomputer_058.png");
+frames[59] = Image("frames/blackcomputer_059.png");
+
+logo_sprite = Sprite(frames[0]);
+logo_sprite.SetX((screen_w - 512) / 2);
+logo_sprite.SetY((screen_h / 2) - 366);
+logo_sprite.SetZ(10);
+
+frame_index = 0;
+
+fun refresh_callback() {
+    frame_index = (frame_index + 1) % 60;
+    logo_sprite.SetImage(frames[frame_index]);
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);

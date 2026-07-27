@@ -1,0 +1,114 @@
+{
+  "collection": "obeos",
+  "compute_used": "extractive",
+  "confidence": 1.0,
+  "domain": "architecture",
+  "extractive_text": "Summary of collection 'obeos' (domain: architecture).\nContents: 21 source(s), 20 embedded, 280 chunks, 20 timeline events.\nKey terms: blackfong, agent, event, reasoning, hud, phase, workspace, obeos, system, memory.\nRepresentative excerpts:\n- (markdown_05bd47fafe9a4101_0011 [Packaging Status]) ## Packaging Status  This repo already contains:  - a native workspace shell - a Thoughtglass HUD browser cockpit - a remaster/materialize bundle path - Linux guest branding generation - a VM checklist and acceptance snapshot path - an installer-plan validation service  What is still being tightened:  - branding consis\n- (markdown_1763221952204949_0005 [Architecture]) ### Architecture  ``` ┌─────────────────────────────────────────────────────────┐ │         User Input / Query                              │ └────────────────────┬────────────────────────────────────┘                      │                      ▼         ┌────────────────────────┐         │   Agent.process()      │   \n- (markdown_0bad3fb25f706e51_0001 [OBEOS-v1 VM Updater]) # OBEOS-v1 VM Updater  Use this wrapper so VM updates stay boring.  Run from the repo root:  ```powershell Set-ExecutionPolicy -Scope Process Bypass .\\tools\\obeos-vm.ps1 update ```  Common actions:  ```powershell .\\tools\\obeos-vm.ps1 status .\\tools\\obeos-vm.ps1 migrate-v3 .\\tools\\obeos-vm.ps1 update .\\tools\\obeos-vm.ps\n- (markdown_b6d8fde946e3a8f6_0004 [Agent: JARVIS (Reasoning Agent)]) ### Agent: JARVIS (Reasoning Agent)  **Primary Role:** General reasoning, orchestration, user-facing interface  | Tool | Service | Action | Use Case | Enabled | |------|---------|--------|----------|---------| | `transcriber` | transcriber | transcribe | Convert audio to text | ✅ YES | | `transcriber` | transcriber | g\n- (markdown_0e482d6edbd93dad_0008 [6. Docs Completeness]) ## 6. Docs Completeness  Confirm these docs are current:  - [README.md](C:/Users/New%20User/Documents/Projects%202026/O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)/README.md) - [OBEOS user guide.md](C:/Users/New%20User/Documents/Projects%202026/O.B.E.O.S%20(official%20blackfong%20ecosystem%20opera\n- (markdown_ad5fcb7b996b9847_0002 [Ollama and response modes]) ## Ollama and response modes  | Variable | Purpose | Default | |----------|---------|---------| | `BLACKFONG_OLLAMA_URL` | Ollama base URL | `http://localhost:11434` | | `BLACKFONG_OLLAMA_MODEL` | Legacy default model tag | `llama3.2:3b` | | `BLACKFONG_FAST_MODEL` | Fast chat model | `llama3.2:3b` | | `BLACKFONG_FAST_M",
+  "facts": {
+    "embedded": 20,
+    "sequence": {
+      "available": false,
+      "reason": "no numeric ranges to analyze"
+    },
+    "sources": 21,
+    "timeline_events": 20,
+    "total_chunks": 280
+  },
+  "fallback_reason": "mode_deterministic",
+  "found": true,
+  "key_terms": [
+    {
+      "count": 241,
+      "term": "blackfong"
+    },
+    {
+      "count": 100,
+      "term": "agent"
+    },
+    {
+      "count": 78,
+      "term": "event"
+    },
+    {
+      "count": 74,
+      "term": "reasoning"
+    },
+    {
+      "count": 72,
+      "term": "hud"
+    },
+    {
+      "count": 71,
+      "term": "phase"
+    },
+    {
+      "count": 69,
+      "term": "workspace"
+    },
+    {
+      "count": 67,
+      "term": "obeos"
+    },
+    {
+      "count": 63,
+      "term": "system"
+    },
+    {
+      "count": 63,
+      "term": "memory"
+    },
+    {
+      "count": 57,
+      "term": "installer"
+    },
+    {
+      "count": 56,
+      "term": "ecosystem"
+    },
+    {
+      "count": 56,
+      "term": "branding"
+    },
+    {
+      "count": 55,
+      "term": "user"
+    },
+    {
+      "count": 55,
+      "term": "agents"
+    }
+  ],
+  "kind": "collection_summary",
+  "source_ids": [
+    "markdown_3d4552d850610392",
+    "markdown_1763221952204949",
+    "markdown_3b106f10268be953",
+    "markdown_7129431f7f2a6f96",
+    "markdown_05bd47fafe9a4101",
+    "markdown_b6d8fde946e3a8f6",
+    "markdown_a1f53e7a2425ccc8",
+    "markdown_328565c1fbf5564f",
+    "markdown_c7a60f55b3f06848",
+    "markdown_0b77d21593307ac0",
+    "markdown_95f888d0c3453361",
+    "markdown_a17a196723ecadb9",
+    "markdown_f42ef08177974306",
+    "markdown_6458a4aa4f376e07",
+    "markdown_ad5fcb7b996b9847",
+    "markdown_3e2e8123ed4e26f9",
+    "markdown_0e482d6edbd93dad",
+    "markdown_2a757dcdd1f42e62",
+    "markdown_f4e77478e52a13ed",
+    "markdown_0bad3fb25f706e51"
+  ],
+  "summary_id": "sum_5886926e2ee7fda9",
+  "supporting_chunk_ids": [
+    "markdown_05bd47fafe9a4101_0011",
+    "markdown_1763221952204949_0005",
+    "markdown_0bad3fb25f706e51_0001",
+    "markdown_b6d8fde946e3a8f6_0004",
+    "markdown_0e482d6edbd93dad_0008",
+    "markdown_ad5fcb7b996b9847_0002"
+  ],
+  "text": "Summary of collection 'obeos' (domain: architecture).\nContents: 21 source(s), 20 embedded, 280 chunks, 20 timeline events.\nKey terms: blackfong, agent, event, reasoning, hud, phase, workspace, obeos, system, memory.\nRepresentative excerpts:\n- (markdown_05bd47fafe9a4101_0011 [Packaging Status]) ## Packaging Status  This repo already contains:  - a native workspace shell - a Thoughtglass HUD browser cockpit - a remaster/materialize bundle path - Linux guest branding generation - a VM checklist and acceptance snapshot path - an installer-plan validation service  What is still being tightened:  - branding consis\n- (markdown_1763221952204949_0005 [Architecture]) ### Architecture  ``` ┌─────────────────────────────────────────────────────────┐ │         User Input / Query                              │ └────────────────────┬────────────────────────────────────┘                      │                      ▼         ┌────────────────────────┐         │   Agent.process()      │   \n- (markdown_0bad3fb25f706e51_0001 [OBEOS-v1 VM Updater]) # OBEOS-v1 VM Updater  Use this wrapper so VM updates stay boring.  Run from the repo root:  ```powershell Set-ExecutionPolicy -Scope Process Bypass .\\tools\\obeos-vm.ps1 update ```  Common actions:  ```powershell .\\tools\\obeos-vm.ps1 status .\\tools\\obeos-vm.ps1 migrate-v3 .\\tools\\obeos-vm.ps1 update .\\tools\\obeos-vm.ps\n- (markdown_b6d8fde946e3a8f6_0004 [Agent: JARVIS (Reasoning Agent)]) ### Agent: JARVIS (Reasoning Agent)  **Primary Role:** General reasoning, orchestration, user-facing interface  | Tool | Service | Action | Use Case | Enabled | |------|---------|--------|----------|---------| | `transcriber` | transcriber | transcribe | Convert audio to text | ✅ YES | | `transcriber` | transcriber | g\n- (markdown_0e482d6edbd93dad_0008 [6. Docs Completeness]) ## 6. Docs Completeness  Confirm these docs are current:  - [README.md](C:/Users/New%20User/Documents/Projects%202026/O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)/README.md) - [OBEOS user guide.md](C:/Users/New%20User/Documents/Projects%202026/O.B.E.O.S%20(official%20blackfong%20ecosystem%20opera\n- (markdown_ad5fcb7b996b9847_0002 [Ollama and response modes]) ## Ollama and response modes  | Variable | Purpose | Default | |----------|---------|---------| | `BLACKFONG_OLLAMA_URL` | Ollama base URL | `http://localhost:11434` | | `BLACKFONG_OLLAMA_MODEL` | Legacy default model tag | `llama3.2:3b` | | `BLACKFONG_FAST_MODEL` | Fast chat model | `llama3.2:3b` | | `BLACKFONG_FAST_M"
+}

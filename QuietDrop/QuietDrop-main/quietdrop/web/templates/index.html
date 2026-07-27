@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}QuietDrop{% if status %} – {{ status }}{% endif %}{% endblock %}
+{% block content %}
+  <section class="panel">
+    <div class="panel__head">
+      <h1 class="h1">Intake Queue{% if status %} <span class="muted">/ {{ status }}</span>{% endif %}</h1>
+      <div class="muted">refreshes on load</div>
+    </div>
+
+    {% if items|length == 0 %}
+      <div class="empty">No items.</div>
+    {% else %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th class="col-id">id</th>
+            <th>filename</th>
+            <th class="col-status">status</th>
+            <th class="col-size">size</th>
+            <th class="col-path">path</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+            <tr>
+              <td class="mono">{{ item.id }}</td>
+              <td><a href="/items/{{ item.id }}">{{ item.filename }}</a></td>
+              <td><span class="pill pill--{{ item.status }}">{{ item.status }}</span></td>
+              <td class="mono">{{ item.size }}</td>
+              <td class="mono muted truncate" title="{{ item.path }}">{{ item.path }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+{% endblock %}
+

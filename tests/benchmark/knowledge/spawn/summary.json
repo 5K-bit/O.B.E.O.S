@@ -1,0 +1,112 @@
+{
+  "collection": "spawn",
+  "compute_used": "extractive",
+  "confidence": 1.0,
+  "domain": "comics",
+  "extractive_text": "Summary of collection 'spawn' (domain: comics).\nContents: 33 source(s), 11 embedded, 3122 chunks, 11 timeline events.\nSequence: 1-99 (continuous).\nKey terms: just, know, now, out, like, don't, i'm, it's, time, spawn.\nRepresentative excerpts:\n- (spawn_009_017_0224) GALLANT  attempt at victory  WAS PUT TO THE TEST. E DIDN'T FAIL ME  r J SWEAR ^  0Y VVHAT HF5 1  REMAINS THAT  /Oil 5tfA4 PA/  FOR THE UVES . OF THESE S L ViLlASERS' JR  ¥ith LIGHTNING SPEED, I POUNCED ON HIM. THOUGH HE WAS MUCH LARGER THAN I. MY GRIT AND DETERMINA- TION WERE CLEARLY TRAITS NEW TO HIS EXPERIENCE. :  f \n- (spawn_009_017_0235) EEN I AL SIMMONS, STRICTLY 8Y HABIT, RESTS DAILY. HIS NEW CIRCUMSTANCE , AS AN AGENT OF EVH FROM DEEP IN THE BOWELS OF SOME NETHERWORL D, HASN’T ERASED HIS HUMANISTIC SELF -IMAGE  )r I'M GETTING FRIGGIN TIRED OF YOU TRYING TO  steal the food scraps  FROM MR- NUNOZ'S RESTAU RANT. THOUGHT I MADE V MYSELF CLEAR LAST A  Jo\n- (spawn_018_026_0001) Qn the street they call him dipper  HE WASN’T ALWAYS DIPPER HE USED TO BE SOMEONE ELSE,  THIS  AIN'T  RIGHT  MARTY. THAT WAS IT. MARTY SLADEK  HE STILL DREAMS ABOUT IT - THE HOT WIND LIKE A PUNCH IN THE GUT AND THE FLYING CHUNKS OF WET MEAT THAT USED TO BE MEN. i 1 ^ in  WHAT'S A GUY TO DO? PRIVATE MARTY SLADEK KHESANH\n- (spawn_018_026_0056) U'D TRY SOMETH ING NSW . EVERY NOW AMD A k AGAIN. YOUR  ABILITIESARE X VAST, YET YOU'RE I STILL THINKING k tLIKE A i  WHAT ARE YOU THEN. . HOTS HOf? YES! I'VE UNLIKE YOU, GOT HIM' f I'M JUST HUMAN,  -v. WHEN AND  WHERE I COME FROM, 1 PLAY  THE ESCAPE ARTIST. PART OF MY TIME, THOUGH, IS SPENT IN THE HEART OF MAGIC, THE \n- (spawn_018_026_0090) ING WHAT WE BELIEVE TO BE TWO OF THE TERRORISTS,! POLICE WILL SAY ONLY THAT ONE IS an AMERICAN, THE OTHER A UKRANIAN NATIONAL, AND THAT THERE WAS SOME SORT OF BOMB THREAT-  WITNESSES CLAIM THAT THOUGH IT SEEMED THERE WAS AN EXPLOSION, THE EVIDENCE IS IN DISPUTE, HOWEVER, THE PRESENCE OF AN ARMED ATOMIC BOMB HAS BEEN CO\n- (spawn_018_026_0170) DIDN'T MAKE IT? MAYBE THEY'RE IN TROUBLE ALREADY? QUESTIONS RACE WIL DL Y THROUGH HIS MIND. HE CURSES HIS GROWING  PARANOIA. AS A TRAINED SECURITY OPERATIVE,  HE EXPECTS BETTER  OF HIMSELF. BUT NO. UL  \\ AGAIN, HE LOOKS OUT THE WINDOW. AGAIN,  \\ HE SEES AN UNMARKED  x CAR WITH TWO CL A. * STIFFS  ONLY ONE  thought  REP",
+  "facts": {
+    "embedded": 11,
+    "sequence": {
+      "available": true,
+      "continuous": true,
+      "coverage_ratio": 1.0,
+      "covered_count": 99,
+      "max": 99,
+      "min": 1,
+      "missing_numbers": [],
+      "span": 99,
+      "unit": "issue_range"
+    },
+    "sources": 33,
+    "timeline_events": 11,
+    "total_chunks": 3122
+  },
+  "fallback_reason": "mode_deterministic",
+  "found": true,
+  "key_terms": [
+    {
+      "count": 916,
+      "term": "just"
+    },
+    {
+      "count": 876,
+      "term": "know"
+    },
+    {
+      "count": 842,
+      "term": "now"
+    },
+    {
+      "count": 764,
+      "term": "out"
+    },
+    {
+      "count": 762,
+      "term": "like"
+    },
+    {
+      "count": 707,
+      "term": "don't"
+    },
+    {
+      "count": 669,
+      "term": "i'm"
+    },
+    {
+      "count": 625,
+      "term": "it's"
+    },
+    {
+      "count": 605,
+      "term": "time"
+    },
+    {
+      "count": 574,
+      "term": "spawn"
+    },
+    {
+      "count": 549,
+      "term": "get"
+    },
+    {
+      "count": 519,
+      "term": "here"
+    },
+    {
+      "count": 511,
+      "term": "there"
+    },
+    {
+      "count": 483,
+      "term": "you're"
+    },
+    {
+      "count": 449,
+      "term": "want"
+    }
+  ],
+  "kind": "collection_summary",
+  "source_ids": [
+    "djvu_text_6f2ba15969e70e86",
+    "djvu_text_d9a9c3347aca7bc8",
+    "djvu_text_ed57e92b7833cb90",
+    "djvu_text_04d19a17b7f81d6b",
+    "djvu_text_e0229d80f9032920",
+    "djvu_text_3d43baadee943f37",
+    "djvu_text_de5ec6054418331f",
+    "djvu_text_ed7644ba097a2fa4",
+    "djvu_text_a3ffb2e9ea195907",
+    "djvu_text_796118b7842c2957",
+    "djvu_text_e12d4a9db459872e"
+  ],
+  "summary_id": "sum_d3e453a34a9dd3e9",
+  "supporting_chunk_ids": [
+    "spawn_009_017_0224",
+    "spawn_009_017_0235",
+    "spawn_018_026_0001",
+    "spawn_018_026_0056",
+    "spawn_018_026_0090",
+    "spawn_018_026_0170"
+  ],
+  "text": "Summary of collection 'spawn' (domain: comics).\nContents: 33 source(s), 11 embedded, 3122 chunks, 11 timeline events.\nSequence: 1-99 (continuous).\nKey terms: just, know, now, out, like, don't, i'm, it's, time, spawn.\nRepresentative excerpts:\n- (spawn_009_017_0224) GALLANT  attempt at victory  WAS PUT TO THE TEST. E DIDN'T FAIL ME  r J SWEAR ^  0Y VVHAT HF5 1  REMAINS THAT  /Oil 5tfA4 PA/  FOR THE UVES . OF THESE S L ViLlASERS' JR  ¥ith LIGHTNING SPEED, I POUNCED ON HIM. THOUGH HE WAS MUCH LARGER THAN I. MY GRIT AND DETERMINA- TION WERE CLEARLY TRAITS NEW TO HIS EXPERIENCE. :  f \n- (spawn_009_017_0235) EEN I AL SIMMONS, STRICTLY 8Y HABIT, RESTS DAILY. HIS NEW CIRCUMSTANCE , AS AN AGENT OF EVH FROM DEEP IN THE BOWELS OF SOME NETHERWORL D, HASN’T ERASED HIS HUMANISTIC SELF -IMAGE  )r I'M GETTING FRIGGIN TIRED OF YOU TRYING TO  steal the food scraps  FROM MR- NUNOZ'S RESTAU RANT. THOUGHT I MADE V MYSELF CLEAR LAST A  Jo\n- (spawn_018_026_0001) Qn the street they call him dipper  HE WASN’T ALWAYS DIPPER HE USED TO BE SOMEONE ELSE,  THIS  AIN'T  RIGHT  MARTY. THAT WAS IT. MARTY SLADEK  HE STILL DREAMS ABOUT IT - THE HOT WIND LIKE A PUNCH IN THE GUT AND THE FLYING CHUNKS OF WET MEAT THAT USED TO BE MEN. i 1 ^ in  WHAT'S A GUY TO DO? PRIVATE MARTY SLADEK KHESANH\n- (spawn_018_026_0056) U'D TRY SOMETH ING NSW . EVERY NOW AMD A k AGAIN. YOUR  ABILITIESARE X VAST, YET YOU'RE I STILL THINKING k tLIKE A i  WHAT ARE YOU THEN. . HOTS HOf? YES! I'VE UNLIKE YOU, GOT HIM' f I'M JUST HUMAN,  -v. WHEN AND  WHERE I COME FROM, 1 PLAY  THE ESCAPE ARTIST. PART OF MY TIME, THOUGH, IS SPENT IN THE HEART OF MAGIC, THE \n- (spawn_018_026_0090) ING WHAT WE BELIEVE TO BE TWO OF THE TERRORISTS,! POLICE WILL SAY ONLY THAT ONE IS an AMERICAN, THE OTHER A UKRANIAN NATIONAL, AND THAT THERE WAS SOME SORT OF BOMB THREAT-  WITNESSES CLAIM THAT THOUGH IT SEEMED THERE WAS AN EXPLOSION, THE EVIDENCE IS IN DISPUTE, HOWEVER, THE PRESENCE OF AN ARMED ATOMIC BOMB HAS BEEN CO\n- (spawn_018_026_0170) DIDN'T MAKE IT? MAYBE THEY'RE IN TROUBLE ALREADY? QUESTIONS RACE WIL DL Y THROUGH HIS MIND. HE CURSES HIS GROWING  PARANOIA. AS A TRAINED SECURITY OPERATIVE,  HE EXPECTS BETTER  OF HIMSELF. BUT NO. UL  \\ AGAIN, HE LOOKS OUT THE WINDOW. AGAIN,  \\ HE SEES AN UNMARKED  x CAR WITH TWO CL A. * STIFFS  ONLY ONE  thought  REP"
+}

@@ -1,0 +1,212 @@
+{
+  "collection": "python",
+  "compute_used": "extractive",
+  "confidence": 1.0,
+  "domain": "programming",
+  "extractive_text": "Summary of collection 'python' (domain: programming).\nContents: 128 source(s), 118 embedded, 3203 chunks, 118 timeline events.\nKey terms: print, python, name, asabeneh, list, item, day, fruits, https, array.\nRepresentative excerpts:\n- (markdown_0f4ed485101ebf68_0036 [Generationg random numbers]) ### Generationg random numbers  ```py     # np.random.normal(mu, sigma, size)     normal_array = np.random.normal(79, 15, 80)     normal_array  ```  ```sh     array([ 89.49990595,  82.06056961, 107.21445842,  38.69307086,             47.85259157,  93.07381061,  76.40724259,  78.55675184,             72.17358173,  47.98\n- (markdown_f60972d5a5fa8376_0037 [Generationg random numbers]) ### Generationg random numbers  ```py     # np.random.normal(mu, sigma, size)     normal_array = np.random.normal(79, 15, 80)     normal_array  ```  ```sh     array([ 89.49990595,  82.06056961, 107.21445842,  38.69307086,             47.85259157,  93.07381061,  76.40724259,  78.55675184,             72.17358173,  47.98\n- (markdown_8e1a12398b10e28a_0008 [比较运算符]) ### 比较运算符  在编程中，我们使用比较运算符来比较两个值。我们检查一个值是否大于或小于或等于另一个值。下表显示了 Python 比较运算符，摘自 [w3shool](https://www.w3schools.com/python/python_operators.asp)。  ![Comparison Operators](../images/comparison_operators.png) **示例：比较运算符**  ```py print(3 > 2)     # True, 因为3大于2 print(3 >= 2)    # True, 因为3大于2 print(3 < 2)     # False,  因为3大于2\n- (markdown_02408e2927abd6f6_0005 [API]) ## API Application Programming Interface(API). The kind of API will cover in this section is going to be Web APIS. Web APIs are the defined interfaces through which interactions happen between an enterprise and applications that use its assets, which also is a Service Level Agreement (SLA) to specify the functional pro\n- (markdown_eecc80c6f09f0dab_0016 [数据探索]) ### 数据探索  让我们使用shape属性获取行和列的数量： ```python print(df.shape) # 行和列的数量 ```  ```sh (10000, 3) ```  如你所见，该数据集有10000行和3列。让我们获取有关数据的更多信息：  ```python print(df.columns) # 列名 print(df.head(10)) # 前10行 print(df.tail(10)) # 最后10行 print(df['Gender'].value_counts()) # 计算每个值有多少个 print(df.describe()) # 数据统计概要 ```  ```sh Index(['Gender'\n- (markdown_8e1a12398b10e28a_0010 [💻 练习 - 第三天]) ## 💻 练习 - 第三天  1. 声明一个值是你年龄的整型变量 2. 声明一个值是你身高的浮点型变量 3. 声明一个值是复数变量 4. 编写一个脚本，提示用户输入三角形的底和高，并计算这个三角形的面积（面积 = 0.5 x b x h）。  ```py     输入底: 20     输入高: 10     三角形的面积是 100 ```  5. 编写一个脚本，提示用户输入三角形的边 a、边 b 和边 c。计算三角形的周长（周长 = a + b + c）。  ```py     输入边 a: 5     输入边 b: 4     输入边 c: 3     三角形的周长是 12 ``` 6. 提示用户输入矩形的长度和宽度。计算其面积",
+  "facts": {
+    "embedded": 118,
+    "sequence": {
+      "available": false,
+      "reason": "no numeric ranges to analyze"
+    },
+    "sources": 128,
+    "timeline_events": 118,
+    "total_chunks": 3203
+  },
+  "fallback_reason": "mode_deterministic",
+  "found": true,
+  "key_terms": [
+    {
+      "count": 3813,
+      "term": "print"
+    },
+    {
+      "count": 2963,
+      "term": "python"
+    },
+    {
+      "count": 1422,
+      "term": "name"
+    },
+    {
+      "count": 1258,
+      "term": "asabeneh"
+    },
+    {
+      "count": 1190,
+      "term": "list"
+    },
+    {
+      "count": 1175,
+      "term": "item"
+    },
+    {
+      "count": 899,
+      "term": "day"
+    },
+    {
+      "count": 892,
+      "term": "fruits"
+    },
+    {
+      "count": 771,
+      "term": "https"
+    },
+    {
+      "count": 733,
+      "term": "array"
+    },
+    {
+      "count": 725,
+      "term": "import"
+    },
+    {
+      "count": 707,
+      "term": "data"
+    },
+    {
+      "count": 691,
+      "term": "first"
+    },
+    {
+      "count": 656,
+      "term": "true"
+    },
+    {
+      "count": 616,
+      "term": "numbers"
+    }
+  ],
+  "kind": "collection_summary",
+  "source_ids": [
+    "markdown_a7593ce99d49272f",
+    "markdown_d002a394a1e38911",
+    "markdown_25011d6da8dd1d1f",
+    "markdown_fdcb7ad4493cb3e0",
+    "markdown_7dc36a4b49934771",
+    "markdown_db7a12277da7fa2c",
+    "markdown_cb0eef31407b9af5",
+    "markdown_a8432067cb15018d",
+    "markdown_a1c7451ae7dffa09",
+    "markdown_72e50278e173c0d3",
+    "markdown_6b64994a6409172b",
+    "markdown_52f3c1a2d6bff957",
+    "markdown_e41438338af58d85",
+    "markdown_2f1f131298bab7b7",
+    "markdown_8151392224d917f4",
+    "markdown_faecf0b707d926c3",
+    "markdown_e48b475bd2b04337",
+    "markdown_f053b9cb5191ae02",
+    "markdown_98a8591b288eb3ab",
+    "markdown_cb9896b8ef473954",
+    "markdown_23dd44d5e7e2631c",
+    "markdown_225630dc29d561f6",
+    "markdown_0f4ed485101ebf68",
+    "markdown_6dd8dda1431f6c6c",
+    "markdown_a3c570cd90190587",
+    "markdown_92f557178327b93f",
+    "markdown_6e1356dea058fdc0",
+    "markdown_c590012bf89b9c1e",
+    "markdown_24ca1aa29ef4003f",
+    "markdown_413b4200b205d27d",
+    "markdown_8e1a12398b10e28a",
+    "markdown_547a3dad489a636b",
+    "markdown_bd34f0cf1b8c7e26",
+    "markdown_f3ac0f04e0830179",
+    "markdown_bbc52441fcc673b7",
+    "markdown_c88d8cbfb7d9eeeb",
+    "markdown_db6040e8c7eec7b5",
+    "markdown_a87bbb2928419b55",
+    "markdown_439d004e780991f2",
+    "markdown_0f24e44b4e867357",
+    "markdown_2e26696c135a86e7",
+    "markdown_91464ec23945aa74",
+    "markdown_193956c6518532ad",
+    "markdown_3b47a3452dedbddd",
+    "markdown_d2d2e6bc6c380e61",
+    "markdown_e6fbd8bcc905771b",
+    "markdown_5bddcca99b84463d",
+    "markdown_4e50e0d0dacb5ffe",
+    "markdown_89af40c0ba71314d",
+    "markdown_c2b7cbb4daf9bb74",
+    "markdown_84e3c3098199f5c2",
+    "markdown_c48edeb29dcd86a5",
+    "markdown_ae60332cfea3e8dd",
+    "markdown_8b6599082591b7a1",
+    "markdown_eecc80c6f09f0dab",
+    "markdown_b35aa8281a643e88",
+    "markdown_0bc5f7001641a0bf",
+    "markdown_8afdaf25026576bc",
+    "markdown_c0ce60c3345f5a3a",
+    "markdown_4f758c45b416c5c5",
+    "markdown_9353c22db10bbd05",
+    "markdown_ecc241e7f23ced72",
+    "markdown_0a11ee20ede17c4a",
+    "markdown_4c907f74c9e519d3",
+    "markdown_ec8a07e84d2fc2ff",
+    "markdown_3223639d8d476fcc",
+    "markdown_90c47875b574946f",
+    "markdown_24acf2837436a402",
+    "markdown_70af273f081ebeb0",
+    "markdown_95cfeb32d158261b",
+    "markdown_b5debb3b6a8bf7b2",
+    "markdown_2a4b7d85068dc7f5",
+    "markdown_996749289cac04f0",
+    "markdown_74bb40fe9e184a0f",
+    "markdown_879389aacea5575e",
+    "markdown_4d42fb1331ab477e",
+    "markdown_5665df2f40945592",
+    "markdown_1c337dcc473e3244",
+    "markdown_b5b6d8e4935dcfd4",
+    "markdown_817da6499ca1c6d3",
+    "markdown_bfa41db9f6fe8e1d",
+    "markdown_cec60f16f6603b8f",
+    "markdown_3ae208fb2d166076",
+    "markdown_d46737aa030bdb10",
+    "markdown_2e565eed7e829e41",
+    "markdown_743711d7b68b0713",
+    "markdown_371ed54da36411a1",
+    "markdown_a68f1d845a529e77",
+    "markdown_0bb5f16034fda501",
+    "markdown_b71cf554c1b13604",
+    "markdown_14f9eee3e978382d",
+    "markdown_4268c3dc3621ba2f",
+    "markdown_1e2f49fd4a4cdebf",
+    "markdown_9141acdef1419541",
+    "markdown_dbd8709e6a1230a7",
+    "markdown_f74e8bca4aa20a1a",
+    "markdown_f9decd0be88fcbbd",
+    "markdown_9c5480efda9b26b3",
+    "markdown_2f97bcee03bd982e",
+    "markdown_d487e19946d6b683",
+    "markdown_0e8da67b25668299",
+    "markdown_58e87532ed623d96",
+    "markdown_9679a0224697c55a",
+    "markdown_5cd6d08ee2170a71",
+    "markdown_563c195d54a1974d",
+    "djvu_text_407f7bb8a03bb0b9",
+    "markdown_f60972d5a5fa8376",
+    "markdown_5314bd8c2bb0bdd0",
+    "markdown_7600cb00d626496b",
+    "markdown_4a70973a0ab89ef6",
+    "markdown_331f2a29393cfca1",
+    "markdown_a784874aaf40c94c",
+    "markdown_4877963a6be92031",
+    "markdown_0bc0f20a994ca734",
+    "markdown_02408e2927abd6f6",
+    "markdown_af192905d7970ea9",
+    "markdown_1d3d625a405c6374",
+    "markdown_ffeca6f6fbc5ed85"
+  ],
+  "summary_id": "sum_39f93e8c7e23bc4f",
+  "supporting_chunk_ids": [
+    "markdown_0f4ed485101ebf68_0036",
+    "markdown_f60972d5a5fa8376_0037",
+    "markdown_8e1a12398b10e28a_0008",
+    "markdown_02408e2927abd6f6_0005",
+    "markdown_eecc80c6f09f0dab_0016",
+    "markdown_8e1a12398b10e28a_0010"
+  ],
+  "text": "Summary of collection 'python' (domain: programming).\nContents: 128 source(s), 118 embedded, 3203 chunks, 118 timeline events.\nKey terms: print, python, name, asabeneh, list, item, day, fruits, https, array.\nRepresentative excerpts:\n- (markdown_0f4ed485101ebf68_0036 [Generationg random numbers]) ### Generationg random numbers  ```py     # np.random.normal(mu, sigma, size)     normal_array = np.random.normal(79, 15, 80)     normal_array  ```  ```sh     array([ 89.49990595,  82.06056961, 107.21445842,  38.69307086,             47.85259157,  93.07381061,  76.40724259,  78.55675184,             72.17358173,  47.98\n- (markdown_f60972d5a5fa8376_0037 [Generationg random numbers]) ### Generationg random numbers  ```py     # np.random.normal(mu, sigma, size)     normal_array = np.random.normal(79, 15, 80)     normal_array  ```  ```sh     array([ 89.49990595,  82.06056961, 107.21445842,  38.69307086,             47.85259157,  93.07381061,  76.40724259,  78.55675184,             72.17358173,  47.98\n- (markdown_8e1a12398b10e28a_0008 [比较运算符]) ### 比较运算符  在编程中，我们使用比较运算符来比较两个值。我们检查一个值是否大于或小于或等于另一个值。下表显示了 Python 比较运算符，摘自 [w3shool](https://www.w3schools.com/python/python_operators.asp)。  ![Comparison Operators](../images/comparison_operators.png) **示例：比较运算符**  ```py print(3 > 2)     # True, 因为3大于2 print(3 >= 2)    # True, 因为3大于2 print(3 < 2)     # False,  因为3大于2\n- (markdown_02408e2927abd6f6_0005 [API]) ## API Application Programming Interface(API). The kind of API will cover in this section is going to be Web APIS. Web APIs are the defined interfaces through which interactions happen between an enterprise and applications that use its assets, which also is a Service Level Agreement (SLA) to specify the functional pro\n- (markdown_eecc80c6f09f0dab_0016 [数据探索]) ### 数据探索  让我们使用shape属性获取行和列的数量： ```python print(df.shape) # 行和列的数量 ```  ```sh (10000, 3) ```  如你所见，该数据集有10000行和3列。让我们获取有关数据的更多信息：  ```python print(df.columns) # 列名 print(df.head(10)) # 前10行 print(df.tail(10)) # 最后10行 print(df['Gender'].value_counts()) # 计算每个值有多少个 print(df.describe()) # 数据统计概要 ```  ```sh Index(['Gender'\n- (markdown_8e1a12398b10e28a_0010 [💻 练习 - 第三天]) ## 💻 练习 - 第三天  1. 声明一个值是你年龄的整型变量 2. 声明一个值是你身高的浮点型变量 3. 声明一个值是复数变量 4. 编写一个脚本，提示用户输入三角形的底和高，并计算这个三角形的面积（面积 = 0.5 x b x h）。  ```py     输入底: 20     输入高: 10     三角形的面积是 100 ```  5. 编写一个脚本，提示用户输入三角形的边 a、边 b 和边 c。计算三角形的周长（周长 = a + b + c）。  ```py     输入边 a: 5     输入边 b: 4     输入边 c: 3     三角形的周长是 12 ``` 6. 提示用户输入矩形的长度和宽度。计算其面积"
+}

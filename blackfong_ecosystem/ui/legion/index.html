@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07090c">
+  <title>Legion O.B.E.O.S Cockpit</title>
+  <link rel="manifest" href="/legion/manifest.webmanifest">
+  <link rel="stylesheet" href="/legion-static/app.css?v=20260726-legion-v5">
+</head>
+<body>
+  <section class="pairing-screen" id="pairingScreen" hidden>
+    <div class="pairing-panel">
+      <div class="kicker">O.B.E.O.S // Legion</div>
+      <h1>Pair this Legion</h1>
+      <form id="pairingForm" class="pairing-form">
+        <label for="pairingToken">Pairing token</label>
+        <input id="pairingToken" name="pairingToken" type="password" autocomplete="one-time-code" required>
+        <button type="submit">Pair</button>
+      </form>
+      <div id="pairingMessage" class="message-line"></div>
+    </div>
+  </section>
+
+  <div class="app-shell" id="appShell" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <div class="kicker">BLACKCOMPUTER LOCAL</div>
+        <h1>Legion Cockpit</h1>
+      </div>
+      <div class="topbar-status">
+        <div class="status-pill" id="pairState">paired</div>
+        <div class="status-pill" id="transportState">polling</div>
+        <div class="clock" id="clock">--:--</div>
+        <button class="icon-button" id="refreshButton" type="button" title="Refresh">Refresh</button>
+      </div>
+    </header>
+
+    <main class="cockpit-grid">
+      <section class="panel device-rail">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Devices</div>
+            <h2>Nodes</h2>
+          </div>
+        </div>
+        <div id="deviceList" class="device-list"></div>
+      </section>
+
+      <section class="panel focus-panel">
+        <div class="section-head">
+          <div>
+            <div class="kicker" id="focusRole">Device</div>
+            <h2 id="focusTitle">Loading</h2>
+          </div>
+          <div class="state-badge" id="focusStatus">unknown</div>
+        </div>
+
+        <div class="metric-band" id="metricBand"></div>
+
+        <section class="control-strip">
+          <button id="diagnoseButton" type="button">Diagnose</button>
+          <button id="refreshDeviceButton" type="button">Refresh Node</button>
+          <button id="startSensorsButton" type="button">Start Sensors</button>
+          <button id="stopSensorsButton" type="button">Stop Sensors</button>
+        </section>
+
+        <section class="sensor-grid" id="sensorGrid"></section>
+        <section class="history-panel">
+          <div class="section-head compact">
+            <div>
+              <div class="kicker">Recent</div>
+              <h3>Heartbeat History</h3>
+            </div>
+          </div>
+          <div id="historyList" class="scroll-list"></div>
+        </section>
+      </section>
+
+      <section class="panel right-stack">
+        <section class="daise-panel">
+          <div class="section-head compact">
+            <div>
+              <div class="kicker">D.A.I.S.E</div>
+              <h2>Quick Ask</h2>
+            </div>
+          </div>
+          <form id="chatForm" class="chat-form">
+            <textarea id="chatInput" rows="4" placeholder="Ask D.A.I.S.E"></textarea>
+            <button type="submit">Send</button>
+          </form>
+          <div id="chatStatus" class="message-line"></div>
+        </section>
+
+        <section class="activity-panel">
+          <div class="section-head compact">
+            <div>
+              <div class="kicker">Events</div>
+              <h2>Live Feed</h2>
+            </div>
+          </div>
+          <div id="eventList" class="scroll-list"></div>
+        </section>
+
+        <section class="activity-panel">
+          <div class="section-head compact">
+            <div>
+              <div class="kicker">Notifications</div>
+              <h2>Inbox</h2>
+            </div>
+          </div>
+          <div id="notificationList" class="scroll-list compact-list"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="/legion-static/app.js?v=20260726-legion-v5" defer></script>
+</body>
+</html>

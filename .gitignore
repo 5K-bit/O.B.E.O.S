@@ -1,0 +1,53 @@
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local virtual environments and build outputs
+.venv/
+.venv-*/
+.venv*/
+build/
+dist/
+*.egg-info/
+
+# Node/browser caches
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local environment and secrets
+.env
+.env.*
+!.env.cloud.example
+*.pem
+*.key
+*.ppk
+id_rsa*
+id_ed25519*
+.aws/
+
+# O.B.E.O.S runtime state, generated artifacts, and heavy local VM material
+data/
+tmp_*/
+backups/
+docs/release-shots/
+*.db
+*.sqlite
+*.sqlite3
+*.db-*
+*.log
+
+# OS/editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=70.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "maxpayne"
+version = "0.1.0"
+description = "Developer environment diagnostics CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "MaxPayne Contributors" }]
+license = { text = "MIT" }
+dependencies = [
+  "psutil>=6.0.0",
+  "rich>=13.7.0",
+  "typer>=0.12.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0",
+]
+
+[project.scripts]
+maxpayne = "maxpayne.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

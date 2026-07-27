@@ -1,0 +1,22 @@
+{
+  "collection": "security_plus",
+  "event_count": 1,
+  "events": [
+    {
+      "approximate_time": null,
+      "chunk_id": "comptia_security_plus_unknown_0001",
+      "collection": "security_plus",
+      "confidence": 1.0,
+      "description": "djvu_text source covering unknown with 6 chunks",
+      "entities": [],
+      "event_type": "source",
+      "ordering": "source_order",
+      "sequence_index": 1,
+      "source_id": "djvu_text_61d2d69d4831e927",
+      "timeline_event_id": "security_plus_tl_0001",
+      "title": "CompTIA Security Plus unknown"
+    }
+  ],
+  "found": true,
+  "ordering": "source_order"
+}

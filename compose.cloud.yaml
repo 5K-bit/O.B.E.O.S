@@ -1,0 +1,60 @@
+name: obeos-cloud
+
+x-obeos-common: &obeos-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: obeos-cloud:latest
+  env_file:
+    - .env.cloud
+  network_mode: host
+  restart: unless-stopped
+  volumes:
+    - obeos-cloud-data:/app/data
+
+services:
+  obeos-hud:
+    <<: *obeos-common
+    container_name: obeos-hud
+    command:
+      - python
+      - -m
+      - blackfong_ecosystem.cli
+      - hud
+      - --host
+      - "127.0.0.1"
+      - --port
+      - "8080"
+      - --no-open-browser
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/legion', timeout=3).read(64)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  obeos-event-api:
+    <<: *obeos-common
+    container_name: obeos-event-api
+    command:
+      - python
+      - -m
+      - blackfong_ecosystem.cli
+      - event-api
+      - --host
+      - "127.0.0.1"
+      - --port
+      - "8000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read(64)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  obeos-cloud-data:
