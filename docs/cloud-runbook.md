@@ -5,16 +5,44 @@ This runbook is the operating contract for the first O.B.E.O.S cloud node.
 ## Current target
 
 - EC2 instance: `i-01e8713cf54c786d1`
-- Public IPv4: `18.212.97.184`
+- Public IPv4: dynamic unless an Elastic IP is attached; use Tailscale for stable access.
 - Private IPv4: `172.31.24.250`
-- OS: Ubuntu 24.04
+- OS: Ubuntu 26.04 LTS (`resolute`)
 - Instance type: `m7i-flex.large`
 - Storage: 80GB gp3 EBS
 - SSH user: `ubuntu`
 - Repo slug: `obeos-cloud`
+- Tailscale hostname: `obeos-cloud`
+- Tailscale IPv4: `100.80.6.98`
+- Private HUD URL: `https://obeos-cloud.tail12c001.ts.net/`
 
 Do not open public inbound access to O.B.E.O.S app ports. Keep `8080`, `8000`,
 `8780`, `8090`, and `11434` private.
+
+## Verified deployment record
+
+Last verified: 2026-07-28.
+
+- HUD/Legion source service: `http://127.0.0.1:8080`
+- Event API source service: `http://127.0.0.1:8000`
+- Ollama source service: `http://127.0.0.1:11434`
+- Tailscale Serve target: `https://obeos-cloud.tail12c001.ts.net/`
+- Exact Tailscale Serve rebuild command:
+
+```bash
+sudo tailscale serve --bg --yes 8080
+```
+
+Expected Serve status:
+
+```text
+https://obeos-cloud.tail12c001.ts.net (tailnet only)
+|-- / proxy http://127.0.0.1:8080
+```
+
+Access rule: the private HUD URL only works from devices signed into the same
+Tailscale tailnet. The iPhone can load it because it is on Tailscale. Legion
+cannot load it until Legion itself joins Tailscale or we add a separate bridge.
 
 ## Local update workflow
 
@@ -146,7 +174,7 @@ Then open the Tailscale URL or MagicDNS name from a device signed into the same
 tailnet:
 
 ```text
-http://obeos-cloud:8080/legion
+https://obeos-cloud.tail12c001.ts.net/legion
 ```
 
 If MagicDNS is not enabled, use the EC2 node’s Tailscale IP from
