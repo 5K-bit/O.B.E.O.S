@@ -137,7 +137,7 @@ The stack binds the HUD to the EC2 loopback address. To publish it only inside
 your tailnet:
 
 ```bash
-sudo tailscale serve --bg --http=8080 http://127.0.0.1:8080
+sudo tailscale serve --bg --yes 8080
 tailscale serve status
 tailscale status
 ```

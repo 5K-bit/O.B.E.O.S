@@ -55,7 +55,7 @@ wait_for_http "Event API /health" "http://127.0.0.1:8000/health" 45 1
 
 if command -v tailscale >/dev/null 2>&1 && tailscale status >/dev/null 2>&1; then
   log "Ensuring private Tailscale Serve is active"
-  sudo tailscale serve --bg --http=8080 http://127.0.0.1:8080 || true
+  sudo tailscale serve --bg --yes 8080 || true
   tailscale serve status || true
 fi
 

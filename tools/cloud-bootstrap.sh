@@ -188,7 +188,7 @@ deploy_stack() {
 
   if need_cmd tailscale && tailscale status >/dev/null 2>&1; then
     log "Publishing HUD privately with Tailscale Serve"
-    sudo tailscale serve --bg --http=8080 http://127.0.0.1:8080 || true
+    sudo tailscale serve --bg --yes 8080 || true
     tailscale serve status || true
   elif [[ "$SKIP_TAILSCALE" == "1" || "$SKIP_TAILSCALE" == "true" ]]; then
     log "Skipping Tailscale Serve because OBEOS_SKIP_TAILSCALE=${SKIP_TAILSCALE}"
