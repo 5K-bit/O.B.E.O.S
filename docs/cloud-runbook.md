@@ -53,6 +53,29 @@ When we say “update O.B.E.O.S on the server,” use this flow:
 3. Pull on EC2.
 4. Rebuild and restart the cloud compose stack.
 
+Recommended local helper:
+
+```powershell
+cd "C:\Users\New User\Documents\Projects 2026\O.B.E.O.S (official blackfong ecosystem operating system)"
+.\tools\release-obeos-cloud.ps1
+.\tools\release-obeos-cloud.ps1 -Push
+.\tools\release-obeos-cloud.ps1 -Push -Deploy -RemoteHost "ubuntu@obeos-cloud.tail12c001.ts.net"
+```
+
+This helper keeps the release lane honest:
+
+- local verification first
+- push only from an approved revision
+- deploy only from the GitHub-backed commit that EC2 can actually pull
+
+The default helper path uses a bounded release-smoke test profile so everyday
+cloud updates stay practical. Use `-FullVerify` when you want the broader
+`blackfong verify automated` pass before a bigger release.
+
+See also:
+
+- [cloud-release-flow.md](C:/Users/New%20User/Documents/Projects%202026/O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)/docs/cloud-release-flow.md)
+
 ```bash
 cd /opt/obeos
 git pull --ff-only

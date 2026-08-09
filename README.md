@@ -160,6 +160,7 @@ See:
 - [Branding Doctrine](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\branding-doctrine.md)
 - [Release Surface Hierarchy](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\release-surface-hierarchy.md)
 - [Release Artifacts](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\release-artifacts.md)
+- [Cloud Release Flow](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\cloud-release-flow.md)
 - [Operator Environment Variables](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\operator-env.md)
 
 ## Architecture Summary

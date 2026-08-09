@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 APP_DIR="${OBEOS_APP_DIR:-/opt/obeos}"
 DEPLOY_KEY="${OBEOS_DEPLOY_KEY:-$HOME/.ssh/obeos_cloud_deploy_ed25519}"
+BRANCH="$(git -C "${OBEOS_APP_DIR:-/opt/obeos}" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'main')"
 
 log() {
   printf '\n[%s] %s\n' "$(date -Is)" "$*"
@@ -35,6 +36,9 @@ wait_for_http() {
 
 cd "$APP_DIR"
 
+before_ref="$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+log "Current revision: ${before_ref} on branch ${BRANCH}"
+
 log "Updating O.B.E.O.S source"
 if [[ -f "$DEPLOY_KEY" ]]; then
   chmod 600 "$DEPLOY_KEY"
@@ -42,15 +46,19 @@ if [[ -f "$DEPLOY_KEY" ]]; then
 else
   git pull --ff-only
 fi
+after_ref="$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+log "Updated revision: ${after_ref}"
+git status --short --branch || true
 
 log "Deploying containers"
 cp -n .env.cloud.example .env.cloud
-sudo docker compose -f compose.cloud.yaml up -d --build
+sudo docker compose -f compose.cloud.yaml up -d --build --remove-orphans
 sudo docker compose -f compose.cloud.yaml ps
 
 log "Checking local endpoints"
 wait_for_http "Ollama API" "http://127.0.0.1:11434/api/tags" 15 0
 wait_for_http "HUD /legion" "http://127.0.0.1:8080/legion" 45 0
+wait_for_http "HUD /api/knowledge/status" "http://127.0.0.1:8080/api/knowledge/status?ensure_ecosystem=false" 45 0
 wait_for_http "Event API /health" "http://127.0.0.1:8000/health" 45 1
 
 if command -v tailscale >/dev/null 2>&1 && tailscale status >/dev/null 2>&1; then
@@ -59,4 +67,4 @@ if command -v tailscale >/dev/null 2>&1 && tailscale status >/dev/null 2>&1; the
   tailscale serve status || true
 fi
 
-log "Deploy complete"
+log "Deploy complete at revision ${after_ref}"

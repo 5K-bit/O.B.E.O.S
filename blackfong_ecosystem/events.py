@@ -33,6 +33,7 @@ EVENT_SOURCES = (
     "memory_chamber",
     "skill_forge",
     "forge",
+    "telegram",
 )
 
 
@@ -61,6 +62,7 @@ EventSource = Literal[
     "memory_chamber",
     "skill_forge",
     "forge",
+    "telegram",
 ]
 
 

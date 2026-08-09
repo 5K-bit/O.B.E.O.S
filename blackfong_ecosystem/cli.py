@@ -409,6 +409,33 @@ def hud_command(host: str, port: int, open_browser: bool) -> None:
         )
 
 
+@cli.group("telegram")
+def telegram_group() -> None:
+    """Run and inspect the private O.B.E.O.S Telegram transport gateway."""
+
+
+@telegram_group.command("start")
+def telegram_start_command() -> None:
+    from .telegram_gateway import TelegramGatewayService
+
+    gateway = TelegramGatewayService()
+    click.echo("Starting O.B.E.O.S Telegram gateway...")
+    try:
+        status = gateway.start()
+    except KeyboardInterrupt:
+        gateway.stop()
+        status = gateway.status()
+        click.echo("\nStopping O.B.E.O.S Telegram gateway...")
+    click.echo(json.dumps(status, indent=2))
+
+
+@telegram_group.command("status")
+def telegram_status_command() -> None:
+    from .telegram_gateway import read_telegram_gateway_status
+
+    click.echo(json.dumps(read_telegram_gateway_status(), indent=2))
+
+
 @cli.group("spine")
 def spine_group() -> None:
     """Inspect and control the O.B.E.O.S authority spine."""

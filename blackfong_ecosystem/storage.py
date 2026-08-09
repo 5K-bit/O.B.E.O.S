@@ -191,6 +191,68 @@ MEMORY_CHAMBER_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_memory_chamber_embeddings_source ON memory_chamber_embeddings(source_type, source_id)",
 )
 
+TELEGRAM_GATEWAY_TABLE_SQL = (
+    """
+    CREATE TABLE IF NOT EXISTS telegram_gateway_state (
+        gateway_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        bot_username TEXT,
+        last_update_id INTEGER NOT NULL DEFAULT 0,
+        last_inbound_at REAL,
+        last_outbound_at REAL,
+        last_error TEXT,
+        lock_owner TEXT,
+        authenticated_at REAL,
+        updated_at REAL NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}'
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS telegram_thread_state (
+        thread_key TEXT PRIMARY KEY,
+        telegram_chat_id TEXT NOT NULL,
+        telegram_user_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'standard',
+        created_at REAL NOT NULL,
+        last_seen_at REAL NOT NULL,
+        last_message_id INTEGER,
+        last_update_id INTEGER,
+        metadata_json TEXT NOT NULL DEFAULT '{}'
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS telegram_update_inbox (
+        update_id INTEGER PRIMARY KEY,
+        message_id INTEGER,
+        telegram_chat_id TEXT NOT NULL,
+        telegram_user_id TEXT NOT NULL,
+        chat_type TEXT,
+        thread_key TEXT NOT NULL,
+        session_id TEXT,
+        request_id TEXT NOT NULL,
+        route_kind TEXT NOT NULL DEFAULT 'chat',
+        status TEXT NOT NULL DEFAULT 'queued',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        normalized_payload TEXT NOT NULL,
+        error TEXT,
+        received_at REAL NOT NULL,
+        accepted_at REAL NOT NULL,
+        processed_at REAL,
+        delivered_at REAL
+    )
+    """,
+)
+
+TELEGRAM_GATEWAY_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS idx_telegram_thread_state_identity ON telegram_thread_state(telegram_chat_id, telegram_user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_telegram_thread_state_session ON telegram_thread_state(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_telegram_update_inbox_thread_status ON telegram_update_inbox(thread_key, status, update_id)",
+    "CREATE INDEX IF NOT EXISTS idx_telegram_update_inbox_identity ON telegram_update_inbox(telegram_chat_id, telegram_user_id, message_id)",
+    "CREATE INDEX IF NOT EXISTS idx_telegram_update_inbox_request ON telegram_update_inbox(request_id)",
+)
+
 try:
     from chromadb.telemetry.product import ProductTelemetryClient, ProductTelemetryEvent
 
@@ -284,6 +346,10 @@ class EventStore:
             for statement in MEMORY_CHAMBER_TABLE_SQL:
                 conn.execute(text(statement))
             for statement in MEMORY_CHAMBER_INDEX_SQL:
+                conn.execute(text(statement))
+            for statement in TELEGRAM_GATEWAY_TABLE_SQL:
+                conn.execute(text(statement))
+            for statement in TELEGRAM_GATEWAY_INDEX_SQL:
                 conn.execute(text(statement))
             try:
                 conn.execute(

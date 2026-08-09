@@ -113,6 +113,7 @@ class PolicyEngine:
                 "never_use_stale_observations_as_current_facts",
                 "never_bypass_daise_for_tinyprogrammer",
                 "never_activate_camera_or_microphone_without_explicit_mode",
+                "telegram_transport_denies_privileged_operator_actions",
             ],
         }
 
@@ -121,6 +122,7 @@ class PolicyEngine:
         triggered: List[Dict[str, Any]] = []
         text = str(context.get("text") or "")
         lower_text = text.lower()
+        transport = str(context.get("transport") or "").strip().lower()
 
         def add(category: str, state: str, rule: str, reason: str, flag: str) -> None:
             triggered.append(
@@ -132,7 +134,18 @@ class PolicyEngine:
                     "reason": reason,
                     "risk_flag": flag,
                 }
-            )
+                )
+
+        if transport == "telegram":
+            privileged_reason = self._telegram_privileged_reason(lower_text, action=action, context=context)
+            if privileged_reason is not None:
+                add(
+                    "governance",
+                    "reject",
+                    "telegram_transport_denies_privileged_operator_actions",
+                    privileged_reason,
+                    "telegram_capability_boundary",
+                )
 
         if context.get("claim_hidden_state") or (action == "final_response" and self._mentions_hidden_state_claim(lower_text)):
             add(
@@ -357,3 +370,52 @@ class PolicyEngine:
                 "i read your hidden",
             )
         )
+
+    @staticmethod
+    def _telegram_privileged_reason(lower_text: str, *, action: str, context: Dict[str, Any]) -> Optional[str]:
+        if action == "file_mutation" or context.get("file_mutation_requested"):
+            return (
+                "Telegram transport is limited to chat, status, and bounded agent conversation. "
+                "Privileged file mutation must stay on trusted O.B.E.O.S operator surfaces."
+            )
+
+        capability_boundary = set(str(item).strip().lower() for item in (context.get("capabilities") or []))
+        if capability_boundary and not capability_boundary.issuperset({"chat", "status_read", "agent_chat"}):
+            return (
+                "Telegram transport did not present the canonical restricted capability set, "
+                "so O.B.E.O.S will not honor privileged operator actions from that path."
+            )
+
+        privileged_patterns = {
+            "filesystem mutation": (
+                ("write", "edit", "modify", "delete", "remove", "rename", "move", "create"),
+                ("file", "folder", "directory", "repo", "repository", "codebase", "patch"),
+            ),
+            "shell execution": (
+                ("run", "execute", "launch", "open", "start"),
+                ("command", "powershell", "cmd", "bash", "terminal", "script"),
+            ),
+            "service control": (
+                ("restart", "start", "stop", "kill", "reload"),
+                ("server", "service", "backend", "hud", "ollama", "docker", "worker"),
+            ),
+            "deployment": (
+                ("deploy", "publish", "release", "ship", "push"),
+                ("server", "ec2", "aws", "cloud", "production", "github"),
+            ),
+            "credentials": (
+                ("show", "reveal", "rotate", "change", "set", "create", "delete", "reset"),
+                ("password", "secret", "token", "api key", "apikey", "credential", "account", "login"),
+            ),
+            "installation": (
+                ("install", "uninstall", "upgrade", "downgrade"),
+                ("package", "dependency", "plugin", "service", "docker", "pip", "apt", "brew"),
+            ),
+        }
+        for label, (verbs, nouns) in privileged_patterns.items():
+            if any(verb in lower_text for verb in verbs) and any(noun in lower_text for noun in nouns):
+                return (
+                    "Telegram transport is limited to chat, status, and bounded agent conversation. "
+                    f"Requests involving {label} are denied centrally on that transport."
+                )
+        return None

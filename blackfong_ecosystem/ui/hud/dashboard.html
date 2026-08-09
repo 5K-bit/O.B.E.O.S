@@ -4,55 +4,81 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Thoughtglass HUD</title>
-  <link rel="stylesheet" href="/hud-static/dashboard.css?v=20260430-docker-hud-stable">
+  <link rel="stylesheet" href="/hud-static/dashboard.css?v=20260729-hud-mission-control">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand-block">
-        <div class="brand-kicker">BLACKFONG WORKSPACE // BROWSER COCKPIT</div>
-        <h1 class="brand-title">Thoughtglass HUD</h1>
-        <div class="brand-copy">Secondary O.B.E.O.S. cockpit for D.A.I.S.E., shared session memory, and live cognition.</div>
-      </div>
-
-      <div class="topbar-right">
-        <div class="toolbar-row">
-          <button class="button button-subtle topbar-button" id="toggleLeftRailButton">Toggle Rail</button>
-          <button class="button button-subtle topbar-button" id="toggleRightRailButton">Toggle Drawer</button>
-          <button class="button button-subtle topbar-button" id="refreshButton">Refresh</button>
-          <button class="button button-subtle topbar-button" id="resetLayoutButton">Reset Layout</button>
+      <div class="topbar-main">
+        <div class="brand-block">
+          <div class="brand-kicker">BLACKFONG WORKSPACE // BROWSER COCKPIT</div>
+          <h1 class="brand-title">Thoughtglass HUD</h1>
+          <div class="brand-copy">Chat-first mission-control cockpit over the shared O.B.E.O.S. cognition stack.</div>
         </div>
 
-        <div class="workbench-tabs" role="tablist" aria-label="Workspace tabs">
-          <button class="mode-chip active" data-workspace-tab="chat">Operator</button>
-          <button class="mode-chip" data-workspace-tab="thoughtglass">Thoughtglass</button>
-          <button class="mode-chip" data-workspace-tab="tiny">Tiny</button>
-          <button class="mode-chip" data-workspace-tab="files">Files</button>
-          <button class="mode-chip" data-workspace-tab="security">Security</button>
-          <button class="mode-chip" data-workspace-tab="queue">Queue</button>
-          <button class="mode-chip" data-workspace-tab="trace">Trace</button>
-        </div>
+        <div class="command-deck">
+          <div class="toolbar-row primary-actions">
+            <button class="button button-subtle topbar-button" id="toggleLeftRailButton">Navigator</button>
+            <button class="button button-subtle topbar-button" id="toggleRightRailButton">Utilities</button>
+            <button class="button button-subtle topbar-button" id="refreshButton">Refresh</button>
+            <button class="button button-subtle topbar-button" id="resetLayoutButton">Reset Layout</button>
+            <details class="command-menu">
+              <summary class="button button-subtle topbar-button">Pop Outs</summary>
+              <div class="command-menu-sheet">
+                <button class="button button-subtle" type="button" data-open-workspace-window="thoughtglass">Thoughtglass</button>
+                <button class="button button-subtle" type="button" data-open-workspace-window="tiny">Tiny</button>
+                <button class="button button-subtle" type="button" data-open-workspace-window="files">Files</button>
+                <button class="button button-subtle" type="button" data-open-workspace-window="trace">Trace</button>
+                <button class="button button-subtle" type="button" data-open-workspace-window="security">Security</button>
+              </div>
+            </details>
+            <details class="command-menu">
+              <summary class="button button-subtle topbar-button">More</summary>
+              <div class="command-menu-sheet">
+                <button class="button button-subtle" id="floatLeftRailButton" type="button">Overlay Navigator</button>
+                <button class="button button-subtle" id="floatRightRailButton" type="button">Overlay Utilities</button>
+                <button class="button button-subtle" id="dockLeftRailButton" type="button">Dock Navigator</button>
+                <button class="button button-subtle" id="dockRightRailButton" type="button">Dock Utilities</button>
+              </div>
+            </details>
+          </div>
 
-        <div class="chip-row">
-          <div id="linkedSessionChip" class="status-chip" hidden></div>
-          <div id="statusChip" class="status-chip">D.A.I.S.E idle</div>
-          <div id="backendChip" class="status-chip">backend unknown</div>
-          <div id="layerChip" class="status-chip">layer live brain</div>
-          <div id="transportChip" class="status-chip">transport polling</div>
+          <div class="workbench-tabs" role="tablist" aria-label="Workspace tabs">
+            <button class="mode-chip active" data-workspace-tab="chat">Operator</button>
+            <button class="mode-chip" data-workspace-tab="thoughtglass">Thoughtglass</button>
+            <button class="mode-chip" data-workspace-tab="tiny">Tiny</button>
+            <button class="mode-chip" data-workspace-tab="files">Files</button>
+            <button class="mode-chip" data-workspace-tab="security">Security</button>
+            <button class="mode-chip" data-workspace-tab="queue">Queue</button>
+            <button class="mode-chip" data-workspace-tab="trace">Trace</button>
+          </div>
+
+          <div class="status-deck">
+            <div class="status-band status-band-primary">
+              <div id="linkedSessionChip" class="status-chip" hidden></div>
+              <div id="statusChip" class="status-chip">D.A.I.S.E idle</div>
+              <div id="backendChip" class="status-chip">backend unknown</div>
+            </div>
+            <div class="status-band status-band-secondary">
+              <div id="layerChip" class="status-chip">layer live brain</div>
+              <div id="transportChip" class="status-chip">transport polling</div>
+              <div class="micro-copy status-caption">Operator mission control keeps the chat lane primary.</div>
+            </div>
+          </div>
         </div>
       </div>
     </header>
+
+    <button id="layoutScrim" class="layout-scrim hidden" type="button" aria-label="Close overlay"></button>
 
     <div class="main-grid">
       <aside class="panel left-rail" id="leftRail">
         <div class="rail-header">
           <div>
-            <div class="section-kicker">Navigator</div>
-            <h2>Sessions</h2>
+            <div class="section-kicker">Navigator Rail</div>
+            <h2>Sessions + Recall</h2>
           </div>
           <div class="button-row tight">
-            <button class="button button-subtle rail-toggle" id="floatLeftRailButton" type="button">Float</button>
-            <button class="button button-subtle rail-toggle" id="dockLeftRailButton" type="button">Dock</button>
             <button class="button button-subtle rail-toggle" id="leftRailToggle">Hide</button>
           </div>
         </div>
@@ -153,6 +179,9 @@
                   <div>
                     <div class="section-kicker">Conversation</div>
                     <h3>Messages</h3>
+                  </div>
+                  <div class="button-row tight">
+                    <div id="conversationStatusChip" class="status-chip status-chip-quiet">idle</div>
                   </div>
                 </div>
                 <div id="messagesPanel" class="messages-panel"></div>
@@ -341,12 +370,10 @@
       <aside class="panel right-rail" id="rightRail">
         <div class="rail-header">
           <div>
-            <div class="section-kicker">Drawer</div>
+            <div class="section-kicker">Utility Drawer</div>
             <h2>Detail + Utilities</h2>
           </div>
           <div class="button-row tight">
-            <button class="button button-subtle rail-toggle" id="floatRightRailButton" type="button">Float</button>
-            <button class="button button-subtle rail-toggle" id="dockRightRailButton" type="button">Dock</button>
             <button class="button button-subtle rail-toggle" id="rightRailToggle">Hide</button>
           </div>
         </div>
@@ -412,6 +439,6 @@
 
   <div id="toastStack" class="toast-stack" aria-live="polite"></div>
 
-  <script src="/hud-static/dashboard.js?v=20260430-docker-hud-stable"></script>
+  <script src="/hud-static/dashboard.js?v=20260729-hud-mission-control"></script>
 </body>
 </html>

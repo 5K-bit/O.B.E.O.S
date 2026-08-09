@@ -260,8 +260,11 @@ class DAISE:
                 "request",
                 {
                     "text": user_input,
+                    "transport": context.get("transport"),
+                    "capabilities": context.get("capabilities"),
                     "explicit_capture_mode": bool(context.get("explicit_capture_mode") or context.get("sensor_mode_enabled")),
                     "active_capture_requested": self._requests_active_capture(user_input),
+                    "file_mutation_requested": detected_intent.file_ops,
                     "insufficient_evidence": not user_input.strip(),
                 },
             ).to_dict()

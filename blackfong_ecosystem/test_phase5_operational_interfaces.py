@@ -19,6 +19,17 @@ from blackfong_ecosystem.operational_interfaces import (
     session_explorer,
     admin_controls
 )
+from blackfong_ecosystem.service_registry import reset_ui_services_for_tests
+
+
+def _build_isolated_dashboard(host: str = "localhost", port: int = 8080) -> WebDashboard:
+    reset_ui_services_for_tests()
+    dashboard = WebDashboard(host=host, port=port)
+    dashboard.sessions = {}
+    dashboard.recent_events = []
+    dashboard.alerts = []
+    dashboard._metrics_cache_updated_at = 0.0
+    return dashboard
 
 
 class TestWebDashboard:
@@ -26,7 +37,7 @@ class TestWebDashboard:
 
     def setup_method(self):
         """Setup test fixtures."""
-        self.dashboard = WebDashboard(host="localhost", port=8081)  # Use different port for testing
+        self.dashboard = _build_isolated_dashboard(host="localhost", port=8081)
 
     def test_initialization(self):
         """Test dashboard initialization."""
@@ -120,7 +131,7 @@ class TestSessionExplorer:
 
     def setup_method(self):
         """Setup test fixtures."""
-        self.dashboard = WebDashboard()
+        self.dashboard = _build_isolated_dashboard()
         self.explorer = SessionExplorer(self.dashboard)
 
     def test_initialization(self):
@@ -208,7 +219,7 @@ class TestAdminControls:
 
     def setup_method(self):
         """Setup test fixtures."""
-        self.dashboard = WebDashboard()
+        self.dashboard = _build_isolated_dashboard()
         self.admin = AdminControls(self.dashboard)
 
     def test_initialization(self):

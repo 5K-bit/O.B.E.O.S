@@ -30,6 +30,7 @@
     workspaceTab: "chat",
     drawerTab: "detail",
     layer: "live_brain",
+    viewportBucket: "wide",
     sessionId: null,
     requestId: null,
     sessions: [],
@@ -65,16 +66,27 @@
       collapsedRight: false,
       floatingLeft: false,
       floatingRight: false,
+      focusedView: false,
       sectionHeights: {},
     },
   };
 
+  const LAYOUT_SCHEMA_VERSION = 2;
+  const LEGACY_LAYOUT_STORAGE_KEYS = [
+    "blackfong.thoughtglass.layout.v1",
+    "blackfong.thoughtglass.layout",
+    "blackfong.hud.layout.v1",
+  ];
+  const LAYOUT_STORAGE_KEY = `blackfong.thoughtglass.layout.v${LAYOUT_SCHEMA_VERSION}`;
   const SHORTCUT_OVERRIDES_STORAGE_KEY = "blackfong.shortcut.overrides.v1";
   const COMMAND_HISTORY_STORAGE_KEY = "blackfong.thoughtglass.commandHistory.v1";
   const UI_STATE_STORAGE_KEY = "blackfong.thoughtglass.uiState.v1";
 
   const el = {
+    appShell: document.querySelector(".app-shell"),
+    topbar: document.querySelector(".topbar"),
     mainGrid: document.querySelector(".main-grid"),
+    layoutScrim: document.getElementById("layoutScrim"),
     leftRail: document.getElementById("leftRail"),
     rightRail: document.getElementById("rightRail"),
     toggleLeftRailButton: document.getElementById("toggleLeftRailButton"),
@@ -112,6 +124,7 @@
     pendingLabel: document.getElementById("pendingLabel"),
     pendingDetail: document.getElementById("pendingDetail"),
     pendingBadge: document.getElementById("pendingBadge"),
+    conversationStatusChip: document.getElementById("conversationStatusChip"),
     messagesPanel: document.getElementById("messagesPanel"),
     chatInput: document.getElementById("chatInput"),
     agentSelect: document.getElementById("agentSelect"),
@@ -167,6 +180,7 @@
     keyboardShortcutsPanel: document.getElementById("keyboardShortcutsPanel"),
     redamonButtons: Array.from(document.querySelectorAll("[data-redamon-action]")),
     columnResizers: Array.from(document.querySelectorAll("[data-column-resizer]")),
+    popoutButtons: Array.from(document.querySelectorAll("[data-open-workspace-window]")),
   };
 
   function escapeHtml(value) {
@@ -231,8 +245,114 @@
     };
   }
 
+  function clearLegacyLayoutState() {
+    LEGACY_LAYOUT_STORAGE_KEYS.forEach((key) => {
+      try {
+        window.localStorage.removeItem(key);
+      } catch (error) {
+        // Ignore storage failures in restrictive browser modes.
+      }
+    });
+  }
+
+  function currentViewportBucket() {
+    const width = window.innerWidth || document.documentElement.clientWidth || 1440;
+    if (width >= 1400) {
+      return "wide";
+    }
+    if (width >= 1100) {
+      return "medium";
+    }
+    if (width >= 768) {
+      return "narrow";
+    }
+    return "mobile";
+  }
+
+  function isOverlayRail(side) {
+    const bucket = state.viewportBucket || "wide";
+    if (side === "right") {
+      return bucket !== "wide" || state.layout.floatingRight || state.layout.focusedView;
+    }
+    return bucket === "narrow" || bucket === "mobile" || state.layout.floatingLeft || state.layout.focusedView;
+  }
+
+  function shouldShowLayoutScrim() {
+    if (state.layout.focusedView && (!state.layout.collapsedLeft || !state.layout.collapsedRight)) {
+      return true;
+    }
+    const leftOpen = !state.layout.collapsedLeft && isOverlayRail("left");
+    const rightOpen = !state.layout.collapsedRight && isOverlayRail("right");
+    return leftOpen || rightOpen;
+  }
+
+  function updateLayoutScrim() {
+    if (!el.layoutScrim) {
+      return;
+    }
+    el.layoutScrim.classList.toggle("hidden", !shouldShowLayoutScrim());
+  }
+
+  function syncUrlState() {
+    const url = new URL(window.location.href);
+    url.searchParams.set("workspace", state.workspaceTab || "chat");
+    url.searchParams.set("drawer", state.drawerTab || "detail");
+    url.searchParams.set("layer", state.layer || "live_brain");
+    if (state.layout.focusedView) {
+      url.searchParams.set("focus", "1");
+    } else {
+      url.searchParams.delete("focus");
+    }
+    window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
+  }
+
+  function applyRouteStateFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const workspace = params.get("workspace");
+    const drawer = params.get("drawer");
+    const layer = params.get("layer");
+    const focus = params.get("focus");
+    if (workspace) {
+      state.workspaceTab = workspace;
+    }
+    if (drawer) {
+      state.drawerTab = drawer;
+    }
+    if (layer) {
+      state.layer = layer;
+    }
+    state.layout.focusedView = focus === "1" || focus === "true";
+  }
+
+  function buildWorkspaceUrl(workspace, focused = true) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("workspace", workspace || "chat");
+    url.searchParams.set("drawer", state.drawerTab || "detail");
+    url.searchParams.set("layer", state.layer || "live_brain");
+    if (focused) {
+      url.searchParams.set("focus", "1");
+    } else {
+      url.searchParams.delete("focus");
+    }
+    return url.toString();
+  }
+
+  function openWorkspaceWindow(workspace) {
+    window.open(buildWorkspaceUrl(workspace, true), `obeos-${workspace || "workspace"}`);
+  }
+
+  function updateViewportState() {
+    state.viewportBucket = currentViewportBucket();
+    document.body.dataset.viewportBucket = state.viewportBucket;
+    document.body.classList.toggle("focused-workspace", Boolean(state.layout.focusedView));
+    const topOffset = Math.round((el.topbar?.getBoundingClientRect().bottom || 90) + 8);
+    document.documentElement.style.setProperty("--dock-top-offset", `${topOffset}px`);
+    updateLayoutScrim();
+  }
+
   function loadLayoutState() {
     try {
+      clearLegacyLayoutState();
       const parsed = JSON.parse(window.localStorage.getItem(LAYOUT_STORAGE_KEY) || "{}");
       state.layout = {
         leftWidth: Number(parsed.leftWidth) || state.layout.leftWidth,
@@ -241,6 +361,7 @@
         collapsedRight: Boolean(parsed.collapsedRight),
         floatingLeft: Boolean(parsed.floatingLeft),
         floatingRight: Boolean(parsed.floatingRight),
+        focusedView: state.layout.focusedView,
         sectionHeights: sanitizeLayoutSectionHeights(
           parsed.sectionHeights && typeof parsed.sectionHeights === "object" ? parsed.sectionHeights : {},
         ),
@@ -254,6 +375,7 @@
         collapsedRight: false,
         floatingLeft: false,
         floatingRight: false,
+        focusedView: false,
         sectionHeights: {},
       };
     }
@@ -293,7 +415,9 @@
 
   function persistLayoutState() {
     try {
-      window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(state.layout));
+      const persisted = { ...state.layout };
+      delete persisted.focusedView;
+      window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(persisted));
     } catch (error) {
       // Ignore storage failures in restrictive browser modes.
     }
@@ -307,6 +431,7 @@
       collapsedRight: false,
       floatingLeft: false,
       floatingRight: false,
+      focusedView: state.layout.focusedView,
       sectionHeights: {},
     };
     persistLayoutState();
@@ -322,10 +447,10 @@
     el.rightRail?.classList.toggle("collapsed", state.layout.collapsedRight);
     el.leftRail?.classList.toggle("floating-rail", state.layout.floatingLeft);
     el.rightRail?.classList.toggle("floating-rail", state.layout.floatingRight);
-    if (state.layout.floatingLeft) {
+    if (state.layout.floatingLeft || isOverlayRail("left")) {
       document.documentElement.style.setProperty("--left-rail-width", "0px");
     }
-    if (state.layout.floatingRight) {
+    if (state.layout.floatingRight || isOverlayRail("right")) {
       document.documentElement.style.setProperty("--right-rail-width", "0px");
     }
     if (el.leftRailToggle) {
@@ -335,10 +460,10 @@
       el.rightRailToggle.textContent = state.layout.collapsedRight ? "Show" : "Hide";
     }
     if (el.toggleLeftRailButton) {
-      el.toggleLeftRailButton.textContent = state.layout.collapsedLeft ? "Show Rail" : "Hide Rail";
+      el.toggleLeftRailButton.textContent = state.layout.collapsedLeft ? "Navigator" : "Hide Navigator";
     }
     if (el.toggleRightRailButton) {
-      el.toggleRightRailButton.textContent = state.layout.collapsedRight ? "Show Drawer" : "Hide Drawer";
+      el.toggleRightRailButton.textContent = state.layout.collapsedRight ? "Utilities" : "Hide Utilities";
     }
     Object.entries(state.layout.sectionHeights || {}).forEach(([sectionId, height]) => {
       const section = document.querySelector(`[data-resizable-section="${sectionId}"]`);
@@ -351,6 +476,7 @@
       }
       section.style.flex = `0 0 ${normalized}px`;
     });
+    updateViewportState();
   }
 
   function persistCommandHistory() {
@@ -602,6 +728,7 @@
       applyLayoutState();
     }
     persistUiState();
+    syncUrlState();
   }
 
   function setWorkspaceTab(tab) {
@@ -686,6 +813,7 @@
       setDrawerTab("commands");
     }
     persistUiState();
+    syncUrlState();
   }
 
   function setMode(mode) {
@@ -739,6 +867,7 @@
       button.classList.toggle("active", button.dataset.layer === state.layer);
     });
     persistUiState();
+    syncUrlState();
   }
 
   function pushCommandHistory(entry) {
@@ -839,10 +968,43 @@
     el.memoryPanel.innerHTML = statCard + cards;
   }
 
+  function looksTechnicalPayload(text) {
+    const full = String(text || "").trim();
+    if (!full) {
+      return false;
+    }
+    const newlineCount = (full.match(/\n/g) || []).length;
+    const jsonLike = (/^[\[{]/.test(full) && /[\]}]$/.test(full)) || full.startsWith("```json");
+    const logLike = newlineCount >= 12 && /(traceback|exception|error|warn|info|debug|\d{4}-\d{2}-\d{2})/i.test(full);
+    const codeLike = full.includes("```") || (newlineCount >= 12 && /[{}[\];=<>()]/.test(full));
+    return jsonLike || logLike || codeLike;
+  }
+
+  function shouldCollapseMessageBody(text) {
+    const full = String(text || "");
+    return full.length > 2400 && looksTechnicalPayload(full);
+  }
+
+  function isMessagePanelNearBottom() {
+    if (!el.messagesPanel) {
+      return true;
+    }
+    const distance = el.messagesPanel.scrollHeight - el.messagesPanel.scrollTop - el.messagesPanel.clientHeight;
+    return distance < 96;
+  }
+
+  function updateConversationStatus(label, status = "idle") {
+    if (!el.conversationStatusChip) {
+      return;
+    }
+    el.conversationStatusChip.textContent = label || "idle";
+    el.conversationStatusChip.classList.toggle("active", status === "active" || status === "streaming");
+    el.conversationStatusChip.classList.toggle("danger-chip", status === "error");
+  }
+
   function formatMessageBody(text, messageIndex) {
     const full = String(text || "");
-    const threshold = 800;
-    if (full.length <= threshold) {
+    if (!shouldCollapseMessageBody(full)) {
       return `<div class="message-body">${escapeHtml(full)}</div>`;
     }
     const isExpanded = state.expandedMessages.has(messageIndex);
@@ -854,6 +1016,9 @@
 
   function renderMessages(payload) {
     const messages = payload.messages || [];
+    const shouldStick = isMessagePanelNearBottom();
+    const previousScrollTop = el.messagesPanel?.scrollTop || 0;
+    const previousScrollHeight = el.messagesPanel?.scrollHeight || 0;
     state.lastRenderedMessages = messages;
     const combined = messages.slice();
     if (state.localMessages.length) {
@@ -887,7 +1052,12 @@
           })
           .join("")
       : `<div class="message system"><div class="message-head"><strong>System</strong><span>idle</span></div><div class="message-body">Start a conversation with D.A.I.S.E to populate this session.</div></div>`;
-    el.messagesPanel.scrollTop = el.messagesPanel.scrollHeight;
+    if (shouldStick) {
+      el.messagesPanel.scrollTop = el.messagesPanel.scrollHeight;
+    } else {
+      const heightDelta = el.messagesPanel.scrollHeight - previousScrollHeight;
+      el.messagesPanel.scrollTop = previousScrollTop + Math.max(0, heightDelta);
+    }
     window.requestAnimationFrame(() => logChatLayoutState("dashboard.js:renderMessages"));
   }
 
@@ -931,6 +1101,8 @@
     state.currentTrace = trace;
     const phase = trace && trace.phase ? trace.phase : "idle";
     const status = trace && trace.status ? trace.status : "idle";
+    const statusLabel = status === "pending" ? `${phase}` : status === "complete" ? "complete" : status === "error" ? "failed" : status;
+    updateConversationStatus(statusLabel, status === "pending" ? "streaming" : status === "error" ? "error" : "idle");
     el.pendingBadge.textContent = `${phase} | ${status}`;
     renderTraceRibbon(el.operatorRibbon, trace.trace_ribbon || buildRibbonFromTrace(trace));
     renderTraceRibbon(el.thoughtglassRibbon, trace.trace_ribbon || buildRibbonFromTrace(trace));
@@ -1793,6 +1965,7 @@
       if (payload.session_id) {
         state.sessionId = payload.session_id;
       }
+      updateConversationStatus("streaming", "streaming");
       state.streamingReply = {
         text: payload.text || `${(state.streamingReply && state.streamingReply.text) || ""}${payload.token || ""}`,
         timestamp: Date.now() / 1000,
@@ -1804,6 +1977,7 @@
     if (eventType === "chat_phase") {
       state.requestId = payload.request_id || state.requestId;
       state.sessionId = payload.session_id || state.sessionId;
+      updateConversationStatus(payload.phase || "working", "active");
       if (payload.fast_path) {
         el.pendingDetail.textContent = "Fast path: single-agent quick route.";
       }
@@ -1823,12 +1997,14 @@
       refreshNotifications().catch(() => {});
       refreshOperatorSummary().catch(() => {});
       if (eventType === "chat_complete") {
+        updateConversationStatus("finalizing", "active");
         state.streamingReply = null;
         refreshMessages().catch(() => {});
         refreshMemory().catch(() => {});
         refreshCognition().catch(() => {});
       }
       if (eventType === "chat_error") {
+        updateConversationStatus("failed", "error");
         state.streamingReply = null;
       }
       return;
@@ -2370,7 +2546,7 @@
       }
       if (matchesShortcut(event, "ctrl+shift+h")) {
         event.preventDefault();
-        window.open("/", "_blank");
+        window.open(buildWorkspaceUrl(state.workspaceTab || "chat", true), "_blank");
         return;
       }
       const layerMap = {
@@ -2509,6 +2685,16 @@
   function installEventHandlers() {
     el.toggleLeftRailButton?.addEventListener("click", hudClick("toggle-left-rail", () => toggleRail("left")));
     el.toggleRightRailButton?.addEventListener("click", hudClick("toggle-right-rail", () => toggleRail("right")));
+    el.layoutScrim?.addEventListener("click", hudClick("layout-scrim", async () => {
+      if (isOverlayRail("left")) {
+        state.layout.collapsedLeft = true;
+      }
+      if (isOverlayRail("right")) {
+        state.layout.collapsedRight = true;
+      }
+      persistLayoutState();
+      applyLayoutState();
+    }));
     el.leftRailToggle?.addEventListener("click", hudClick("left-rail-toggle", () => toggleRail("left")));
     el.floatLeftRailButton?.addEventListener("click", hudClick("float-left-rail", () => floatRail("left")));
     el.dockLeftRailButton?.addEventListener("click", hudClick("dock-left-rail", () => dockRail("left")));
@@ -2680,6 +2866,12 @@
       setWorkspaceTab("security");
       Promise.all([refreshIntegrations(), refreshRedamonStatus(), refreshVerification("integrations")]).catch((error) => showToast(error.message, "error"));
     });
+    el.popoutButtons.forEach((button) => {
+      button.addEventListener("click", hudClick(`popout:${button.dataset.openWorkspaceWindow}`, async () => {
+        openWorkspaceWindow(button.dataset.openWorkspaceWindow || "chat");
+        button.closest("details")?.removeAttribute("open");
+      }));
+    });
   }
 
   async function loadSharedSession() {
@@ -2707,50 +2899,18 @@
   }
 
   function installFloatingRailDrag() {
-    [el.leftRail, el.rightRail].forEach((rail) => {
-      if (!rail) {
-        return;
-      }
-      const header = rail.querySelector(".rail-header");
-      if (!header) {
-        return;
-      }
-      header.style.cursor = "move";
-      let dragOrigin = null;
-      let startLeft = 0;
-      let startTop = 0;
-      header.addEventListener("pointerdown", (event) => {
-        if (!rail.classList.contains("floating-rail")) {
-          return;
-        }
-        dragOrigin = { x: event.clientX, y: event.clientY };
-        const rect = rail.getBoundingClientRect();
-        startLeft = rect.left;
-        startTop = rect.top;
-        header.setPointerCapture(event.pointerId);
-      });
-      header.addEventListener("pointermove", (event) => {
-        if (!dragOrigin) {
-          return;
-        }
-        const dx = event.clientX - dragOrigin.x;
-        const dy = event.clientY - dragOrigin.y;
-        rail.style.left = `${startLeft + dx}px`;
-        rail.style.top = `${startTop + dy}px`;
-        rail.style.right = "auto";
-      });
-      header.addEventListener("pointerup", () => {
-        dragOrigin = null;
-      });
-    });
+    // Mission-control layout uses controlled docks and overlays instead of
+    // restoring unstable free-floating pixel positions.
   }
 
   async function init() {
     debugHudLog("B", "dashboard.js:init", "HUD init start", {});
     loadLayoutState();
+    applyRouteStateFromUrl();
     await loadSharedSession();
     loadCommandHistory();
     loadUiState();
+    applyRouteStateFromUrl();
     installColumnResizers();
     installPanelResizers();
     applyLayoutState();
@@ -2765,6 +2925,7 @@
     setLayer(state.layer);
     setDrawerTab(state.drawerTab);
     setWorkspaceTab(state.workspaceTab);
+    updateViewportState();
     renderTrace({ phase: "idle", status: "idle", events: [], reports: [] });
     setTransportState("polling", "starting");
     connectLiveStream();
@@ -2774,6 +2935,10 @@
     state.generalPollHandle = window.setInterval(() => {
       generalRefresh().catch((error) => showToast(error.message, "error"));
     }, 15000);
+    window.addEventListener("resize", debounce(() => {
+      updateViewportState();
+      applyLayoutState();
+    }, 120));
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
         generalRefresh().catch((error) => showToast(error.message, "error"));

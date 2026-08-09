@@ -404,11 +404,13 @@ class SystemAwarenessService:
         voice_status: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         tiny_status = self._observe_tinyprogrammer_status()
+        telegram_status = self._observe_telegram_status()
         return {
             "schema_version": SCHEMA_VERSION,
             "hud": {"status": "available"},
             "voice": voice_status or {"active": False, "message": "Voice loop status not queried"},
             "tinyprogrammer": tiny_status,
+            "telegram": telegram_status,
             "backend_bootstrap": dict(backend_bootstrap or {}),
             "freshness": self._freshness(time.time()),
             "provenance": self._provenance(source="local_service_registry", collection_method="service_status_probe"),
@@ -439,6 +441,18 @@ class SystemAwarenessService:
             return self.tinyprogrammer.get_status()
         except Exception as exc:
             return {"online": False, "mode": "unavailable", "error": str(exc)}
+
+    def _observe_telegram_status(self) -> Dict[str, Any]:
+        try:
+            from .telegram_gateway import read_telegram_gateway_status
+
+            status = read_telegram_gateway_status(
+                event_store=getattr(self.memory_service, "event_store", None),
+            )
+            status["awareness_probe"] = "events_db_gateway_state"
+            return status
+        except Exception as exc:
+            return {"status": "unavailable", "error": str(exc), "awareness_probe": "telegram_status_failed"}
 
     def observe_environment(self) -> Dict[str, Any]:
         env: Dict[str, Any] = {

@@ -133,6 +133,27 @@ def test_release_evidence_writes_json_and_markdown_reports(tmp_path: Path) -> No
     assert "Kubuntu 24.04 LTS" in markdown_path.read_text(encoding="utf-8")
 
 
+def test_python_command_candidates_ignore_inaccessible_posix_venv(tmp_path: Path, monkeypatch) -> None:
+    services = SimpleNamespace(integration_registry=ExternalIntegrationRegistry(workspace_root=tmp_path, tacklebox_root=tmp_path))
+    verification = VerificationService(workspace_root=tmp_path, services=services)
+    windows_candidate = tmp_path / ".venv" / "Scripts" / "python.exe"
+    posix_candidate = tmp_path / ".venv" / "bin" / "python"
+    _write_file(windows_candidate, "")
+    original_exists = Path.exists
+
+    def fake_exists(self: Path) -> bool:
+        if self == posix_candidate:
+            raise OSError(1920, "The file cannot be accessed by the system")
+        return original_exists(self)
+
+    monkeypatch.setattr(Path, "exists", fake_exists)
+
+    candidates = verification._python_command_candidates()
+
+    assert [str(windows_candidate)] in candidates
+    assert [str(posix_candidate)] not in candidates
+
+
 def test_shotset_writes_manifest_and_capture_index(tmp_path: Path) -> None:
     services = SimpleNamespace(integration_registry=ExternalIntegrationRegistry(workspace_root=tmp_path, tacklebox_root=tmp_path))
     verification = VerificationService(workspace_root=tmp_path, services=services)

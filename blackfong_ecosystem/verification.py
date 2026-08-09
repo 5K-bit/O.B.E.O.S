@@ -340,15 +340,15 @@ class VerificationService:
             candidates.append(command)
 
         executable = str(sys.executable or "").strip()
-        if executable and Path(executable).exists():
+        if executable and self._path_exists(Path(executable)):
             add([executable])
 
         local_windows = self.workspace_root / ".venv" / "Scripts" / "python.exe"
-        if local_windows.exists():
+        if self._path_exists(local_windows):
             add([str(local_windows)])
 
         local_posix = self.workspace_root / ".venv" / "bin" / "python"
-        if local_posix.exists():
+        if self._path_exists(local_posix):
             add([str(local_posix)])
 
         py_launcher = shutil.which("py")
@@ -362,6 +362,13 @@ class VerificationService:
                 add([resolved])
 
         return candidates
+
+    @staticmethod
+    def _path_exists(path: Path) -> bool:
+        try:
+            return path.exists()
+        except OSError:
+            return False
 
     @staticmethod
     def _is_python_launcher_failure(completed: subprocess.CompletedProcess[str]) -> bool:

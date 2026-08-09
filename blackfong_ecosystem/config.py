@@ -440,6 +440,58 @@ class TUISettings:
         )
 
 
+@dataclass(frozen=True)
+class TelegramSettings:
+    """Runtime settings for the private Telegram transport adapter."""
+
+    enabled: bool = False
+    bot_token: str = ""
+    allowlisted_identities: tuple[tuple[str, str], ...] = ()
+    private_chat_only: bool = True
+    poll_timeout_seconds: float = 20.0
+    poll_retry_delay_seconds: float = 2.0
+    poll_limit: int = 20
+    request_timeout_seconds: float = 30.0
+    voice_enabled: bool = True
+    max_voice_download_bytes: int = 10_000_000
+    max_voice_duration_seconds: float = 120.0
+    max_voice_processing_seconds: float = 60.0
+    max_transcript_chars: int = 4000
+
+    @staticmethod
+    def _parse_allowlist(raw: str) -> tuple[tuple[str, str], ...]:
+        entries: list[tuple[str, str]] = []
+        for item in raw.replace(";", ",").split(","):
+            chunk = item.strip()
+            if not chunk or ":" not in chunk:
+                continue
+            chat_id, user_id = chunk.split(":", 1)
+            normalized = (chat_id.strip(), user_id.strip())
+            if normalized[0] and normalized[1] and normalized not in entries:
+                entries.append(normalized)
+        return tuple(entries)
+
+    @staticmethod
+    def from_env() -> "TelegramSettings":
+        return TelegramSettings(
+            enabled=os.getenv("BLACKFONG_TELEGRAM_ENABLED", "false").lower() == "true",
+            bot_token=os.getenv("BLACKFONG_TELEGRAM_BOT_TOKEN", "").strip(),
+            allowlisted_identities=TelegramSettings._parse_allowlist(
+                os.getenv("BLACKFONG_TELEGRAM_ALLOWLIST", "")
+            ),
+            private_chat_only=os.getenv("BLACKFONG_TELEGRAM_PRIVATE_CHAT_ONLY", "true").lower() != "false",
+            poll_timeout_seconds=float(os.getenv("BLACKFONG_TELEGRAM_POLL_TIMEOUT_SECONDS", "20")),
+            poll_retry_delay_seconds=float(os.getenv("BLACKFONG_TELEGRAM_POLL_RETRY_DELAY_SECONDS", "2")),
+            poll_limit=max(1, min(100, int(os.getenv("BLACKFONG_TELEGRAM_POLL_LIMIT", "20")))),
+            request_timeout_seconds=float(os.getenv("BLACKFONG_TELEGRAM_REQUEST_TIMEOUT_SECONDS", "30")),
+            voice_enabled=os.getenv("BLACKFONG_TELEGRAM_VOICE_ENABLED", "true").lower() != "false",
+            max_voice_download_bytes=int(os.getenv("BLACKFONG_TELEGRAM_MAX_VOICE_DOWNLOAD_BYTES", "10000000")),
+            max_voice_duration_seconds=float(os.getenv("BLACKFONG_TELEGRAM_MAX_VOICE_DURATION_SECONDS", "120")),
+            max_voice_processing_seconds=float(os.getenv("BLACKFONG_TELEGRAM_MAX_VOICE_PROCESSING_SECONDS", "60")),
+            max_transcript_chars=int(os.getenv("BLACKFONG_TELEGRAM_MAX_TRANSCRIPT_CHARS", "4000")),
+        )
+
+
 paths = Paths.from_root(Path(__file__).resolve().parents[1])
 identity = SystemIdentity()
 chat_settings = ChatSettings.from_env()
@@ -448,4 +500,5 @@ hud_settings = HUDSettings.from_env()
 legion_settings = LegionSettings.from_env()
 tinyprogrammer_settings = TinyProgrammerSettings.from_env(paths.root)
 tui_settings = TUISettings.from_env()
+telegram_settings = TelegramSettings.from_env()
 
