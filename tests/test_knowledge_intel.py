@@ -1053,8 +1053,10 @@ class _FakeSearchStore:
 
     def __init__(self, hits) -> None:
         self._hits = hits
+        self.last_metadata_filter = None
 
-    def search(self, query, k=5):
+    def search(self, query, k=5, metadata_filter=None):
+        self.last_metadata_filter = metadata_filter
         return list(self._hits)[:k]
 
 
@@ -1124,3 +1126,4 @@ def test_librarian_filters_by_collection(tmp_path: Path, monkeypatch) -> None:
     # Only the spawn passage survives the collection filter.
     assert record["retrieved_count"] == 1
     assert all(p["collection"] == "spawn" for p in record["provenance"])
+    assert agent.vector_store.last_metadata_filter == {"collection": "spawn"}

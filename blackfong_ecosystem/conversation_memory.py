@@ -1320,6 +1320,11 @@ class ConversationMemoryService:
             reverse=True,
         )
         selected_hits = deduped_hits[: int(settings.get("citation_limit") or vector_k)]
+        selected_hits = self._limit_collection_focused_hits(
+            selected_hits,
+            retrieval_profile=retrieval_profile,
+            hinted_collections=hinted_collections,
+        )
         context = self._render_retrieval_context(
             selected_hits,
             max_chars=int(settings.get("context_chars") or 0),
@@ -1727,6 +1732,37 @@ class ConversationMemoryService:
             seen.add(key)
             ordered.append(hit)
         return ordered
+
+    def _limit_collection_focused_hits(
+        self,
+        hits: List[Dict[str, Any]],
+        *,
+        retrieval_profile: str,
+        hinted_collections: List[str],
+    ) -> List[Dict[str, Any]]:
+        if not hits or not hinted_collections:
+            return hits
+        summary_hits = [hit for hit in hits if str(hit.get("kind") or "") == "collection_summary"]
+        if not summary_hits:
+            return hits
+        focus_collection = str(summary_hits[0].get("collection") or hinted_collections[0] or "")
+        if not focus_collection:
+            return hits
+        supporting_cap = 2 if retrieval_profile in {"deep", "architecture"} else 1
+        supporting_hits = [
+            hit
+            for hit in hits
+            if hit is not summary_hits[0] and str(hit.get("collection") or "") == focus_collection
+        ]
+        fallback_hits = [
+            hit
+            for hit in hits
+            if hit is not summary_hits[0] and str(hit.get("collection") or "") != focus_collection
+        ]
+        limited = [summary_hits[0], *supporting_hits[:supporting_cap]]
+        if len(limited) < len(hits) and retrieval_profile in {"deep", "architecture"}:
+            limited.extend(fallback_hits[:1])
+        return limited
 
     def _collection_display_name(self, collection: str) -> str:
         _source_registry, collection_registry = self._knowledge_registries()

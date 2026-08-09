@@ -68,6 +68,15 @@ class LibrarianAgent:
         # Over-fetch when filtering by collection so the post-filter still has depth.
         fetch_k = top_k * 5 if slug else top_k
         try:
+            if slug:
+                results = self.vector_store.search(
+                    question,
+                    k=fetch_k,
+                    metadata_filter={"collection": slug},
+                )
+            else:
+                results = self.vector_store.search(question, k=fetch_k)
+        except TypeError:
             results = self.vector_store.search(question, k=fetch_k)
         except Exception:
             return []

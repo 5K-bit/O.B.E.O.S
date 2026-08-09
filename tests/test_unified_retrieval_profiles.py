@@ -401,6 +401,7 @@ def test_standard_retrieval_rescues_hinted_collection_without_summary(tmp_path: 
     assert bundle["citations"][0]["kind"] == "collection_summary"
     assert "Spawn comic universe and related series" in bundle["knowledge_context"]
     assert "Al Simmons" in bundle["knowledge_context"]
+    assert len(bundle["citations"]) <= 2
 
 
 def test_knowledge_routes_use_existing_memory_stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
