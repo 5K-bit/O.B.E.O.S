@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional
 
 from ..events import Event
@@ -205,6 +206,13 @@ class LibrarianAgent:
         passages: List[Dict[str, Any]],
         facts: Dict[str, Any],
     ) -> str:
+        if collection:
+            return self._structured_collection_answer(
+                question,
+                collection=collection,
+                passages=passages,
+                facts=facts,
+            )
         where = f"collection '{collection}'" if collection else "the knowledge base"
         if not passages:
             return (
@@ -223,6 +231,81 @@ class LibrarianAgent:
                 f"{facts.get('sources', 0)} sources, {facts.get('total_chunks', 0)} chunks.)"
             )
         return "\n".join(lines)
+
+    def _structured_collection_answer(
+        self,
+        question: str,
+        *,
+        collection: str,
+        passages: List[Dict[str, Any]],
+        facts: Dict[str, Any],
+    ) -> str:
+        del question
+        collection_label = str(collection or "collection").replace("_", " ").title()
+        if not passages:
+            return (
+                f"I do not have enough grounded passages in the local {collection_label} collection to answer that yet. "
+                "The collection exists, but nothing relevant was retrieved from the embedded sources."
+            )
+        lead_excerpt = self._clean_excerpt(str(passages[0].get("excerpt") or ""))
+        if not lead_excerpt:
+            lead_excerpt = f"The local {collection_label} collection has relevant material, but the top excerpt was too noisy to quote cleanly."
+        sentences = [f"According to the local {collection_label} collection, {lead_excerpt}"]
+        entities = self._salient_entities(passages)
+        if entities:
+            sentences.append(f"Key names showing up in the retrieved material include {', '.join(entities[:4])}.")
+        supporting_examples: List[str] = []
+        for passage in passages[1:3]:
+            cleaned = self._clean_excerpt(str(passage.get('excerpt') or ''))
+            if not cleaned or cleaned.lower() == lead_excerpt.lower():
+                continue
+            source_name = Path(str(passage.get("source_file") or "")).name or "local source"
+            supporting_examples.append(f"{source_name}: {cleaned}")
+        if supporting_examples:
+            sentences.append("Examples from the local sources: " + " | ".join(supporting_examples[:2]))
+        if facts:
+            embedded = int(facts.get("embedded", 0) or 0)
+            sources = int(facts.get("sources", 0) or 0)
+            total_chunks = int(facts.get("total_chunks", 0) or 0)
+            domain = str(facts.get("domain") or "").strip()
+            coverage = (
+                f"Local coverage currently includes {embedded} embedded source(s) "
+                f"across {total_chunks} searchable chunk(s)"
+            )
+            if domain:
+                coverage += f" in the {domain} domain"
+            coverage += "."
+            if sources and embedded < sources:
+                coverage += f" Coverage is partial right now: {embedded} of {sources} registered source(s) are embedded."
+            sentences.append(coverage)
+        return " ".join(sentences)
+
+    def _salient_entities(self, passages: List[Dict[str, Any]]) -> List[str]:
+        pattern = re.compile(r"\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}|[A-Z]{2,})\b")
+        blocked = {"According", "Examples", "The", "This"}
+        seen: List[str] = []
+        for passage in passages:
+            excerpt = self._clean_excerpt(str(passage.get("excerpt") or ""))
+            for match in pattern.findall(excerpt):
+                candidate = " ".join(match.split()).strip(" ,.;:!?")
+                if len(candidate) <= 2 or candidate in blocked:
+                    continue
+                if candidate not in seen:
+                    seen.append(candidate)
+                if len(seen) >= 6:
+                    return seen
+        return seen
+
+    def _clean_excerpt(self, text: str) -> str:
+        cleaned = " ".join(str(text or "").split())
+        cleaned = re.sub(r"[\uFFFD]", "", cleaned)
+        cleaned = re.sub(r"[_*#~`|]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:-")
+        if not cleaned:
+            return ""
+        if len(cleaned) > 220:
+            cleaned = cleaned[:217].rstrip(" ,.;:-") + "..."
+        return cleaned
 
     def _emit(self, record: Dict[str, Any]) -> None:
         if self.event_store is None:

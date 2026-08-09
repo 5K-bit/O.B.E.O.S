@@ -1016,34 +1016,88 @@ class TelegramGatewayService:
                     "last_seen_at": now,
                     "last_message_id": message_id,
                     "last_update_id": update_id,
-                    "metadata_json": "{}",
+                    "metadata_json": json.dumps({"mode_explicit": False}),
                 },
             )
             row = conn.execute(
                 text(
                     """
-                    SELECT thread_key, telegram_chat_id, telegram_user_id, session_id, mode, created_at, last_seen_at
+                    SELECT thread_key, telegram_chat_id, telegram_user_id, session_id, mode, created_at, last_seen_at, metadata_json
                     FROM telegram_thread_state
                     WHERE thread_key = :thread_key
                     """
                 ),
                 {"thread_key": thread_key},
             ).mappings().first()
-        return dict(row or {})
+            normalized = dict(row or {})
+            metadata = self._decode_thread_metadata(normalized.get("metadata_json"))
+            if not bool(metadata.get("mode_explicit")) and str(normalized.get("mode") or "") != DEFAULT_MODE:
+                normalized["mode"] = DEFAULT_MODE
+                normalized["metadata_json"] = json.dumps(metadata)
+                conn.execute(
+                    text(
+                        """
+                        UPDATE telegram_thread_state
+                        SET mode = :mode,
+                            metadata_json = :metadata_json,
+                            last_seen_at = :last_seen_at
+                        WHERE thread_key = :thread_key
+                        """
+                    ),
+                    {
+                        "mode": DEFAULT_MODE,
+                        "metadata_json": normalized["metadata_json"],
+                        "last_seen_at": now,
+                        "thread_key": thread_key,
+                    },
+                )
+        return normalized
 
     def _set_thread_mode(self, thread_key: str, mode: str) -> None:
         with self.event_store.engine.begin() as conn:
+            metadata_json = conn.execute(
+                text(
+                    """
+                    SELECT metadata_json
+                    FROM telegram_thread_state
+                    WHERE thread_key = :thread_key
+                    """
+                ),
+                {"thread_key": thread_key},
+            ).scalar_one_or_none()
+            metadata = self._decode_thread_metadata(metadata_json)
+            metadata["mode_explicit"] = True
             conn.execute(
                 text(
                     """
                     UPDATE telegram_thread_state
                     SET mode = :mode,
-                        last_seen_at = :last_seen_at
+                        last_seen_at = :last_seen_at,
+                        metadata_json = :metadata_json
                     WHERE thread_key = :thread_key
                     """
                 ),
-                {"mode": mode, "last_seen_at": time.time(), "thread_key": thread_key},
+                {
+                    "mode": mode,
+                    "last_seen_at": time.time(),
+                    "metadata_json": json.dumps(metadata),
+                    "thread_key": thread_key,
+                },
             )
+
+    @staticmethod
+    def _decode_thread_metadata(raw: Any) -> Dict[str, Any]:
+        if isinstance(raw, dict):
+            decoded = dict(raw)
+        else:
+            try:
+                decoded = json.loads(str(raw) or "{}")
+            except Exception:
+                decoded = {}
+        if not isinstance(decoded, dict):
+            decoded = {}
+        decoded.setdefault("mode_explicit", False)
+        return decoded
 
     def _get_inbox_row(self, update_id: int) -> Optional[Dict[str, Any]]:
         with self.event_store.engine.begin() as conn:

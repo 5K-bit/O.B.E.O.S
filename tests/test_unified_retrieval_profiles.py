@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+import blackfong_ecosystem.agents.jarvis_agent as jarvis_agent_module
 import blackfong_ecosystem.conversation_memory as conversation_memory_module
 import blackfong_ecosystem.ecosystem_knowledge as ecosystem_knowledge_module
 import blackfong_ecosystem.model_routing as model_routing_module
 import pytest
 
+from blackfong_ecosystem.agents.jarvis_agent import JARVISAgent
 from blackfong_ecosystem.chat_backends import ChatBackendError, ChatBackendResult, HeuristicChatBackend, OllamaChatBackend
 from blackfong_ecosystem.config import Paths
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
@@ -327,6 +329,8 @@ def test_standard_retrieval_prefers_collection_summary_for_spawn(tmp_path: Path,
     assert bundle["citations"][0]["kind"] == "collection_summary"
     assert bundle["citations"][0]["collection"] == "spawn"
     assert "Al Simmons" in bundle["knowledge_context"]
+    assert bundle["grounded_knowledge_answer"]["collection"] == "spawn"
+    assert "According to the local Spawn collection" in bundle["grounded_knowledge_answer"]["answer"]
 
 
 def test_standard_retrieval_rescues_hinted_collection_without_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -402,6 +406,81 @@ def test_standard_retrieval_rescues_hinted_collection_without_summary(tmp_path: 
     assert "Spawn comic universe and related series" in bundle["knowledge_context"]
     assert "Al Simmons" in bundle["knowledge_context"]
     assert len(bundle["citations"]) <= 2
+
+
+def test_jarvis_uses_grounded_collection_answer_before_ollama(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    temp_paths = Paths.from_root(tmp_path)
+    monkeypatch.setattr(conversation_memory_module, "paths", temp_paths)
+
+    vector_store = FakeVectorStore()
+    vector_store.upsert(
+        ids=["spawn-1", "spawn-2"],
+        texts=[
+            "Spawn centers on Al Simmons, who returns to Earth as Hellspawn after bargaining with Malebolgia.",
+            "Wanda, Terry, and the grim street-level atmosphere define the early Spawn issues.",
+        ],
+        metadatas=[
+            {
+                "collection": "spawn",
+                "source_id": "spawn-src-1",
+                "source_path": "spawn/issues_001_008.md",
+                "title": "Spawn 1-8",
+            },
+            {
+                "collection": "spawn",
+                "source_id": "spawn-src-2",
+                "source_path": "spawn/issues_009_017.md",
+                "title": "Spawn 9-17",
+            },
+        ],
+    )
+    memory = _build_memory(tmp_path, vector_store=vector_store)
+    collection_registry = CollectionRegistry(temp_paths.collection_registry_path)
+    collection_registry.upsert("spawn", domain="comics", description="Spawn comic universe")
+    collection_registry.save()
+    source_registry = SourceRegistry(temp_paths.source_registry_path)
+    source_registry.register(
+        source_type="markdown",
+        path=tmp_path / "spawn-001.md",
+        series="Spawn",
+        issue_range="1-8",
+        collection="spawn",
+        domain="comics",
+        compute_hash=False,
+    )
+    source_registry.save()
+    summary_dir = temp_paths.knowledge_intel_path / "spawn"
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    (summary_dir / "summary.json").write_text(
+        '{"collection":"spawn","domain":"comics","kind":"collection_summary","text":"Spawn follows Al Simmons after a bargain with Malebolgia returns him to Earth as Hellspawn."}',
+        encoding="utf-8",
+    )
+
+    bundle = memory.build_context(
+        session_id=memory.create_session_id(),
+        query="tell me about spawn",
+        agent_name="jarvis",
+        analysis_mode="standard",
+        retrieval_profile="standard",
+    )
+
+    assert bundle["grounded_knowledge_answer"] is not None
+
+    def _should_not_reach_ollama(*args, **kwargs):
+        raise AssertionError("collection-grounded answers should not invoke the routed Ollama backend")
+
+    agent = JARVISAgent(chat_backend=HeuristicChatBackend(), fallback_backend=HeuristicChatBackend())
+    monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", _should_not_reach_ollama)
+
+    result = agent.process(
+        "tell me about spawn",
+        context={"analysis_mode": "standard", "memory_context": bundle},
+    )
+
+    assert result["provider"] == "knowledge_librarian"
+    assert result["model"] == "deterministic-collection-grounded"
+    assert "According to the local Spawn collection" in result["response"]
+    assert "Al Simmons" in result["response"]
 
 
 def test_knowledge_routes_use_existing_memory_stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

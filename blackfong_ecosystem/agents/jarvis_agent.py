@@ -172,6 +172,20 @@ class JARVISAgent(Agent):
     
     def _generate_response(self, user_input: str, context: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         """Generate a response with the configured local backend and safe fallback."""
+        grounded = self._grounded_knowledge_response(context)
+        if grounded is not None:
+            prompt_metrics = dict(((context.get("memory_context") or {}).get("prompt_metrics") or {}))
+            metadata = dict(grounded["metadata"])
+            metadata["prompt_metrics"] = prompt_metrics
+            metadata.setdefault("prompt_message_count", 0)
+            metadata.setdefault("prompt_chars", 0)
+            metadata.setdefault("approx_prompt_tokens", 0)
+            return grounded["answer"], {
+                "provider": grounded["provider"],
+                "model": grounded["model"],
+                "metadata": metadata,
+                "backend_error": None,
+            }
         messages, prompt_metrics = self._build_chat_messages(user_input, context)
         backend_options = self._backend_options(context)
         response_mode = normalize_response_mode(context.get("analysis_mode") or context.get("response_mode"))
@@ -213,6 +227,29 @@ class JARVISAgent(Agent):
             "model": backend_result.model,
             "metadata": metadata,
             "backend_error": backend_error,
+        }
+
+    def _grounded_knowledge_response(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        memory_context = context.get("memory_context") or {}
+        grounded = memory_context.get("grounded_knowledge_answer")
+        if not isinstance(grounded, dict):
+            return None
+        answer_text = str(grounded.get("answer") or "").strip()
+        if not answer_text:
+            return None
+        return {
+            "answer": answer_text,
+            "provider": "knowledge_librarian",
+            "model": "deterministic-collection-grounded",
+            "metadata": {
+                "grounded_answer": True,
+                "collection": grounded.get("collection"),
+                "retrieval_profile": grounded.get("retrieval_profile"),
+                "compute_used": grounded.get("compute_used"),
+                "retrieved_count": grounded.get("retrieved_count"),
+                "timing_ms": grounded.get("timing_ms", {}),
+                "provenance": list(grounded.get("provenance") or []),
+            },
         }
 
     def _backend_options(self, context: Dict[str, Any]) -> Dict[str, Any]:

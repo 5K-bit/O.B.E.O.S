@@ -313,6 +313,63 @@ def test_telegram_gateway_default_mode_is_standard(tmp_path: Path) -> None:
     assert operator_chat.calls[0]["analysis_mode"] == "standard"
 
 
+def test_telegram_gateway_upgrades_legacy_non_explicit_fast_threads_to_standard(tmp_path: Path) -> None:
+    memory = build_memory(tmp_path)
+    client = FakeTelegramClient()
+    operator_chat = StubOperatorChat()
+    service = TelegramGatewayService(
+        settings=build_settings(allowlist=(("100", "200"),)),
+        memory_service=memory,
+        operator_chat=operator_chat,
+        http_client=client,
+        lock_path=tmp_path / "telegram.lock",
+    )
+    with memory.event_store.engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO telegram_thread_state (
+                    thread_key,
+                    telegram_chat_id,
+                    telegram_user_id,
+                    session_id,
+                    mode,
+                    created_at,
+                    last_seen_at,
+                    last_message_id,
+                    last_update_id,
+                    metadata_json
+                ) VALUES (
+                    'telegram:100:200',
+                    '100',
+                    '200',
+                    'legacy-session',
+                    'fast',
+                    :now,
+                    :now,
+                    1,
+                    1,
+                    '{}'
+                )
+                """
+            ),
+            {"now": time.time()},
+        )
+    service._dispatch_thread_queue = lambda thread_key, update_id: None  # type: ignore[method-assign]
+
+    accepted = service._accept_update(message_update(22, text="hello again"))
+    service._process_update_with_retries(22)
+
+    with memory.event_store.engine.begin() as conn:
+        stored_mode = conn.execute(
+            text("SELECT mode FROM telegram_thread_state WHERE thread_key = 'telegram:100:200'")
+        ).scalar_one()
+
+    assert accepted is True
+    assert operator_chat.calls[0]["analysis_mode"] == "standard"
+    assert stored_mode == "standard"
+
+
 def test_telegram_gateway_denies_non_private_or_unapproved_identities(tmp_path: Path) -> None:
     memory = build_memory(tmp_path)
     client = FakeTelegramClient()
