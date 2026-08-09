@@ -11,6 +11,9 @@ from .config import chat_settings
 from .ollama_models import filter_model_chain
 
 MAX_MODEL_CHAIN_WALL_S = 90.0
+FAST_CHAIN_TIMEOUT_CAP_S = 25.0
+STANDARD_CHAIN_TIMEOUT_CAP_S = 45.0
+DEEP_CHAIN_TIMEOUT_CAP_S = 90.0
 
 ResponseMode = str  # "fast" | "standard" | "deep"
 
@@ -277,11 +280,31 @@ class OllamaRoutingChatBackend(OllamaChatBackend):
             return [str(override)]
         return [self.model, *self.fallback_models]
 
+    @staticmethod
+    def _capped_timeout(options: Dict[str, Any], *, chain_length: int) -> float | None:
+        requested_timeout = options.get("timeout")
+        if requested_timeout is None:
+            return None
+        try:
+            timeout_value = float(requested_timeout)
+        except (TypeError, ValueError):
+            return None
+        if chain_length <= 1:
+            return timeout_value
+        mode = normalize_response_mode(options.get("mode"))
+        if mode == "fast":
+            return min(timeout_value, FAST_CHAIN_TIMEOUT_CAP_S)
+        if mode == "standard":
+            return min(timeout_value, STANDARD_CHAIN_TIMEOUT_CAP_S)
+        return min(timeout_value, DEEP_CHAIN_TIMEOUT_CAP_S)
+
     def generate(self, messages: Sequence[Dict[str, str]], **options: Any) -> Any:
         last_error: Exception | None = None
         attempt_models: List[str] = []
         chain_started = time.perf_counter()
-        for model_name in self._model_chain(options):
+        model_chain = self._model_chain(options)
+        effective_timeout = self._capped_timeout(options, chain_length=len(model_chain))
+        for model_name in model_chain:
             if model_name in attempt_models:
                 continue
             if (time.perf_counter() - chain_started) > MAX_MODEL_CHAIN_WALL_S:
@@ -289,10 +312,13 @@ class OllamaRoutingChatBackend(OllamaChatBackend):
             attempt_models.append(model_name)
             try:
                 merged = {**options, "model": model_name}
+                if effective_timeout is not None:
+                    merged["timeout"] = effective_timeout
                 result = super().generate(messages, **merged)
                 meta = dict(result.metadata or {})
                 meta["model_chain"] = attempt_models
                 meta["selected_model"] = model_name
+                meta["effective_timeout_s"] = effective_timeout
                 return type(result)(
                     text=result.text,
                     provider=result.provider,
@@ -318,7 +344,9 @@ class OllamaRoutingChatBackend(OllamaChatBackend):
         last_error: Exception | None = None
         attempt_models: List[str] = []
         chain_started = time.perf_counter()
-        for model_name in self._model_chain(options):
+        model_chain = self._model_chain(options)
+        effective_timeout = self._capped_timeout(options, chain_length=len(model_chain))
+        for model_name in model_chain:
             if model_name in attempt_models:
                 continue
             if (time.perf_counter() - chain_started) > MAX_MODEL_CHAIN_WALL_S:
@@ -326,11 +354,14 @@ class OllamaRoutingChatBackend(OllamaChatBackend):
             attempt_models.append(model_name)
             try:
                 merged = {**options, "model": model_name}
+                if effective_timeout is not None:
+                    merged["timeout"] = effective_timeout
                 result = super().generate_stream(messages, on_token=on_token, **merged)
                 meta = dict(result.metadata or {})
                 meta["model_chain"] = attempt_models
                 meta["selected_model"] = model_name
                 meta["streamed"] = True
+                meta["effective_timeout_s"] = effective_timeout
                 return type(result)(
                     text=result.text,
                     provider=result.provider,

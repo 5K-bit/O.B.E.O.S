@@ -2919,7 +2919,7 @@ class WebDashboard:
                 "force": force,
             }
         try:
-            result = self.memory_service.ensure_ecosystem_knowledge_collections(
+            result = self.memory_service.hydrate_knowledge_runtime(
                 max_files_per_root=max_files_per_root,
                 force=force,
             )

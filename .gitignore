@@ -36,6 +36,8 @@ id_ed25519*
 
 # O.B.E.O.S runtime state, generated artifacts, and heavy local VM material
 data/
+knowledge_seed/*
+!knowledge_seed/README.md
 tmp_*/
 backups/
 docs/release-shots/

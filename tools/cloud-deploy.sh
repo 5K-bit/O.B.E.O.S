@@ -61,6 +61,24 @@ wait_for_http "HUD /legion" "http://127.0.0.1:8080/legion" 45 0
 wait_for_http "HUD /api/knowledge/status" "http://127.0.0.1:8080/api/knowledge/status?ensure_ecosystem=false" 45 0
 wait_for_http "Event API /health" "http://127.0.0.1:8000/health" 45 1
 
+knowledge_status_json="$(curl -fsS http://127.0.0.1:8080/api/knowledge/status?ensure_ecosystem=false)"
+if python3 - "$knowledge_status_json" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+source_count = int(payload.get("registered_source_count") or 0)
+collection_count = int(payload.get("collection_count") or 0)
+raise SystemExit(0 if source_count == 0 or collection_count == 0 else 1)
+PY
+then
+  log "Hydrating knowledge runtime because the live authority is empty"
+  curl -fsS -X POST "http://127.0.0.1:8080/api/knowledge/sync" \
+    -H "Content-Type: application/json" \
+    -d '{"background": false, "max_files_per_root": 80}' >/tmp/obeos-knowledge-sync.json
+  cat /tmp/obeos-knowledge-sync.json
+fi
+
 if command -v tailscale >/dev/null 2>&1 && tailscale status >/dev/null 2>&1; then
   log "Ensuring private Tailscale Serve is active"
   sudo tailscale serve --bg --yes 8080 || true

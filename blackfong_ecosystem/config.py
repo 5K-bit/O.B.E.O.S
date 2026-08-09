@@ -25,6 +25,7 @@ class Paths:
     knowledge_intel_path: Path
     source_registry_path: Path
     collection_registry_path: Path
+    knowledge_bundle_root: Path
 
     @staticmethod
     def from_root(root: Path) -> "Paths":
@@ -40,6 +41,9 @@ class Paths:
         knowledge_intel_path = knowledge_root / "intel"
         source_registry_path = knowledge_root / "source_registry.json"
         collection_registry_path = knowledge_root / "collections.json"
+        knowledge_bundle_root = Path(
+            os.getenv("BLACKFONG_KNOWLEDGE_BUNDLE_PATH", str(root / "knowledge_seed"))
+        )
         return Paths(
             root=root,
             data_root=data_root,
@@ -54,6 +58,7 @@ class Paths:
             knowledge_intel_path=knowledge_intel_path,
             source_registry_path=source_registry_path,
             collection_registry_path=collection_registry_path,
+            knowledge_bundle_root=knowledge_bundle_root,
         )
 
 

@@ -11,6 +11,7 @@ x-obeos-common: &obeos-common
   restart: unless-stopped
   volumes:
     - obeos-cloud-data:/app/data
+    - ./knowledge_seed:/app/knowledge_seed:ro
 
 services:
   obeos-hud:

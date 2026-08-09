@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+import socket
 import threading
 import time
 from pathlib import Path
@@ -13,7 +16,7 @@ from blackfong_ecosystem.operator_summary import OperatorSummaryService
 from blackfong_ecosystem.policy_engine import PolicyEngine
 from blackfong_ecosystem.storage import EventStore, NullVectorStore
 from blackfong_ecosystem.system_awareness import SystemAwarenessService
-from blackfong_ecosystem.telegram_gateway import TelegramGatewayService, read_telegram_gateway_status
+from blackfong_ecosystem.telegram_gateway import TelegramGatewayLock, TelegramGatewayService, read_telegram_gateway_status
 
 
 class FakeTelegramResponse:
@@ -266,6 +269,28 @@ def test_telegram_gateway_replays_are_idempotent_and_mode_persists(tmp_path: Pat
     assert inbox_count == 1
     assert stored_mode == "deep"
     assert "Telegram mode set to deep" in client.sent_messages[-1]["text"]
+
+
+def test_telegram_gateway_lock_reclaims_stale_pid_reuse(tmp_path: Path) -> None:
+    lock_path = tmp_path / "telegram.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+                "created_at": time.time() - 60.0,
+                "process_started_at": 1.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    lock = TelegramGatewayLock(lock_path)
+    acquired, owner_label = lock.acquire()
+
+    assert acquired is True
+    assert f"pid={os.getpid()}@" in owner_label
+    lock.release()
 
 
 def test_telegram_gateway_default_mode_is_standard(tmp_path: Path) -> None:

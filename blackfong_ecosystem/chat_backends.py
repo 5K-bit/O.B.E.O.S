@@ -18,10 +18,10 @@ def is_chain_retry_error(exc: Exception) -> bool:
     if isinstance(exc, ChatBackendError):
         meta = getattr(exc, "metadata", {}) or {}
         error_type = str(meta.get("error_type") or "")
-        if error_type in {"http_404", "model_not_found", "empty_stream"}:
+        if error_type in {"http_404", "model_not_found", "empty_stream", "read_timeout"}:
             return True
         message = str(exc).lower()
-        if "404" in message or "not found" in message:
+        if "404" in message or "not found" in message or "timed out" in message:
             return True
     return False
 

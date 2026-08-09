@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 import blackfong_ecosystem.conversation_memory as conversation_memory_module
 import blackfong_ecosystem.ecosystem_knowledge as ecosystem_knowledge_module
+import blackfong_ecosystem.model_routing as model_routing_module
 import pytest
 
+from blackfong_ecosystem.chat_backends import ChatBackendError, ChatBackendResult, OllamaChatBackend
 from blackfong_ecosystem.config import Paths
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
 from blackfong_ecosystem.daise import DAISE
 from blackfong_ecosystem.ingestion.source_registry import SourceRegistry
 from blackfong_ecosystem.knowledge_intel.collection_registry import CollectionRegistry
 from blackfong_ecosystem.memory_chamber import MemoryChamberService
+from blackfong_ecosystem.model_routing import OllamaRoutingChatBackend
 from blackfong_ecosystem.operational_interfaces import WebDashboard
 from blackfong_ecosystem.service_registry import reset_ui_services_for_tests
 from blackfong_ecosystem.storage import EventStore
@@ -432,3 +436,131 @@ description = "EarthGlass fixture collection."
     assert any(record.resolved_collection() == "blackforge" for record in registry.all())
     assert collection_registry.domain_for("earthglass") == "obeos_ecosystem"
     assert vector_store.search("EarthGlass architecture", k=3)
+
+
+def test_knowledge_runtime_hydrates_from_bundle_before_ecosystem_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    temp_paths = Paths.from_root(tmp_path)
+    monkeypatch.setattr(conversation_memory_module, "paths", temp_paths)
+    monkeypatch.setattr(ecosystem_knowledge_module, "paths", temp_paths)
+
+    bundle_root = temp_paths.knowledge_bundle_root
+    (bundle_root / "chunks").mkdir(parents=True, exist_ok=True)
+    (bundle_root / "intel" / "spawn").mkdir(parents=True, exist_ok=True)
+    (bundle_root / "collections.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "collections": [
+                    {
+                        "collection": "spawn",
+                        "domain": "comics",
+                        "description": "Spawn comic universe",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bundle_root / "source_registry.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "sources": [
+                    {
+                        "source_id": "spawn-seed-1",
+                        "source_type": "markdown",
+                        "path": "portable://spawn/issues_001_008.md",
+                        "series": "Spawn",
+                        "issue_range": "1-8",
+                        "role": "canonical",
+                        "embedded": True,
+                        "processing_status": "embedded",
+                        "copyright_status": "private_reference_only",
+                        "collection": "spawn",
+                        "domain": "comics",
+                        "checksum": "seed-checksum",
+                        "chunk_count": 1,
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bundle_root / "chunks" / "spawn-seed-1.jsonl").write_text(
+        json.dumps(
+            {
+                "chunk_id": "knowledge:spawn-seed-1:0",
+                "source": "Spawn 1-8",
+                "text": "Spawn follows Al Simmons after a bargain with Malebolgia returns him to Earth as Hellspawn.",
+                "metadata": {
+                    "source_id": "spawn-seed-1",
+                    "collection": "spawn",
+                    "domain": "comics",
+                    "source_path": "portable://spawn/issues_001_008.md",
+                    "title": "Spawn 1-8",
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bundle_root / "intel" / "spawn" / "summary.json").write_text(
+        '{"collection":"spawn","kind":"collection_summary","text":"Spawn centers on Al Simmons."}',
+        encoding="utf-8",
+    )
+
+    vector_store = FakeVectorStore()
+    memory = _build_memory(tmp_path, vector_store=vector_store)
+
+    result = memory.hydrate_knowledge_runtime(workspace_root=tmp_path, max_files_per_root=10)
+    bundle = memory.build_context(
+        session_id=memory.create_session_id(),
+        query="tell me about spawn",
+        agent_name="daise",
+        analysis_mode="standard",
+        retrieval_profile="standard",
+    )
+
+    assert result["status"] == "ok"
+    assert result["bundle_import"]["status"] == "ok"
+    assert result["bundle_import"]["imported_sources"] == 1
+    assert memory.knowledge_status()["bundle_available"] is True
+    assert bundle["knowledge_hits"]
+    assert "Al Simmons" in bundle["knowledge_context"]
+
+
+def test_model_routing_falls_back_after_read_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[Dict[str, Any]] = []
+
+    def fake_generate(self, messages, **options):
+        calls.append({"model": options.get("model"), "timeout": options.get("timeout")})
+        if options.get("model") == "slow-model":
+            raise ChatBackendError(
+                "Ollama request timed out after 90s for model slow-model",
+                metadata={"error_type": "read_timeout"},
+            )
+        return ChatBackendResult(
+            text="fallback succeeded",
+            provider="ollama",
+            model=str(options.get("model")),
+            metadata={},
+        )
+
+    monkeypatch.setattr(OllamaChatBackend, "generate", fake_generate)
+
+    backend = OllamaRoutingChatBackend(
+        model="slow-model",
+        fallback_models=("fast-model",),
+        timeout=90.0,
+        keep_alive="30m",
+        num_ctx=4096,
+        num_predict=256,
+    )
+    result = backend.generate([{"role": "user", "content": "tell me about spawn"}], mode="standard", timeout=90.0)
+
+    assert [item["model"] for item in calls] == ["slow-model", "fast-model"]
+    assert all(item["timeout"] == model_routing_module.STANDARD_CHAIN_TIMEOUT_CAP_S for item in calls)
+    assert result.text == "fallback succeeded"
+    assert result.metadata["selected_model"] == "fast-model"

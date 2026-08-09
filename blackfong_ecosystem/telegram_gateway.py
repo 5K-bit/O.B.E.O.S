@@ -162,11 +162,13 @@ class TelegramGatewayLock:
     """Simple singleton lock backed by a local file in the canonical data directory."""
 
     def __init__(self, path: Path) -> None:
+        process_started_at = self._pid_process_started_at(os.getpid())
         self.path = path
         self.owner = {
             "pid": os.getpid(),
             "hostname": socket.gethostname() or platform.node() or "unknown-host",
             "created_at": time.time(),
+            "process_started_at": process_started_at,
         }
         self._held = False
 
@@ -175,7 +177,7 @@ class TelegramGatewayLock:
         if self.path.exists():
             payload = self._read_payload()
             pid = int(payload.get("pid") or 0)
-            if pid and self._pid_alive(pid):
+            if pid and self._pid_matches_payload(pid, payload):
                 return False, self._owner_label(payload)
             with contextlib.suppress(Exception):
                 self.path.unlink()
@@ -198,12 +200,25 @@ class TelegramGatewayLock:
         self._held = False
 
     @staticmethod
-    def _pid_alive(pid: int) -> bool:
+    def _pid_process_started_at(pid: int) -> float | None:
         with contextlib.suppress(Exception):
             import psutil
 
-            return bool(psutil.pid_exists(pid))
-        return True
+            return float(psutil.Process(pid).create_time())
+        return None
+
+    @classmethod
+    def _pid_matches_payload(cls, pid: int, payload: Dict[str, Any]) -> bool:
+        started_at = cls._pid_process_started_at(pid)
+        if started_at is None:
+            return False
+        expected_started_at = payload.get("process_started_at")
+        if expected_started_at is None:
+            return True
+        try:
+            return abs(float(expected_started_at) - float(started_at)) < 1.0
+        except (TypeError, ValueError):
+            return True
 
     def _read_payload(self) -> Dict[str, Any]:
         try:

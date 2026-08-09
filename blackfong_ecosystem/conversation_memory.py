@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -543,6 +544,8 @@ class ConversationMemoryService:
             "events_authority": str(paths.events_db),
             "source_registry": str(paths.source_registry_path),
             "collection_registry": str(paths.collection_registry_path),
+            "bundle_root": str(paths.knowledge_bundle_root),
+            "bundle_available": self._knowledge_bundle_available(),
             "vector_backend": self.vector_store.__class__.__name__,
             "vector_available": not isinstance(self.vector_store, NullVectorStore),
             "registered_source_count": source_count,
@@ -558,6 +561,220 @@ class ConversationMemoryService:
                 }
                 for item in collections
             ],
+        }
+
+    def hydrate_knowledge_runtime(
+        self,
+        *,
+        workspace_root: Optional[Path] = None,
+        max_files_per_root: int = 80,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        source_registry, collection_registry = self._knowledge_registries()
+        source_count = len(source_registry.all()) if source_registry is not None else 0
+        collection_count = len(collection_registry.all()) if collection_registry is not None else 0
+        should_import_bundle = force or source_count == 0 or collection_count == 0
+        bundle_report = {
+            "status": "skipped",
+            "bundle_root": str(paths.knowledge_bundle_root),
+            "reason": "runtime_already_seeded",
+            "bundle_available": self._knowledge_bundle_available(),
+        }
+        if should_import_bundle and self._knowledge_bundle_available():
+            bundle_report = self.import_knowledge_bundle(paths.knowledge_bundle_root, force=force)
+
+        ecosystem_sync = self.ensure_ecosystem_knowledge_collections(
+            workspace_root=workspace_root,
+            max_files_per_root=max_files_per_root,
+            force=force,
+        )
+        final_status = "ok"
+        if bundle_report.get("status") == "failed" or ecosystem_sync.get("status") != "ok":
+            final_status = "failed"
+        return {
+            "status": final_status,
+            "bundle_import": bundle_report,
+            "ecosystem_sync": ecosystem_sync,
+        }
+
+    def import_knowledge_bundle(self, bundle_root: Path, *, force: bool = False) -> Dict[str, Any]:
+        from .ingestion.source_registry import SourceRecord, SourceRegistry
+        from .knowledge_intel.collection_registry import CollectionMetadata, CollectionRegistry
+
+        bundle = Path(bundle_root)
+        bundle_status = self._knowledge_bundle_status(bundle)
+        if not bundle_status["bundle_available"]:
+            return {
+                "status": "skipped",
+                "bundle_root": str(bundle),
+                "reason": "bundle_missing",
+                **bundle_status,
+            }
+
+        source_registry = self._source_registry or SourceRegistry(paths.source_registry_path)
+        collection_registry = self._collection_registry or CollectionRegistry(paths.collection_registry_path)
+        self._source_registry = source_registry
+        self._collection_registry = collection_registry
+
+        imported_collections = 0
+        imported_sources = 0
+        imported_chunks = 0
+        copied_cleaned = 0
+        copied_intel_files = 0
+
+        bundle_collection_registry = bundle / "collections.json"
+        if bundle_collection_registry.exists():
+            collection_payload = json.loads(bundle_collection_registry.read_text(encoding="utf-8"))
+            collection_items = collection_payload.get("collections", []) if isinstance(collection_payload, dict) else collection_payload
+            for item in collection_items:
+                meta = CollectionMetadata.from_dict(item)
+                collection_registry.upsert(
+                    meta.collection,
+                    domain=meta.domain,
+                    description=meta.description,
+                    subdomain=meta.subdomain,
+                    category=meta.category,
+                )
+                imported_collections += 1
+
+        bundle_source_registry = bundle / "source_registry.json"
+        if bundle_source_registry.exists():
+            source_payload = json.loads(bundle_source_registry.read_text(encoding="utf-8"))
+            source_items = source_payload.get("sources", []) if isinstance(source_payload, dict) else source_payload
+            for item in source_items:
+                record = SourceRecord.from_dict(item)
+                if not force:
+                    existing = source_registry.get(record.source_id)
+                    if existing is not None and existing.checksum == record.checksum and existing.chunk_count >= record.chunk_count:
+                        continue
+                source_registry.upsert(record)
+                imported_sources += 1
+
+        bundle_chunks_root = bundle / "chunks"
+        paths.knowledge_chunks_path.mkdir(parents=True, exist_ok=True)
+        if bundle_chunks_root.exists():
+            for chunk_file in sorted(bundle_chunks_root.glob("*.jsonl")):
+                destination = paths.knowledge_chunks_path / chunk_file.name
+                if force or not destination.exists():
+                    shutil.copy2(chunk_file, destination)
+                chunk_records = self._read_chunk_records(chunk_file)
+                if chunk_records and not isinstance(self.vector_store, NullVectorStore):
+                    self.vector_store.upsert(
+                        ids=[item["chunk_id"] for item in chunk_records],
+                        texts=[item["text"] for item in chunk_records],
+                        metadatas=[item["metadata"] for item in chunk_records],
+                    )
+                imported_chunks += len(chunk_records)
+
+        bundle_cleaned_root = bundle / "cleaned"
+        paths.knowledge_cleaned_path.mkdir(parents=True, exist_ok=True)
+        if bundle_cleaned_root.exists():
+            for cleaned_file in sorted(bundle_cleaned_root.glob("*")):
+                if not cleaned_file.is_file():
+                    continue
+                destination = paths.knowledge_cleaned_path / cleaned_file.name
+                if force or not destination.exists():
+                    shutil.copy2(cleaned_file, destination)
+                    copied_cleaned += 1
+
+        bundle_intel_root = bundle / "intel"
+        if bundle_intel_root.exists():
+            paths.knowledge_intel_path.mkdir(parents=True, exist_ok=True)
+            for item in sorted(bundle_intel_root.rglob("*")):
+                if not item.is_file():
+                    continue
+                relative = item.relative_to(bundle_intel_root)
+                destination = paths.knowledge_intel_path / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if force or not destination.exists():
+                    shutil.copy2(item, destination)
+                    copied_intel_files += 1
+
+        source_registry.save()
+        collection_registry.save()
+        self.persist_workflow_event(
+            source="daise",
+            event_type="knowledge_embedded",
+            payload={
+                "bundle_root": str(bundle),
+                "imported_collections": imported_collections,
+                "imported_sources": imported_sources,
+                "imported_chunks": imported_chunks,
+                "copied_cleaned": copied_cleaned,
+                "copied_intel_files": copied_intel_files,
+                "force": force,
+            },
+            tags=["knowledge", "bundle_import"],
+        )
+        return {
+            "status": "ok",
+            "bundle_root": str(bundle),
+            "bundle_available": True,
+            "imported_collections": imported_collections,
+            "imported_sources": imported_sources,
+            "imported_chunks": imported_chunks,
+            "copied_cleaned": copied_cleaned,
+            "copied_intel_files": copied_intel_files,
+        }
+
+    def export_knowledge_bundle(
+        self,
+        bundle_root: Path,
+        *,
+        collections: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        from .ingestion.source_registry import SourceRegistry, slugify_collection
+        from .knowledge_intel.collection_registry import CollectionRegistry
+
+        bundle = Path(bundle_root)
+        if bundle.exists():
+            shutil.rmtree(bundle)
+        (bundle / "chunks").mkdir(parents=True, exist_ok=True)
+        (bundle / "cleaned").mkdir(parents=True, exist_ok=True)
+        (bundle / "intel").mkdir(parents=True, exist_ok=True)
+
+        source_registry = self._source_registry or SourceRegistry(paths.source_registry_path)
+        collection_registry = self._collection_registry or CollectionRegistry(paths.collection_registry_path)
+        self._source_registry = source_registry
+        self._collection_registry = collection_registry
+
+        allowed_collections = {slugify_collection(item) for item in (collections or []) if item}
+        source_records = []
+        referenced_collections = set()
+        for record in source_registry.all():
+            if allowed_collections and record.resolved_collection() not in allowed_collections:
+                continue
+            source_records.append(record.to_dict())
+            referenced_collections.add(record.resolved_collection())
+            chunk_path = paths.knowledge_chunks_path / f"{record.source_id}.jsonl"
+            if chunk_path.exists():
+                shutil.copy2(chunk_path, bundle / "chunks" / chunk_path.name)
+            cleaned_path = paths.knowledge_cleaned_path / f"{record.source_id}.txt"
+            if cleaned_path.exists():
+                shutil.copy2(cleaned_path, bundle / "cleaned" / cleaned_path.name)
+
+        collection_items = []
+        for meta in collection_registry.all():
+            if referenced_collections and meta.collection not in referenced_collections:
+                continue
+            collection_items.append(meta.to_dict())
+            intel_dir = paths.knowledge_intel_path / meta.collection
+            if intel_dir.exists():
+                shutil.copytree(intel_dir, bundle / "intel" / meta.collection, dirs_exist_ok=True)
+
+        (bundle / "source_registry.json").write_text(
+            json.dumps({"version": 1, "sources": source_records}, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        (bundle / "collections.json").write_text(
+            json.dumps({"version": 1, "collections": collection_items}, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "status": "ok",
+            "bundle_root": str(bundle),
+            "exported_sources": len(source_records),
+            "exported_collections": len(collection_items),
         }
 
     def knowledge_search(
@@ -1405,6 +1622,44 @@ class ConversationMemoryService:
             except Exception:
                 return self._source_registry, self._collection_registry
         return self._source_registry, self._collection_registry
+
+    def _knowledge_bundle_status(self, bundle_root: Path) -> Dict[str, Any]:
+        bundle = Path(bundle_root)
+        chunks_root = bundle / "chunks"
+        has_chunks = chunks_root.exists() and any(chunks_root.glob("*.jsonl"))
+        bundle_available = bundle.exists() and bundle.is_dir() and (
+            (bundle / "collections.json").exists()
+            or (bundle / "source_registry.json").exists()
+            or has_chunks
+        )
+        return {
+            "bundle_root": str(bundle),
+            "bundle_available": bool(bundle_available),
+            "has_collection_registry": (bundle / "collections.json").exists(),
+            "has_source_registry": (bundle / "source_registry.json").exists(),
+            "has_chunks": has_chunks,
+        }
+
+    def _knowledge_bundle_available(self) -> bool:
+        return bool(self._knowledge_bundle_status(paths.knowledge_bundle_root)["bundle_available"])
+
+    def _read_chunk_records(self, chunk_file: Path) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        for raw_line in chunk_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            chunk_id = str(payload.get("chunk_id") or "").strip()
+            text = str(payload.get("text") or "").strip()
+            metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+            if not chunk_id or not text:
+                continue
+            records.append({"chunk_id": chunk_id, "text": text, "metadata": metadata})
+        return records
 
     def _build_retrieval_contract(
         self,

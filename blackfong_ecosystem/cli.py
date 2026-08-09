@@ -11,7 +11,7 @@ from .config import hud_settings, paths
 from .daise import DAISE
 from .events import EVENT_SOURCES, Event
 from .mobray import Mobray
-from .storage import EventStore, ChromaVectorStore
+from .storage import EventStore, ChromaVectorStore, NullVectorStore
 from .capsules import CapsuleImporter
 from .knowledge import ingest_file, ingest_directory
 
@@ -1375,6 +1375,18 @@ def _resolve_ingest_domain(collection_slug: str, domain_opt: Optional[str]) -> s
     return _collection_registry().domain_for(collection_slug)
 
 
+def _memory_service_with_best_vector_store():
+    from .conversation_memory import ConversationMemoryService
+
+    event_store = EventStore()
+    event_store.init_db()
+    try:
+        vector_store = ChromaVectorStore(paths.vector_db_path)
+    except Exception:
+        vector_store = NullVectorStore()
+    return ConversationMemoryService(event_store=event_store, vector_store=vector_store)
+
+
 @knowledge_group.command("ingest-comics")
 @click.option("--root", "root", type=click.Path(path_type=Path, exists=True, file_okay=False), required=True, help="Directory containing source files (txt/epub/pdf/jp2).")
 @click.option("--series", type=str, default="Spawn", show_default=True, help="Series name applied to discovered sources.")
@@ -1498,6 +1510,44 @@ def knowledge_register(path: Path, series: str, issue_range: str, source_type: s
         f"Registered {record.source_id} ({record.source_type}) "
         f"status={record.processing_status}"
     )
+
+
+@knowledge_group.command("export-bundle")
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path, file_okay=False),
+    default=paths.knowledge_bundle_root,
+    show_default=True,
+    help="Directory to write the portable knowledge bundle.",
+)
+@click.option(
+    "--collection",
+    "collections",
+    multiple=True,
+    help="Optional collection slug filter. Repeat to export multiple collections.",
+)
+def knowledge_export_bundle(output: Path, collections: tuple[str, ...]) -> None:
+    """Export a portable knowledge bundle from the canonical runtime state."""
+    memory = _memory_service_with_best_vector_store()
+    result = memory.export_knowledge_bundle(output, collections=list(collections) or None)
+    click.echo(json.dumps(result, indent=2))
+
+
+@knowledge_group.command("import-bundle")
+@click.option(
+    "--bundle",
+    "bundle_root",
+    type=click.Path(path_type=Path, exists=True, file_okay=False),
+    default=paths.knowledge_bundle_root,
+    show_default=True,
+    help="Directory containing a portable knowledge bundle.",
+)
+@click.option("--force", is_flag=True, default=False, help="Overwrite chunk/intel files and refresh the local vector state.")
+def knowledge_import_bundle(bundle_root: Path, force: bool) -> None:
+    """Import a portable knowledge bundle into the canonical runtime state."""
+    memory = _memory_service_with_best_vector_store()
+    result = memory.import_knowledge_bundle(bundle_root, force=force)
+    click.echo(json.dumps(result, indent=2))
 
 
 @knowledge_group.command("status")
