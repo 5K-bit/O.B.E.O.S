@@ -237,6 +237,85 @@ def test_memory_chamber_reasoning_context_and_daise_share_profiles(tmp_path: Pat
     chamber.shutdown()
 
 
+def test_daise_grounded_truth_answers_date_and_identity(tmp_path: Path) -> None:
+    memory = _build_memory(tmp_path, vector_store=FakeVectorStore())
+    daise = DAISE.create_default(
+        event_store=memory.event_store,
+        vector_store=memory.vector_store,
+        memory_service=memory,
+    )
+
+    date_result = daise.process_request(
+        user_input="what's today's date?",
+        agents={"jarvis": FakeJarvisAgent()},
+        context={"request_id": "grounded-date-1", "analysis_mode": "standard"},
+    )
+    identity_result = daise.process_request(
+        user_input="what does D.A.I.S.E stand for?",
+        agents={"jarvis": FakeJarvisAgent()},
+        context={"request_id": "grounded-identity-1", "analysis_mode": "standard"},
+    )
+
+    assert "Sunday, August 9, 2026" in date_result["response"]
+    assert date_result["provider"] == "local_runtime_truth"
+    assert "Direct Artificial Intelligence System Environment" in identity_result["response"]
+    assert "Jarvis alias" not in identity_result["response"]
+
+
+def test_standard_retrieval_prefers_collection_summary_for_spawn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    temp_paths = Paths.from_root(tmp_path)
+    monkeypatch.setattr(conversation_memory_module, "paths", temp_paths)
+
+    vector_store = FakeVectorStore()
+    vector_store.upsert(
+        ids=["spawn-1"],
+        texts=["Spawn follows Al Simmons after a deal with Malebolgia returns him to Earth as Hellspawn."],
+        metadatas=[
+            {
+                "collection": "spawn",
+                "source_id": "spawn-src",
+                "source_path": "spawn/issues_001_008.md",
+                "title": "Spawn 1-8",
+            }
+        ],
+    )
+    memory = _build_memory(tmp_path, vector_store=vector_store)
+    collection_registry = CollectionRegistry(temp_paths.collection_registry_path)
+    collection_registry.upsert("spawn", domain="comics", description="Spawn comic universe")
+    collection_registry.save()
+    source_registry = SourceRegistry(temp_paths.source_registry_path)
+    source_registry.register(
+        source_type="markdown",
+        path=tmp_path / "spawn-001.md",
+        series="Spawn",
+        issue_range="1-8",
+        collection="spawn",
+        domain="comics",
+        compute_hash=False,
+    )
+    source_registry.save()
+    summary_dir = temp_paths.knowledge_intel_path / "spawn"
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    (summary_dir / "summary.json").write_text(
+        '{"collection":"spawn","domain":"comics","kind":"collection_summary","text":"Spawn centers on Al Simmons, a murdered operative who returns as Hellspawn after bargaining with Malebolgia."}',
+        encoding="utf-8",
+    )
+
+    bundle = memory.build_context(
+        session_id=memory.create_session_id(),
+        query="tell me about spawn",
+        agent_name="daise",
+        analysis_mode="standard",
+        retrieval_profile="standard",
+    )
+
+    assert bundle["retrieval_profile"] == "standard"
+    assert bundle["knowledge_hits"]
+    assert bundle["citations"][0]["kind"] == "collection_summary"
+    assert bundle["citations"][0]["collection"] == "spawn"
+    assert "Al Simmons" in bundle["knowledge_context"]
+
+
 def test_knowledge_routes_use_existing_memory_stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     reset_ui_services_for_tests()
     temp_paths = Paths.from_root(tmp_path)

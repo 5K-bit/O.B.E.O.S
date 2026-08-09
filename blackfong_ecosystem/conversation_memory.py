@@ -1039,20 +1039,27 @@ class ConversationMemoryService:
 
         rerank_started = time.perf_counter()
         query_tokens = self._tokenize(query)
+        hinted_collections = self._detect_collection_hints(query)
         annotated_hits: List[Dict[str, Any]] = []
+        for collection in hinted_collections:
+            summary_hit = self._collection_summary_hit(collection, query_tokens=query_tokens, retrieval_profile=retrieval_profile)
+            if summary_hit is not None:
+                annotated_hits.append(summary_hit)
         for result in results:
             enriched = self._annotate_semantic_hit(
                 result,
                 query_tokens=query_tokens,
                 retrieval_profile=retrieval_profile,
+                hinted_collections=hinted_collections,
             )
             if enriched is not None:
                 annotated_hits.append(enriched)
-        annotated_hits.sort(
+        deduped_hits = self._dedupe_semantic_hits(annotated_hits)
+        deduped_hits.sort(
             key=lambda item: (float(item["score"]), float(item["relevance"])),
             reverse=True,
         )
-        selected_hits = annotated_hits[: int(settings.get("citation_limit") or vector_k)]
+        selected_hits = deduped_hits[: int(settings.get("citation_limit") or vector_k)]
         context = self._render_retrieval_context(
             selected_hits,
             max_chars=int(settings.get("context_chars") or 0),
@@ -1076,6 +1083,7 @@ class ConversationMemoryService:
         *,
         query_tokens: List[str],
         retrieval_profile: str,
+        hinted_collections: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         metadata = dict(result.get("metadata") or {})
         hit_id = str(result.get("id") or "")
@@ -1108,6 +1116,9 @@ class ConversationMemoryService:
 
         score = float(result.get("relevance") or 0.0)
         score += self._token_overlap_score(query_tokens, f"{title} {text}".lower(), weight=0.04)
+        hinted = set(hinted_collections or [])
+        if collection and collection in hinted:
+            score += 0.18
         if retrieval_profile == "architecture":
             if not self._is_architecture_hit(title=title, text=text, metadata=metadata, collection=collection):
                 return None
@@ -1144,6 +1155,132 @@ class ConversationMemoryService:
             "metadata": metadata,
             "citation": citation,
         }
+
+    def _detect_collection_hints(self, query: str) -> List[str]:
+        normalized_query = re.sub(r"[^a-z0-9]+", " ", str(query or "").lower()).strip()
+        if not normalized_query:
+            return []
+        query_haystack = f" {normalized_query} "
+        source_registry, collection_registry = self._knowledge_registries()
+        hints: List[str] = []
+
+        def register_hint(collection: str, *aliases: str) -> None:
+            normalized_collection = re.sub(r"[^a-z0-9]+", "_", str(collection or "").lower()).strip("_")
+            if not normalized_collection:
+                return
+            for alias in aliases:
+                alias_text = re.sub(r"[^a-z0-9]+", " ", str(alias or "").lower()).strip()
+                if not alias_text:
+                    continue
+                if f" {alias_text} " in query_haystack and normalized_collection not in hints:
+                    hints.append(normalized_collection)
+                    return
+
+        if collection_registry is not None:
+            for meta in collection_registry.all():
+                register_hint(
+                    meta.collection,
+                    meta.collection,
+                    meta.collection.replace("_", " "),
+                    meta.description,
+                    meta.domain,
+                    meta.subdomain,
+                    meta.category,
+                )
+        if source_registry is not None:
+            for record in source_registry.all():
+                register_hint(
+                    record.collection or record.resolved_collection(),
+                    record.collection,
+                    record.series,
+                    Path(record.path).stem,
+                )
+        return hints[:4]
+
+    def _collection_summary_hit(
+        self,
+        collection: str,
+        *,
+        query_tokens: List[str],
+        retrieval_profile: str,
+    ) -> Optional[Dict[str, Any]]:
+        candidates = [
+            paths.knowledge_intel_path / collection / "summary.json",
+            paths.knowledge_intel_path / collection / "collection_summary.json",
+            paths.knowledge_intel_path / collection / "summaries" / "collection_summary.json",
+        ]
+        summary_path = next((path for path in candidates if path.exists()), None)
+        if summary_path is None:
+            return None
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        text = str(payload.get("text") or payload.get("extractive_text") or payload.get("summary") or "").strip()
+        if not text:
+            return None
+        collection_slug = str(payload.get("collection") or collection or "").strip().lower().replace("-", "_")
+        title = self._collection_display_name(collection_slug)
+        score = 0.98 + self._token_overlap_score(query_tokens, f"{title} {text}".lower(), weight=0.03)
+        if retrieval_profile == "architecture" and not self._is_architecture_hit(
+            title=title,
+            text=text,
+            metadata={"collection": collection_slug, "source_path": str(summary_path)},
+            collection=collection_slug,
+        ):
+            return None
+        citation = {
+            "vector_id": f"collection-summary:{collection_slug}",
+            "kind": "collection_summary",
+            "title": title,
+            "collection": collection_slug,
+            "source_path": str(summary_path),
+            "source_id": None,
+            "section": payload.get("kind") or "collection_summary",
+            "relevance": 0.98,
+            "distance": 0.02,
+            "text_preview": text[:280],
+        }
+        return {
+            "id": f"collection-summary:{collection_slug}",
+            "kind": "collection_summary",
+            "title": title,
+            "collection": collection_slug,
+            "text": text,
+            "relevance": 0.98,
+            "distance": 0.02,
+            "score": round(score, 6),
+            "metadata": {
+                "collection": collection_slug,
+                "source_path": str(summary_path),
+                "summary_kind": payload.get("kind") or "collection_summary",
+                "domain": payload.get("domain") or "",
+            },
+            "citation": citation,
+        }
+
+    def _dedupe_semantic_hits(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        ordered: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for hit in hits:
+            citation = hit.get("citation") or {}
+            key = (
+                str(hit.get("id") or citation.get("vector_id") or ""),
+                str(citation.get("source_path") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append(hit)
+        return ordered
+
+    def _collection_display_name(self, collection: str) -> str:
+        _source_registry, collection_registry = self._knowledge_registries()
+        if collection_registry is not None:
+            meta = collection_registry.get(collection)
+            if meta is not None and meta.collection:
+                return meta.collection.replace("_", " ").title()
+        return str(collection or "collection").replace("_", " ").title()
 
     def _render_retrieval_context(self, hits: List[Dict[str, Any]], *, max_chars: int) -> str:
         if not hits or max_chars <= 0:

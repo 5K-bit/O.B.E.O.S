@@ -24,12 +24,14 @@ class SystemAwarenessService:
         *,
         memory_service: Any = None,
         tinyprogrammer: Any = None,
+        gps_service: Any = None,
         policy_engine: Optional[PolicyEngine] = None,
         startup_coordinator: Any = None,
         emit_min_interval: float = 30.0,
     ) -> None:
         self.memory_service = memory_service
         self.tinyprogrammer = tinyprogrammer
+        self.gps_service = gps_service
         self.policy_engine = policy_engine or PolicyEngine()
         self.startup_coordinator = startup_coordinator
         self.perception_gate = PerceptionGate()
@@ -569,6 +571,7 @@ class SystemAwarenessService:
             "permission_state": "not_enabled",
             "provenance": self._provenance(source="local_runtime_state", collection_method="screen_snapshot_capability_probe"),
         }
+        gps_snapshot = self._observe_gps_sensor()
 
         sensors = {
             "schema_version": SCHEMA_VERSION,
@@ -612,6 +615,7 @@ class SystemAwarenessService:
                 "can_read_screen": False,
                 "can_read_screen_state": "not_enabled",
             },
+            "gps": gps_snapshot,
             "capture_policy": {
                 "continuous_capture_allowed": False,
                 "active_camera_capture": False,
@@ -651,6 +655,39 @@ class SystemAwarenessService:
             "provenance": self._provenance(source="local_hardware_probe", collection_method="safe_capability_probe"),
         }
         return sensors
+
+    def _observe_gps_sensor(self) -> Dict[str, Any]:
+        if self.gps_service is None:
+            return {
+                "available": False,
+                "provider_type": "not_configured",
+                "recording": False,
+                "latest_fix": None,
+                "accuracy_m": None,
+                "last_update_at": None,
+                "offline_state": "offline",
+                "active_route": {"recording": False, "point_count": 0, "distance_km": 0.0},
+                "trail": [],
+                "provenance": self._provenance(source="awareness_runtime", collection_method="gps_not_configured"),
+            }
+        try:
+            snapshot = dict(self.gps_service.snapshot() or {})
+        except Exception as exc:
+            return {
+                "available": False,
+                "provider_type": "unavailable",
+                "recording": False,
+                "latest_fix": None,
+                "accuracy_m": None,
+                "last_update_at": None,
+                "offline_state": "degraded",
+                "active_route": {"recording": False, "point_count": 0, "distance_km": 0.0},
+                "trail": [],
+                "error": str(exc),
+                "provenance": self._provenance(source="awareness_runtime", collection_method="gps_probe_failed"),
+            }
+        snapshot.setdefault("provenance", self._provenance(source="gps_service", collection_method="shared_sensor_adapter"))
+        return snapshot
 
     def observe_schema_compatibility(self) -> Dict[str, Any]:
         checks = {

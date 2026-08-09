@@ -129,6 +129,8 @@ EVENT_TYPES = {
     "sensor_capability_snapshot",
     "audio_device_observation",
     "camera_device_observation",
+    "gps_fix_observation",
+    "gps_route_recording_state",
     "queue_pressure_observation",
     "consistency_conflict",
     "request_outcome",

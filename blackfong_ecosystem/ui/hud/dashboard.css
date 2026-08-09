@@ -336,6 +336,83 @@ textarea {
   flex: 1;
 }
 
+.maps-workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.maps-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.maps-grid {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.gps-route-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid rgba(123, 208, 218, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top, rgba(123, 208, 218, 0.08), transparent 32%),
+    linear-gradient(180deg, rgba(8, 11, 15, 0.98), rgba(10, 13, 18, 0.98));
+}
+
+#gpsRouteView {
+  width: 100%;
+  min-height: 260px;
+  height: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.gps-map-bg {
+  fill: rgba(7, 10, 14, 0.98);
+  stroke: rgba(123, 208, 218, 0.18);
+  stroke-width: 1;
+}
+
+.gps-map-title {
+  fill: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.gps-map-subtitle,
+.gps-map-current,
+.gps-map-empty {
+  fill: var(--text-dim);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.gps-route-line {
+  fill: none;
+  stroke: rgba(123, 208, 218, 0.92);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.gps-route-point {
+  fill: rgba(228, 194, 118, 0.7);
+}
+
+.gps-route-point.latest {
+  fill: rgba(228, 194, 118, 1);
+  stroke: rgba(255, 255, 255, 0.45);
+  stroke-width: 1.4;
+}
+
 .panel-resizer {
   position: relative;
   flex: 0 0 10px;

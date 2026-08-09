@@ -59,6 +59,7 @@
     integrations: null,
     redamonStatus: null,
     verification: null,
+    gpsStatus: null,
     layout: {
       leftWidth: 300,
       rightWidth: 360,
@@ -110,6 +111,7 @@
     sessionMeta: document.getElementById("sessionMeta"),
     operatorMode: document.getElementById("operatorMode"),
     thoughtglassMode: document.getElementById("thoughtglassMode"),
+    workspaceMaps: document.getElementById("workspaceMaps"),
     workspaceTiny: document.getElementById("workspaceTiny"),
     workspaceFiles: document.getElementById("workspaceFiles"),
     workspaceSecurity: document.getElementById("workspaceSecurity"),
@@ -162,6 +164,8 @@
     verificationPanel: document.getElementById("verificationPanel"),
     redamonPanel: document.getElementById("redamonPanel"),
     integrationPanel: document.getElementById("integrationPanel"),
+    gpsStatusPanel: document.getElementById("gpsStatusPanel"),
+    gpsRouteView: document.getElementById("gpsRouteView"),
     redamonObjectiveInput: document.getElementById("redamonObjectiveInput"),
     redamonTargetInput: document.getElementById("redamonTargetInput"),
     refreshIntegrationsButton: document.getElementById("refreshIntegrationsButton"),
@@ -179,6 +183,7 @@
     linkedSessionChip: document.getElementById("linkedSessionChip"),
     keyboardShortcutsPanel: document.getElementById("keyboardShortcutsPanel"),
     redamonButtons: Array.from(document.querySelectorAll("[data-redamon-action]")),
+    gpsButtons: Array.from(document.querySelectorAll("[data-gps-action]")),
     columnResizers: Array.from(document.querySelectorAll("[data-column-resizer]")),
     popoutButtons: Array.from(document.querySelectorAll("[data-open-workspace-window]")),
   };
@@ -737,6 +742,7 @@
     const tabMap = {
       chat: el.operatorMode,
       thoughtglass: el.thoughtglassMode,
+      maps: el.workspaceMaps,
       tiny: el.workspaceTiny,
       files: el.workspaceFiles,
       security: el.workspaceSecurity,
@@ -751,6 +757,10 @@
       thoughtglass: {
         title: "Thoughtglass",
         subhead: "System visibility gets the whole center when cognition is the task.",
+      },
+      maps: {
+        title: "GPS + Maps",
+        subhead: "Shared route awareness stays bounded, offline-aware, and operator-readable.",
       },
       tiny: {
         title: "TinyProgrammer",
@@ -798,6 +808,10 @@
     }
     if (normalized === "tiny") {
       refreshTiny().catch(() => {});
+      setDrawerTab("detail");
+    }
+    if (normalized === "maps") {
+      refreshGpsStatus().catch(() => {});
       setDrawerTab("detail");
     }
     if (normalized === "files") {
@@ -1234,6 +1248,98 @@
       const tinyLabel = tiny.state ? ` | Tiny ${tiny.state}` : "";
       el.backendChip.textContent = `${backendLabel || "backend unknown"}${tinyLabel}`;
     }
+  }
+
+  function renderGpsStatus(payload) {
+    state.gpsStatus = payload || state.gpsStatus;
+    const gps = state.gpsStatus || {};
+    const latestFix = gps.latest_fix || {};
+    const activeRoute = gps.active_route || {};
+    const cards = [
+      {
+        title: "Provider",
+        value: String(gps.provider_type || "offline").replace(/_/g, " "),
+        meta: `${gps.status || "unknown"} | ${gps.recording ? "recording" : "standby"}`,
+      },
+      {
+        title: "Current Position",
+        value: latestFix.latitude != null && latestFix.longitude != null
+          ? `${Number(latestFix.latitude).toFixed(4)}, ${Number(latestFix.longitude).toFixed(4)}`
+          : "No fix yet",
+        meta: latestFix.timestamp || gps.last_update_at || "waiting",
+      },
+      {
+        title: "Accuracy",
+        value: latestFix.accuracy_m != null ? `${Number(latestFix.accuracy_m).toFixed(1)} m` : "unknown",
+        meta: latestFix.speed_kmh != null ? `${Number(latestFix.speed_kmh).toFixed(1)} km/h` : "speed unavailable",
+      },
+      {
+        title: "Route Session",
+        value: activeRoute.route_session_id ? `points ${activeRoute.point_count || 0}` : "No active route",
+        meta: activeRoute.route_session_id
+          ? `${Number(activeRoute.distance_km || 0).toFixed(2)} km | ${activeRoute.started_at || "started"}`
+          : gps.offline_state || "offline",
+      },
+    ];
+    if (el.gpsStatusPanel) {
+      el.gpsStatusPanel.innerHTML = cards
+        .map((card) => `
+          <div class="metric-card">
+            <span>${escapeHtml(card.title)}</span>
+            <strong>${escapeHtml(card.value)}</strong>
+            <div class="micro-copy">${escapeHtml(card.meta)}</div>
+          </div>
+        `)
+        .join("");
+    }
+    drawGpsRoute(gps);
+  }
+
+  function drawGpsRoute(gps) {
+    if (!el.gpsRouteView) {
+      return;
+    }
+    const svg = el.gpsRouteView;
+    const width = 760;
+    const height = 360;
+    const padding = 36;
+    const trail = Array.isArray(gps.trail) ? gps.trail : [];
+    const latestFix = gps.latest_fix || {};
+    const points = trail.length ? trail : (latestFix.latitude != null && latestFix.longitude != null ? [latestFix] : []);
+    svg.innerHTML = `
+      <rect x="0" y="0" width="${width}" height="${height}" rx="20" class="gps-map-bg"></rect>
+      <text x="24" y="30" class="gps-map-title">OBEOS route view</text>
+      <text x="24" y="52" class="gps-map-subtitle">${escapeHtml(String(gps.offline_state || gps.status || "offline"))}</text>
+    `;
+    if (!points.length) {
+      svg.innerHTML += `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="gps-map-empty">No GPS fix available yet. Attach GNSS or switch to simulator.</text>`;
+      return;
+    }
+    const latitudes = points.map((point) => Number(point.latitude || 0));
+    const longitudes = points.map((point) => Number(point.longitude || 0));
+    const minLat = Math.min(...latitudes);
+    const maxLat = Math.max(...latitudes);
+    const minLon = Math.min(...longitudes);
+    const maxLon = Math.max(...longitudes);
+    const latSpan = Math.max(0.0008, maxLat - minLat);
+    const lonSpan = Math.max(0.0008, maxLon - minLon);
+    const projected = points.map((point) => {
+      const x = padding + ((Number(point.longitude || 0) - minLon) / lonSpan) * (width - padding * 2);
+      const y = height - padding - ((Number(point.latitude || 0) - minLat) / latSpan) * (height - padding * 2);
+      return { x, y, point };
+    });
+    const polylinePoints = projected.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+    svg.innerHTML += `<polyline class="gps-route-line" points="${polylinePoints}"></polyline>`;
+    projected.forEach((entry, index) => {
+      const isLatest = index === projected.length - 1;
+      svg.innerHTML += `<circle class="${isLatest ? "gps-route-point latest" : "gps-route-point"}" cx="${entry.x.toFixed(1)}" cy="${entry.y.toFixed(1)}" r="${isLatest ? 6 : 3.2}"></circle>`;
+    });
+    const current = projected[projected.length - 1];
+    svg.innerHTML += `
+      <text x="${Math.min(width - 170, current.x + 10).toFixed(1)}" y="${Math.max(68, current.y - 12).toFixed(1)}" class="gps-map-current">
+        current fix | ${Number(current.point.latitude || 0).toFixed(4)}, ${Number(current.point.longitude || 0).toFixed(4)}
+      </text>
+    `;
   }
 
   function renderVerification(payload) {
@@ -2152,6 +2258,7 @@
         refreshActions(),
         refreshNotifications(),
         refreshOperatorSummary(),
+        refreshGpsStatus(),
         refreshFileScopes(),
         refreshCognition(),
         refreshTiny(),
@@ -2218,6 +2325,20 @@
   async function refreshFileScopes() {
     const roots = await fetchJSON("/api/files/roots");
     renderFileScopes(state.operatorSummary, roots, state.fileScopeDetail);
+  }
+
+  async function refreshGpsStatus() {
+    const payload = await fetchOptionalJSON("/api/gps/status", {
+      status: "offline",
+      provider_type: "offline",
+      recording: false,
+      latest_fix: null,
+      active_route: { point_count: 0, distance_km: 0.0 },
+      trail: [],
+      offline_state: "offline",
+    });
+    renderGpsStatus(payload);
+    return payload;
   }
 
   async function refreshCommands() {
@@ -2488,6 +2609,47 @@
     }
   }
 
+  async function handleGpsAction(action) {
+    try {
+      setWorkspaceTab("maps");
+      let result = null;
+      if (action === "refresh") {
+        result = await refreshGpsStatus();
+      } else if (action.startsWith("provider:")) {
+        const mode = action.split(":")[1] || "auto";
+        result = await fetchJSON("/api/gps/provider", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode, session_id: state.sessionId, request_id: state.requestId }),
+        });
+      } else if (action === "record:start") {
+        result = await fetchJSON("/api/gps/recording/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: state.sessionId, request_id: state.requestId }),
+        });
+      } else if (action === "record:stop") {
+        result = await fetchJSON("/api/gps/recording/stop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: state.sessionId, request_id: state.requestId }),
+        });
+      }
+      if (result) {
+        pushCommandHistory({ command: `/gps ${action}`, result });
+        if (result.snapshot) {
+          renderGpsStatus(result.snapshot);
+        } else if (action !== "refresh") {
+          await refreshGpsStatus();
+        }
+        await refreshOperatorSummary();
+        showToast(`GPS ${action} complete.`, "success");
+      }
+    } catch (error) {
+      showToast(error.message, "error");
+    }
+  }
+
   function matchesShortcut(event, sequence) {
     const parts = sequence.toLowerCase().split("+");
     const key = parts[parts.length - 1];
@@ -2646,6 +2808,7 @@
       refreshActions(),
       refreshNotifications(),
       refreshOperatorSummary(),
+      refreshGpsStatus(),
       refreshFileScopes(),
       refreshTiny(),
       refreshIntegrations(),
@@ -2806,6 +2969,9 @@
     });
     el.tinyButtons.forEach((button) => {
       button.addEventListener("click", () => handleTinyAction(button.dataset.tinyAction));
+    });
+    el.gpsButtons.forEach((button) => {
+      button.addEventListener("click", () => handleGpsAction(button.dataset.gpsAction));
     });
     el.fileScopeButtons.forEach((button) => {
       button.addEventListener("click", () => handleFileScopeAction(button.dataset.fileScopeAction));

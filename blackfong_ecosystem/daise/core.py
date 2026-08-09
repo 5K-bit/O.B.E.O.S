@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from ..config import paths
@@ -23,10 +25,12 @@ from ..model_routing import (
     requires_memory_chamber,
     resolve_response_mode,
 )
+from ..gps_service import GPSService
 from ..policy_engine import PolicyEngine
 from ..retrieval_profiles import normalize_retrieval_profile, retrieval_profile_settings
 from ..runtime_ownership import get_shared_memory_chamber
 from ..storage import ChromaVectorStore, EventStore, NullVectorStore, VectorStore
+from ..system_awareness import SystemAwarenessService
 from .engines import EvolutionEngine, IngestionEngine, MemoryEngine, ReflectionEngine, SynthesisEngine
 
 
@@ -96,6 +100,7 @@ class DAISE:
     memory_chamber: Optional[MemoryChamberService] = None
     file_workflow: Optional[FileWorkflowService] = None
     file_scope_service: Optional[FileScopeService] = None
+    awareness_service: Optional[SystemAwarenessService] = None
 
     MULTI_AGENT_THRESHOLD = 0.75
     LOW_CONFIDENCE_THRESHOLD = 0.72
@@ -115,6 +120,7 @@ class DAISE:
         file_workflow: Optional[FileWorkflowService] = None,
         file_scope_service: Optional[FileScopeService] = None,
         memory_chamber: Optional[MemoryChamberService] = None,
+        awareness_service: Optional[SystemAwarenessService] = None,
     ) -> "DAISE":
         """
         Construct DAISE with default Blackfong-backed storage.
@@ -143,6 +149,10 @@ class DAISE:
             workspace_root=paths.root,
             start_watch=False,
         )
+        awareness_service = awareness_service or SystemAwarenessService(
+            memory_service=memory_service,
+            gps_service=GPSService(event_store=event_store),
+        )
 
         return cls(
             event_store=event_store,
@@ -157,6 +167,7 @@ class DAISE:
             memory_chamber=memory_chamber,
             file_workflow=file_workflow,
             file_scope_service=file_scope_service,
+            awareness_service=awareness_service,
         )
 
     def init_storage(self) -> None:
@@ -383,6 +394,20 @@ class DAISE:
                     "summary_event_id": None,
                     "execution_time_ms": execution_time_ms,
                 }
+
+            grounded_result = self._handle_grounded_truth_request(
+                user_input=user_input,
+                modality=modality,
+                context=context,
+                policy_decision=policy_decision,
+                session_id=session_id,
+                correlation_id=correlation_id,
+                request_id=request_id,
+                request_started=request_started,
+                progress_callback=progress_callback,
+            )
+            if grounded_result is not None:
+                return grounded_result
 
             file_intent = parse_file_chat_intent(user_input) if self.file_workflow is not None else None
             if file_intent is not None and self.file_workflow is not None:
@@ -1374,6 +1399,288 @@ class DAISE:
             if normalized.upper().startswith(banner.upper()):
                 return normalized[len(banner) :].lstrip("- \n")
         return normalized
+
+    def _handle_grounded_truth_request(
+        self,
+        *,
+        user_input: str,
+        modality: str,
+        context: Dict[str, Any],
+        policy_decision: Dict[str, Any],
+        session_id: str,
+        correlation_id: str,
+        request_id: str,
+        request_started: float,
+        progress_callback: Optional[TraceCallback],
+    ) -> Optional[Dict[str, Any]]:
+        truth = self._grounded_truth_response(user_input)
+        if truth is None:
+            return None
+
+        query_event = self.conversation_memory.persist_user_turn(
+            session_id=session_id,
+            correlation_id=correlation_id,
+            text=user_input,
+            modality=modality,
+            routed_agent="daise",
+            analysis_mode=str(context.get("analysis_mode") or "standard"),
+            agent_override=context.get("agent_override"),
+            request_id=request_id,
+        )
+        event_type = "backend_health_observation" if truth["kind"] == "status" else "environment_snapshot"
+        trace_event = self.conversation_memory.persist_workflow_event(
+            source="daise",
+            event_type=event_type,
+            payload={
+                "schema_version": "1.0",
+                "grounded_truth": {
+                    "kind": truth["kind"],
+                    "source": truth["source"],
+                    "observation": truth["observation"],
+                },
+            },
+            confidence=0.94,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            parent_event_id=query_event.id,
+            tags=["grounded_truth", truth["kind"]],
+        )
+        execution_time_ms = (time.time() - request_started) * 1000
+        response_event = self.conversation_memory.persist_agent_response(
+            session_id=session_id,
+            correlation_id=correlation_id,
+            agent_name="daise",
+            response_text=truth["response"],
+            confidence=0.94,
+            modality=modality,
+            parent_event_id=query_event.id,
+            execution_time_ms=execution_time_ms,
+            success=True,
+            extras={
+                "selected_agent": "daise",
+                "consulted_agents": [],
+                "synthesized": False,
+                "analysis_mode": context.get("analysis_mode"),
+                "decision_state": policy_decision.get("decision_state"),
+                "policy_decision": policy_decision,
+                "grounded_truth": {
+                    "kind": truth["kind"],
+                    "source": truth["source"],
+                },
+            },
+            request_id=request_id,
+        )
+        self.conversation_memory.persist_workflow_event(
+            source="daise",
+            event_type="request_outcome",
+            payload={
+                "schema_version": "1.0",
+                "success": True,
+                "decision_state": policy_decision.get("decision_state"),
+                "selected_agent": "daise",
+                "reason": "grounded_truth",
+                "grounded_truth_kind": truth["kind"],
+                "execution_time_ms": execution_time_ms,
+            },
+            confidence=0.9,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            parent_event_id=response_event.id,
+        )
+        self._emit_phase(
+            progress_callback,
+            request_id=request_id,
+            session_id=session_id,
+            phase="complete",
+            agent="daise",
+            message="Answered from local grounded truth.",
+        )
+        operator_trace = self.conversation_memory.get_request_trace(request_id)
+        return {
+            "response": truth["response"],
+            "confidence": 0.94,
+            "agent": "daise",
+            "output_agent": "daise",
+            "mediated_by": "daise",
+            "selected_agent": "daise",
+            "consulted_agents": [],
+            "synthesized": False,
+            "trace_event_id": trace_event.id,
+            "provider": "local_runtime_truth",
+            "model": "grounded-truth-v1",
+            "backend_error": None,
+            "backend_metadata": {"grounded_truth": truth["observation"]},
+            "task_type": "grounded_truth",
+            "analysis_mode": context.get("analysis_mode"),
+            "routing_confidence": 1.0,
+            "complexity_score": 0.0,
+            "multi_agent_mode": False,
+            "quality_evaluation": {"approved": True, "reason": "grounded_truth"},
+            "policy_decision": policy_decision,
+            "decision_state": policy_decision.get("decision_state"),
+            "candidate_reports": [],
+            "operator_trace": operator_trace,
+            "session_id": session_id,
+            "correlation_id": correlation_id,
+            "request_id": request_id,
+            "query_event_id": query_event.id,
+            "selection_event_id": None,
+            "response_event_id": response_event.id,
+            "summary_event_id": None,
+            "execution_time_ms": execution_time_ms,
+        }
+
+    def _grounded_truth_response(self, user_input: str) -> Optional[Dict[str, Any]]:
+        normalized = " ".join(str(user_input or "").strip().lower().split())
+        if not normalized:
+            return None
+
+        now = datetime.now().astimezone()
+        observation = {
+            "local_date": f"{now.strftime('%A, %B')} {now.day}, {now.year}",
+            "local_time": now.strftime("%I:%M %p %Z").lstrip("0"),
+            "day_of_week": now.strftime("%A"),
+            "timezone": str(now.tzinfo or ""),
+        }
+
+        if self._matches_identity_truth(normalized):
+            return {
+                "kind": "identity",
+                "source": "obeos_identity_doctrine",
+                "response": "I am D.A.I.S.E., the visible assistant inside O.B.E.O.S. D.A.I.S.E. stands for Direct Artificial Intelligence System Environment.",
+                "observation": {
+                    "assistant": "D.A.I.S.E.",
+                    "expansion": "Direct Artificial Intelligence System Environment",
+                    "alias_policy": "jarvis_internal_compatibility_only",
+                },
+            }
+
+        asks_date = self._matches_any(
+            normalized,
+            (
+                "today's date",
+                "todays date",
+                "what date is it",
+                "what is the date",
+                "current date",
+                "date today",
+            ),
+        )
+        asks_day = self._matches_any(
+            normalized,
+            (
+                "what day is it",
+                "day of the week",
+                "what day of the week is it",
+                "what weekday is it",
+                "current day",
+            ),
+        )
+        asks_time = self._matches_any(
+            normalized,
+            (
+                "what time is it",
+                "what is the time",
+                "current time",
+                "local time",
+                "time is it",
+            ),
+        )
+        asks_status = self._matches_status_truth(normalized)
+
+        if asks_date and asks_time:
+            return {
+                "kind": "date_time",
+                "source": "local_system_clock",
+                "response": f"It is {observation['local_date']}, and the local time is {observation['local_time']}.",
+                "observation": observation,
+            }
+        if asks_date:
+            return {
+                "kind": "date",
+                "source": "local_system_clock",
+                "response": f"Today is {observation['local_date']}.",
+                "observation": observation,
+            }
+        if asks_day:
+            return {
+                "kind": "day_of_week",
+                "source": "local_system_clock",
+                "response": f"Today is {observation['day_of_week']}.",
+                "observation": observation,
+            }
+        if asks_time:
+            return {
+                "kind": "time",
+                "source": "local_system_clock",
+                "response": f"The local time is {observation['local_time']}.",
+                "observation": observation,
+            }
+        if asks_status:
+            snapshot = self.awareness_service.build_snapshot(emit=False) if self.awareness_service is not None else {}
+            observed = snapshot.get("observed", {}) if snapshot else {}
+            backend = observed.get("backend", {}) if isinstance(observed.get("backend"), dict) else {}
+            services = observed.get("services", {}) if isinstance(observed.get("services"), dict) else {}
+            gps = observed.get("sensors", {}).get("gps", {}) if isinstance(observed.get("sensors"), dict) else {}
+            health = snapshot.get("health", {}) if isinstance(snapshot.get("health"), dict) else {}
+            backend_label = backend.get("status", "unknown")
+            provider = backend.get("provider", "backend")
+            model = backend.get("configured_model", "unknown model")
+            telegram = services.get("telegram", {}) if isinstance(services.get("telegram"), dict) else {}
+            gps_status = gps.get("status", "offline") if isinstance(gps, dict) else "offline"
+            status_text = (
+                f"I am online. Backend status is {backend_label} on {provider} using {model}. "
+                f"Telegram is {telegram.get('status', 'unknown')}. GPS is {gps_status}."
+            )
+            return {
+                "kind": "status",
+                "source": "local_awareness_snapshot",
+                "response": status_text,
+                "observation": {
+                    "health": health,
+                    "backend": backend,
+                    "telegram": telegram,
+                    "gps": gps,
+                },
+            }
+        return None
+
+    @staticmethod
+    def _matches_any(normalized: str, phrases: Sequence[str]) -> bool:
+        return any(phrase in normalized for phrase in phrases)
+
+    def _matches_identity_truth(self, normalized: str) -> bool:
+        if self._matches_any(
+            normalized,
+            (
+                "what does daise stand for",
+                "what does d.a.i.s.e stand for",
+                "what is daise",
+                "who are you",
+                "what is your name",
+            ),
+        ):
+            return True
+        return "direct artificial intelligence system environment" in normalized
+
+    def _matches_status_truth(self, normalized: str) -> bool:
+        short_tokens = len(normalized.split()) <= 10
+        if normalized in {"status", "/status"}:
+            return True
+        if not short_tokens:
+            return False
+        status_phrases = (
+            "what is your status",
+            "what's your status",
+            "are you online",
+            "are you awake",
+            "system status",
+            "backend status",
+            "runtime status",
+        )
+        return self._matches_any(normalized, status_phrases)
 
     def _handle_file_workflow_request(
         self,

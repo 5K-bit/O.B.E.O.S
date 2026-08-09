@@ -250,6 +250,7 @@ class WebDashboard:
         shared_file_scope = getattr(orchestrator_instance, "file_scope_service", None) if orchestrator_instance is not None else None
         self.file_workflow = shared_file_workflow or self.services.file_workflow
         self.file_scope_service = shared_file_scope or self.services.file_scope_service
+        self.gps_service = self.services.gps_service
         self.sensor_mode = "off"
         self.awareness_service = self.services.awareness_service
         self.operator_summary = self.services.operator_summary
@@ -326,6 +327,7 @@ class WebDashboard:
         self.services.operator_actions = self.operator_actions
         self.services.file_workflow = self.file_workflow
         self.services.file_scope_service = self.file_scope_service
+        self.services.gps_service = self.gps_service
         self.services.awareness_service = self.awareness_service
         self.services.operator_summary = self.operator_summary
         self.services.cognition_service = self.cognition_service
@@ -1236,6 +1238,41 @@ class WebDashboard:
             if self.memory_chamber is not None:
                 self.memory_chamber.request_reindex(reason="knowledge_api_ingest", background=True)
             return jsonify(self._json_safe_value(result)), 201
+
+        @self.app.route("/api/gps/status")
+        def gps_status():
+            return jsonify(self._json_safe_value(self.gps_service.snapshot()))
+
+        @self.app.route("/api/gps/provider", methods=["POST"])
+        def gps_provider():
+            payload = request.get_json(silent=True) or {}
+            try:
+                result = self.gps_service.set_provider_mode(
+                    str(payload.get("mode") or "auto"),
+                    session_id=payload.get("session_id") or request.args.get("session_id") or None,
+                    request_id=payload.get("request_id") or request.args.get("request_id") or None,
+                )
+            except ValueError as exc:
+                return jsonify({"status": "error", "error": str(exc)}), 400
+            return jsonify(self._json_safe_value(result))
+
+        @self.app.route("/api/gps/recording/start", methods=["POST"])
+        def gps_recording_start():
+            payload = request.get_json(silent=True) or {}
+            result = self.gps_service.start_recording(
+                session_id=payload.get("session_id") or request.args.get("session_id") or None,
+                request_id=payload.get("request_id") or request.args.get("request_id") or None,
+            )
+            return jsonify(self._json_safe_value(result))
+
+        @self.app.route("/api/gps/recording/stop", methods=["POST"])
+        def gps_recording_stop():
+            payload = request.get_json(silent=True) or {}
+            result = self.gps_service.stop_recording(
+                session_id=payload.get("session_id") or request.args.get("session_id") or None,
+                request_id=payload.get("request_id") or request.args.get("request_id") or None,
+            )
+            return jsonify(self._json_safe_value(result))
 
         @self.app.route("/api/verify/<mode>")
         def verify_mode(mode: str):

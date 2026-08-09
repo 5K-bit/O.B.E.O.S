@@ -46,6 +46,7 @@
           <div class="workbench-tabs" role="tablist" aria-label="Workspace tabs">
             <button class="mode-chip active" data-workspace-tab="chat">Operator</button>
             <button class="mode-chip" data-workspace-tab="thoughtglass">Thoughtglass</button>
+            <button class="mode-chip" data-workspace-tab="maps">Maps</button>
             <button class="mode-chip" data-workspace-tab="tiny">Tiny</button>
             <button class="mode-chip" data-workspace-tab="files">Files</button>
             <button class="mode-chip" data-workspace-tab="security">Security</button>
@@ -280,6 +281,32 @@
                 <button class="button button-subtle" data-file-scope-action="read">Read Path</button>
               </div>
               <div id="scopePanel" class="scroll-stack panel-fill"></div>
+            </section>
+          </section>
+
+          <section id="workspaceMaps" class="workbench-panel">
+            <section class="panel-section grow">
+              <div class="section-head">
+                <div>
+                  <div class="section-kicker">GPS + Maps</div>
+                  <h3>Route View</h3>
+                </div>
+                <div class="button-grid maps-grid">
+                  <button class="button button-subtle" data-gps-action="refresh">Refresh</button>
+                  <button class="button button-subtle" data-gps-action="provider:auto">Auto</button>
+                  <button class="button button-subtle" data-gps-action="provider:simulator">Simulator</button>
+                  <button class="button button-subtle" data-gps-action="provider:serial">Serial</button>
+                  <button class="button button-subtle" data-gps-action="record:start">Start Recording</button>
+                  <button class="button button-subtle" data-gps-action="record:stop">Stop Recording</button>
+                </div>
+              </div>
+              <div class="maps-workspace grow">
+                <div id="gpsStatusPanel" class="maps-status-grid"></div>
+                <div class="gps-route-shell grow">
+                  <div class="section-kicker">Earthglass-ready route canvas</div>
+                  <svg id="gpsRouteView" viewBox="0 0 760 360" aria-label="OBEOS GPS route view"></svg>
+                </div>
+              </div>
             </section>
           </section>
 

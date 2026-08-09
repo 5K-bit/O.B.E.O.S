@@ -492,6 +492,38 @@ class TelegramSettings:
         )
 
 
+@dataclass(frozen=True)
+class GPSSettings:
+    """Runtime settings for shared GPS/GNSS awareness."""
+
+    enabled: bool = True
+    provider_mode: str = "auto"
+    serial_port: str = ""
+    baud_rate: int = 9600
+    simulator_enabled: bool = True
+    simulator_step_seconds: float = 3.0
+    emit_interval_seconds: float = 4.0
+    trail_limit: int = 48
+    route_history_limit: int = 240
+
+    @staticmethod
+    def from_env() -> "GPSSettings":
+        provider_mode = (os.getenv("BLACKFONG_GPS_PROVIDER", "auto").strip().lower() or "auto")
+        if provider_mode not in {"auto", "serial", "simulator", "off"}:
+            provider_mode = "auto"
+        return GPSSettings(
+            enabled=os.getenv("BLACKFONG_GPS_ENABLED", "true").lower() != "false",
+            provider_mode=provider_mode,
+            serial_port=os.getenv("BLACKFONG_GPS_SERIAL_PORT", "").strip(),
+            baud_rate=max(1200, int(os.getenv("BLACKFONG_GPS_BAUD_RATE", "9600"))),
+            simulator_enabled=os.getenv("BLACKFONG_GPS_SIMULATOR_ENABLED", "true").lower() != "false",
+            simulator_step_seconds=max(0.5, float(os.getenv("BLACKFONG_GPS_SIMULATOR_STEP_SECONDS", "3"))),
+            emit_interval_seconds=max(1.0, float(os.getenv("BLACKFONG_GPS_EMIT_INTERVAL_SECONDS", "4"))),
+            trail_limit=max(8, min(256, int(os.getenv("BLACKFONG_GPS_TRAIL_LIMIT", "48")))),
+            route_history_limit=max(32, min(1000, int(os.getenv("BLACKFONG_GPS_ROUTE_HISTORY_LIMIT", "240")))),
+        )
+
+
 paths = Paths.from_root(Path(__file__).resolve().parents[1])
 identity = SystemIdentity()
 chat_settings = ChatSettings.from_env()
@@ -501,4 +533,5 @@ legion_settings = LegionSettings.from_env()
 tinyprogrammer_settings = TinyProgrammerSettings.from_env(paths.root)
 tui_settings = TUISettings.from_env()
 telegram_settings = TelegramSettings.from_env()
+gps_settings = GPSSettings.from_env()
 

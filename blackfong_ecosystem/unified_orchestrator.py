@@ -25,9 +25,11 @@ from blackfong_ecosystem.conversation_memory import conversation_memory_service
 from blackfong_ecosystem.daise import DAISE
 from blackfong_ecosystem.file_scope_service import FileScopeService
 from blackfong_ecosystem.file_workflow import FileWorkflowService
+from blackfong_ecosystem.gps_service import GPSService
 from blackfong_ecosystem.observability import log_action, LogLevel
 from blackfong_ecosystem.orchestrator import Orchestrator
 from blackfong_ecosystem.memory_lifecycle_management import memory_lifecycle_manager
+from blackfong_ecosystem.system_awareness import SystemAwarenessService
 from blackfong_ecosystem.model_routing import (
     normalize_response_mode,
     resolve_response_mode,
@@ -70,12 +72,18 @@ class UnifiedOrchestrator:
             memory_service=self.memory_service,
             governed_roots=self.file_workflow.allowed_roots,
         )
+        self.gps_service = GPSService(event_store=self.memory_service.event_store)
+        self.awareness_service = SystemAwarenessService(
+            memory_service=self.memory_service,
+            gps_service=self.gps_service,
+        )
         self.daise = DAISE.create_default(
             event_store=self.memory_service.event_store,
             vector_store=self.memory_service.vector_store,
             memory_service=self.memory_service,
             file_workflow=self.file_workflow,
             file_scope_service=self.file_scope_service,
+            awareness_service=self.awareness_service,
         )
         self.memory_chamber = self.daise.memory_chamber
         self.session_id = str(uuid.uuid4())

@@ -160,6 +160,7 @@ class UIServiceContainer:
     operator_actions: Any
     file_workflow: Any
     file_scope_service: Any
+    gps_service: Any
     awareness_service: Any
     operator_summary: Any
     cognition_service: Any
@@ -181,6 +182,7 @@ def _build_ui_services(*, memory_service: Any = None, orchestrator_instance: Any
     from blackfong_ecosystem.external_integrations import ExternalIntegrationRegistry
     from blackfong_ecosystem.file_scope_service import FileScopeService
     from blackfong_ecosystem.file_workflow import FileWorkflowService
+    from blackfong_ecosystem.gps_service import GPSService
     from blackfong_ecosystem.memory_chamber import MemoryChamberService
     from blackfong_ecosystem.notification_service import NotificationService
     from blackfong_ecosystem.obeos_linux import OBEOSLinuxPlatformService
@@ -218,11 +220,22 @@ def _build_ui_services(*, memory_service: Any = None, orchestrator_instance: Any
         startup_coordinator=startup_coordinator,
         start_watch=False,
     )
-    awareness_service = SystemAwarenessService(
-        memory_service=memory,
-        tinyprogrammer=tinyprogrammer_companion,
-        startup_coordinator=startup_coordinator,
-    )
+    gps_service = getattr(orchestrator_instance, "gps_service", None) if orchestrator_instance is not None else None
+    if gps_service is None:
+        gps_service = GPSService(event_store=event_store)
+    awareness_service = getattr(orchestrator_instance, "awareness_service", None) if orchestrator_instance is not None else None
+    if awareness_service is None:
+        awareness_service = SystemAwarenessService(
+            memory_service=memory,
+            tinyprogrammer=tinyprogrammer_companion,
+            gps_service=gps_service,
+            startup_coordinator=startup_coordinator,
+        )
+    else:
+        awareness_service.memory_service = memory
+        awareness_service.tinyprogrammer = tinyprogrammer_companion
+        awareness_service.gps_service = gps_service
+        awareness_service.startup_coordinator = startup_coordinator
     redamon_workflow = RedAmonWorkflowService(
         memory_service=memory,
         operator_actions=operator_actions,
@@ -256,6 +269,7 @@ def _build_ui_services(*, memory_service: Any = None, orchestrator_instance: Any
         operator_actions=operator_actions,
         file_workflow=file_workflow,
         file_scope_service=file_scope_service,
+        gps_service=gps_service,
         awareness_service=awareness_service,
         operator_summary=operator_summary,
         cognition_service=cognition_service,

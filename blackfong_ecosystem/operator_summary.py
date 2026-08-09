@@ -64,6 +64,8 @@ class OperatorSummaryService:
             awareness_snapshot = self.awareness_service.build_snapshot(emit=False)
         observed = awareness_snapshot.get("observed", {}) if awareness_snapshot else {}
         backend = observed.get("backend", {})
+        sensors = observed.get("sensors", {}) if awareness_snapshot else {}
+        gps = sensors.get("gps", {}) if isinstance(sensors.get("gps"), dict) else {}
         telegram = (observed.get("services", {}) or {}).get("telegram", {}) if awareness_snapshot else {}
         health = awareness_snapshot.get("health", {}) if awareness_snapshot else {}
         if self.startup_coordinator is not None:
@@ -127,6 +129,7 @@ class OperatorSummaryService:
                 "counts": integration_listing.get("counts", {}),
                 "items": integration_listing.get("integrations", [])[:4],
             },
+            "gps": gps,
             "telegram": telegram,
             "security_modes": {
                 "redamon": self.redamon_workflow.status(session_id=session_id),
@@ -135,6 +138,7 @@ class OperatorSummaryService:
             "system": {
                 "health": health,
                 "backend": backend,
+                "sensors": sensors,
                 "environment": awareness_snapshot.get("environment", {}),
             },
         }
