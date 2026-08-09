@@ -709,7 +709,12 @@ class VectorStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         raise NotImplementedError
 
     def upsert(
@@ -786,10 +791,18 @@ class ChromaVectorStore(VectorStore):
             normalized.append({k: _scalar_for_chroma(v) for k, v in m.items()})
         self._collection.add(ids=ids_list, documents=texts_list, metadatas=normalized)
 
-    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         try:
             result = self._collection.query(
-                query_texts=[query], n_results=k, include=["documents", "metadatas", "distances"]
+                query_texts=[query],
+                n_results=k,
+                include=["documents", "metadatas", "distances"],
+                where=dict(metadata_filter or {}) or None,
             )
         except RuntimeError as exc:
             # hnswlib can raise "Cannot return the results in a contigious 2D
@@ -803,6 +816,7 @@ class ChromaVectorStore(VectorStore):
                         query_texts=[query],
                         n_results=max(1, k // 2),
                         include=["documents", "metadatas", "distances"],
+                        where=dict(metadata_filter or {}) or None,
                     )
                 except Exception:  # noqa: BLE001
                     return []
@@ -872,7 +886,13 @@ class NullVectorStore(VectorStore):
         # Intentionally do nothing; this is a stub.
         return None
 
-    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        del query, k, metadata_filter
         # No results in the null implementation.
         return []
 

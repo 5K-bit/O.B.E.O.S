@@ -468,6 +468,35 @@ class ConversationMemoryService:
             retrieval_profile=resolved_retrieval_profile,
             skip_vector_search=skip_vector_search,
         )
+        focus_tokens = self._salient_query_tokens(query)
+        if semantic_bundle["hits"] and focus_tokens:
+            hinted_collections = self._detect_collection_hints(query)
+            if hinted_collections:
+                session_summaries = self._filter_session_summaries_for_query(
+                    session_summaries,
+                    focus_tokens=focus_tokens,
+                    limit=min(summary_limit, 1),
+                )
+                global_memories = self._filter_global_memories_for_query(
+                    global_memories,
+                    focus_tokens=focus_tokens,
+                    limit=min(memory_limit, 2),
+                )
+                recent_events = self._filter_recent_events_for_query(
+                    recent_events,
+                    focus_tokens=focus_tokens,
+                    limit=min(recent_event_limit, 1),
+                )
+                global_memories = [
+                    item
+                    for item in global_memories
+                    if str((item.get("metadata") or {}).get("session_id") or "") == session_id
+                ]
+                recent_events = [
+                    item
+                    for item in recent_events
+                    if str(item.get("session_id") or "") == session_id
+                ]
 
         prompt_context = self._format_prompt_context(
             agent_name=profile["agent"],
@@ -1247,6 +1276,8 @@ class ConversationMemoryService:
         if vector_k <= 0:
             return empty
 
+        query_tokens = self._tokenize(query)
+        hinted_collections = self._detect_collection_hints(query)
         query_started = time.perf_counter()
         try:
             results = self.vector_store.search(query, k=max(vector_k * 3, vector_k))
@@ -1255,13 +1286,25 @@ class ConversationMemoryService:
         query_completed = time.perf_counter()
 
         rerank_started = time.perf_counter()
-        query_tokens = self._tokenize(query)
-        hinted_collections = self._detect_collection_hints(query)
         annotated_hits: List[Dict[str, Any]] = []
         for collection in hinted_collections:
             summary_hit = self._collection_summary_hit(collection, query_tokens=query_tokens, retrieval_profile=retrieval_profile)
             if summary_hit is not None:
                 annotated_hits.append(summary_hit)
+        for result in self._search_hinted_collection_results(
+            query=query,
+            hinted_collections=hinted_collections,
+            retrieval_profile=retrieval_profile,
+            limit=max(vector_k * 2, vector_k),
+        ):
+            enriched = self._annotate_semantic_hit(
+                result,
+                query_tokens=query_tokens,
+                retrieval_profile=retrieval_profile,
+                hinted_collections=hinted_collections,
+            )
+            if enriched is not None:
+                annotated_hits.append(enriched)
         for result in results:
             enriched = self._annotate_semantic_hit(
                 result,
@@ -1334,8 +1377,13 @@ class ConversationMemoryService:
         score = float(result.get("relevance") or 0.0)
         score += self._token_overlap_score(query_tokens, f"{title} {text}".lower(), weight=0.04)
         hinted = set(hinted_collections or [])
+        targeted_collection = str(metadata.get("_hinted_collection") or "")
         if collection and collection in hinted:
             score += 0.18
+        if collection and targeted_collection and collection == targeted_collection:
+            score += 0.14
+        elif hinted and kind == "memory_chamber_document" and not collection:
+            score -= 0.12
         if retrieval_profile == "architecture":
             if not self._is_architecture_hit(title=title, text=text, metadata=metadata, collection=collection):
                 return None
@@ -1421,24 +1469,15 @@ class ConversationMemoryService:
         query_tokens: List[str],
         retrieval_profile: str,
     ) -> Optional[Dict[str, Any]]:
-        candidates = [
-            paths.knowledge_intel_path / collection / "summary.json",
-            paths.knowledge_intel_path / collection / "collection_summary.json",
-            paths.knowledge_intel_path / collection / "summaries" / "collection_summary.json",
-        ]
-        summary_path = next((path for path in candidates if path.exists()), None)
-        if summary_path is None:
-            return None
-        try:
-            payload = json.loads(summary_path.read_text(encoding="utf-8"))
-        except Exception:
+        payload, summary_path = self._collection_summary_payload(collection)
+        if payload is None:
             return None
         text = str(payload.get("text") or payload.get("extractive_text") or payload.get("summary") or "").strip()
         if not text:
             return None
         collection_slug = str(payload.get("collection") or collection or "").strip().lower().replace("-", "_")
-        title = self._collection_display_name(collection_slug)
-        score = 0.98 + self._token_overlap_score(query_tokens, f"{title} {text}".lower(), weight=0.03)
+        title = str(payload.get("title") or self._collection_display_name(collection_slug))
+        score = 1.1 + self._token_overlap_score(query_tokens, f"{title} {text}".lower(), weight=0.03)
         if retrieval_profile == "architecture" and not self._is_architecture_hit(
             title=title,
             text=text,
@@ -1475,6 +1514,204 @@ class ConversationMemoryService:
             },
             "citation": citation,
         }
+
+    def _search_hinted_collection_results(
+        self,
+        *,
+        query: str,
+        hinted_collections: List[str],
+        retrieval_profile: str,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        if not hinted_collections or limit <= 0:
+            return []
+        _source_registry, collection_registry = self._knowledge_registries()
+        targeted_results: List[Dict[str, Any]] = []
+        for collection in hinted_collections[:4]:
+            description = ""
+            domain = ""
+            subdomain = ""
+            category = ""
+            if collection_registry is not None:
+                meta = collection_registry.get(collection)
+                if meta is not None:
+                    description = str(meta.description or "")
+                    domain = str(meta.domain or "")
+                    subdomain = str(meta.subdomain or "")
+                    category = str(meta.category or "")
+            suffix = (
+                "architecture topology graph contract interface routing"
+                if retrieval_profile == "architecture"
+                else "overview characters plot context"
+            )
+            collection_query = " ".join(
+                part
+                for part in [
+                    query,
+                    collection.replace("_", " "),
+                    description,
+                    domain,
+                    subdomain,
+                    category,
+                    suffix,
+                ]
+                if str(part or "").strip()
+            )
+            try:
+                matches = self.vector_store.search(
+                    collection_query,
+                    k=limit,
+                    metadata_filter={"collection": collection},
+                )
+            except TypeError:
+                matches = self.vector_store.search(collection_query, k=limit)
+            except Exception:
+                matches = []
+            for result in matches:
+                enriched_result = dict(result)
+                metadata = dict(enriched_result.get("metadata") or {})
+                metadata["_hinted_collection"] = collection
+                enriched_result["metadata"] = metadata
+                targeted_results.append(enriched_result)
+        return targeted_results
+
+    def _collection_summary_payload(self, collection: str) -> tuple[Optional[Dict[str, Any]], Optional[Path]]:
+        candidates = [
+            paths.knowledge_intel_path / collection / "summary.json",
+            paths.knowledge_intel_path / collection / "collection_summary.json",
+            paths.knowledge_intel_path / collection / "summaries" / "collection_summary.json",
+        ]
+        summary_path = next((path for path in candidates if path.exists()), None)
+        if summary_path is not None:
+            try:
+                return json.loads(summary_path.read_text(encoding="utf-8")), summary_path
+            except Exception:
+                pass
+        fallback = self._build_collection_summary_fallback(collection)
+        if fallback is None:
+            return None, None
+        return fallback, paths.knowledge_intel_path / collection / "summary.fallback.json"
+
+    def _build_collection_summary_fallback(self, collection: str) -> Optional[Dict[str, Any]]:
+        collection_slug = str(collection or "").strip().lower().replace("-", "_")
+        if not collection_slug:
+            return None
+        intel_dir = paths.knowledge_intel_path / collection_slug
+        if not intel_dir.exists():
+            return None
+        inventory = self._load_collection_intel_json(collection_slug, "inventory.json")
+        coverage = self._load_collection_intel_json(collection_slug, "coverage.json")
+        timeline = self._load_collection_intel_json(collection_slug, "timeline.json")
+        _source_registry, collection_registry = self._knowledge_registries()
+        meta = collection_registry.get(collection_slug) if collection_registry is not None else None
+        title = self._collection_display_name(collection_slug)
+        summary_title = title
+        description = str(getattr(meta, "description", "") or "")
+        domain = str(
+            (inventory or {}).get("domain")
+            or (coverage or {}).get("domain")
+            or getattr(meta, "domain", "")
+            or ""
+        ).strip()
+        sources = int((inventory or {}).get("sources") or (coverage or {}).get("total_sources") or 0)
+        embedded = int((inventory or {}).get("embedded") or (coverage or {}).get("embedded_sources") or 0)
+        total_chunks = int((inventory or {}).get("total_chunks") or (coverage or {}).get("total_chunks") or 0)
+        issue_ranges = list((inventory or {}).get("issue_ranges") or [])
+        timeline_events = int((timeline or {}).get("event_count") or 0)
+        representative = self._collection_summary_passages(collection_slug, description=description, limit=2)
+
+        lines: List[str] = []
+        if description:
+            lines.append(f"{title} is an OBEOS knowledge collection focused on {description.rstrip('.')}.")
+        else:
+            lines.append(f"{title} is an OBEOS knowledge collection.")
+        if domain:
+            lines.append(f"Domain: {domain}.")
+        if sources or embedded or total_chunks:
+            coverage_bits = []
+            if sources:
+                coverage_bits.append(f"{sources} source(s)")
+            if embedded:
+                coverage_bits.append(f"{embedded} embedded")
+            if total_chunks:
+                coverage_bits.append(f"{total_chunks} searchable chunk(s)")
+            if coverage_bits:
+                lines.append(f"Coverage: {', '.join(coverage_bits)}.")
+        if issue_ranges:
+            preview = ", ".join(issue_ranges[:6])
+            suffix = "..." if len(issue_ranges) > 6 else ""
+            lines.append(f"Issue ranges: {preview}{suffix}.")
+        if timeline_events:
+            lines.append(f"Structured timeline entries: {timeline_events}.")
+        if representative:
+            lines.append("Representative passages:")
+            for excerpt in representative:
+                lines.append(f"- {excerpt}")
+        text = "\n".join(lines).strip()
+        if not text:
+            return None
+        if domain.lower() == "architecture" and "architecture" not in summary_title.lower():
+            summary_title = f"{title} Architecture"
+        return {
+            "collection": collection_slug,
+            "domain": domain,
+            "kind": "collection_summary",
+            "title": summary_title,
+            "text": text,
+        }
+
+    def _load_collection_intel_json(self, collection: str, name: str) -> Optional[Dict[str, Any]]:
+        path = paths.knowledge_intel_path / collection / name
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _collection_summary_passages(
+        self,
+        collection: str,
+        *,
+        description: str = "",
+        limit: int = 2,
+    ) -> List[str]:
+        if limit <= 0:
+            return []
+        query = " ".join(
+            part
+            for part in [
+                collection.replace("_", " "),
+                description,
+                "overview character story context",
+            ]
+            if str(part or "").strip()
+        )
+        try:
+            matches = self.vector_store.search(
+                query,
+                k=max(limit * 2, limit),
+                metadata_filter={"collection": collection},
+            )
+        except TypeError:
+            matches = self.vector_store.search(query, k=max(limit * 2, limit))
+        except Exception:
+            matches = []
+        excerpts: List[str] = []
+        seen: set[str] = set()
+        for match in matches:
+            cleaned = " ".join(str(match.get("text") or "").split())
+            if not cleaned:
+                continue
+            excerpt = cleaned[:220]
+            if excerpt in seen:
+                continue
+            seen.add(excerpt)
+            excerpts.append(excerpt)
+            if len(excerpts) >= limit:
+                break
+        return excerpts
 
     def _dedupe_semantic_hits(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         ordered: List[Dict[str, Any]] = []
@@ -1551,29 +1788,35 @@ class ConversationMemoryService:
                 collection,
             ]
         ).lower()
-        architecture_tokens = {
+        strong_tokens = {
             "architecture",
             "topology",
             "graph",
-            "cognition",
-            "memory",
-            "system",
-            "workflow",
             "routing",
             "contract",
             "interface",
             "integration",
+            "design",
+        }
+        supporting_tokens = {
+            "cognition",
+            "memory",
+            "system",
+            "workflow",
             "agent",
             "fault",
             "queue",
             "session",
             "trace",
-            "design",
             "obeos",
             "blackfong",
             "daise",
         }
-        return any(token in haystack for token in architecture_tokens)
+        strong_hits = sum(1 for token in strong_tokens if token in haystack)
+        if strong_hits >= 1:
+            return True
+        supporting_hits = sum(1 for token in supporting_tokens if token in haystack)
+        return supporting_hits >= 3
 
     def _annotate_provenance(self, result: Dict[str, Any]) -> Dict[str, Any]:
         service = self._knowledge_provenance_service()
@@ -1778,6 +2021,8 @@ class ConversationMemoryService:
         retrieval_profile: str = "fast",
     ) -> str:
         sections: List[str] = [f"Retrieval profile: {agent_name} ({prompt_mode}, {retrieval_profile})"]
+        if knowledge_context:
+            sections.append("Bounded retrieval context:\n" + knowledge_context)
         if session_summaries:
             sections.append(
                 "Session summaries:\n" + "\n".join(
@@ -1799,8 +2044,6 @@ class ConversationMemoryService:
                     for event in recent_events[:6]
                 )
             )
-        if knowledge_context:
-            sections.append("Bounded retrieval context:\n" + knowledge_context)
         if session_messages:
             sections.append(
                 "Recent transcript:\n" + "\n".join(
@@ -1985,6 +2228,38 @@ class ConversationMemoryService:
     def _tokenize(self, text: str) -> List[str]:
         return re.findall(r"[a-z0-9_]+", text.lower())
 
+    def _salient_query_tokens(self, text: str) -> List[str]:
+        stopwords = {
+            "tell",
+            "about",
+            "what",
+            "when",
+            "where",
+            "which",
+            "who",
+            "does",
+            "work",
+            "works",
+            "explain",
+            "show",
+            "give",
+            "please",
+            "would",
+            "could",
+            "should",
+            "into",
+            "from",
+            "have",
+            "with",
+        }
+        salient: List[str] = []
+        for token in self._tokenize(text):
+            if len(token) <= 3 or token in stopwords:
+                continue
+            if token not in salient:
+                salient.append(token)
+        return salient[:8]
+
     def _token_overlap_score(self, tokens: List[str], haystack: str, *, weight: float) -> float:
         if not tokens or not haystack:
             return 0.0
@@ -1995,6 +2270,86 @@ class ConversationMemoryService:
         }
         overlap = sum(1 for token in unique_tokens if token in haystack)
         return overlap * weight
+
+    def _filter_session_summaries_for_query(
+        self,
+        summaries: List[Dict[str, Any]],
+        *,
+        focus_tokens: List[str],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        return self._filter_context_records(
+            summaries,
+            focus_tokens=focus_tokens,
+            limit=limit,
+            text_getter=lambda item: str(item.get("summary") or ""),
+            tie_breaker=lambda item: float(item.get("timestamp") or 0.0),
+        )
+
+    def _filter_global_memories_for_query(
+        self,
+        memories: List[Dict[str, Any]],
+        *,
+        focus_tokens: List[str],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        return self._filter_context_records(
+            memories,
+            focus_tokens=focus_tokens,
+            limit=limit,
+            text_getter=lambda item: " ".join(
+                [
+                    str(item.get("text") or ""),
+                    str((item.get("metadata") or {}).get("title") or ""),
+                ]
+            ),
+            tie_breaker=lambda item: float(item.get("relevance") or 0.0),
+        )
+
+    def _filter_recent_events_for_query(
+        self,
+        events: List[Dict[str, Any]],
+        *,
+        focus_tokens: List[str],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        return self._filter_context_records(
+            events,
+            focus_tokens=focus_tokens,
+            limit=limit,
+            text_getter=lambda item: " ".join(
+                [
+                    str(item.get("source") or ""),
+                    str(item.get("event_type") or ""),
+                    str(item.get("message") or ""),
+                    str(item.get("payload") or ""),
+                ]
+            ),
+            tie_breaker=lambda item: float(item.get("relevance") or item.get("timestamp") or 0.0),
+        )
+
+    def _filter_context_records(
+        self,
+        records: List[Dict[str, Any]],
+        *,
+        focus_tokens: List[str],
+        limit: int,
+        text_getter: Any,
+        tie_breaker: Any,
+    ) -> List[Dict[str, Any]]:
+        if limit <= 0 or not records:
+            return []
+        if not focus_tokens:
+            return records[:limit]
+        ranked: List[tuple[float, float, Dict[str, Any]]] = []
+        for record in records:
+            haystack = str(text_getter(record) or "").lower()
+            overlap = self._token_overlap_score(focus_tokens, haystack, weight=1.0)
+            if overlap <= 0:
+                continue
+            ranked.append((overlap, float(tie_breaker(record) or 0.0), record))
+        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [item[2] for item in ranked[:limit]]
 
     def _normalize_request_phases(self, events: List[Event]) -> List[Dict[str, Any]]:
         phase_for_type = {

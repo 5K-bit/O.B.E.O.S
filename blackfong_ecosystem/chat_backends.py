@@ -389,9 +389,49 @@ class HeuristicChatBackend(BaseChatBackend):
         if "memory" in lowered:
             return "Session and global memory are available through the shared conversation layer. Use /memory or pin important context from the HUD."
 
+        grounded = self._grounded_context_fallback(lowered, context_text)
+        if grounded:
+            return grounded
+
         return (
             "The primary Ollama response did not complete, so D.A.I.S.E is using the local fallback path. "
             "I still have access to recent session context and pinned memory, but richer reasoning depends on the local model path recovering."
+        )
+
+    def _grounded_context_fallback(self, lowered: str, context_text: str) -> str:
+        if not context_text:
+            return ""
+        source_match = re.search(
+            r"\[Source\s+\d+\][^\n]*\n(?P<body>.+?)(?:\n---\n|\Z)",
+            context_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not source_match:
+            return ""
+        excerpt = " ".join(source_match.group("body").split()).strip()
+        if not excerpt:
+            return ""
+        excerpt = excerpt[:420].rstrip(" ,;")
+        if any(
+            token in lowered
+            for token in (
+                "tell me about",
+                "what is",
+                "what's",
+                "who is",
+                "who's",
+                "explain",
+                "remember",
+                "recall",
+            )
+        ):
+            return (
+                "The primary Ollama response did not complete, but local OBEOS knowledge says: "
+                f"{excerpt}"
+            )
+        return (
+            "The primary Ollama response did not complete, but I can still ground this in local OBEOS context: "
+            f"{excerpt}"
         )
 
 

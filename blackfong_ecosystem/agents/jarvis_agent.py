@@ -234,6 +234,7 @@ class JARVISAgent(Agent):
             "If the operator asks what D.A.I.S.E stands for, the expansion is Direct Artificial Intelligence System Environment. "
             "Blackfong adjudicates truth and governance; you communicate truthful, grounded answers to the operator. "
             "Use the supplied session transcript and global memory when it is relevant. "
+            "When bounded ecosystem context includes knowledge citations or memory evidence, treat that supplied context as authoritative for this turn instead of substituting unrelated prior model knowledge. "
             "Answer naturally, prefer concise responses by default, and be explicit when you are unsure. "
             "If the user asks about system abilities or commands, mention the HUD, TUI, slash commands, admitted agents, or routing when helpful."
         )

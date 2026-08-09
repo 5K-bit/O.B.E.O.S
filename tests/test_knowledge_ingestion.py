@@ -59,7 +59,13 @@ class FakeVectorStore(VectorStore):
         self.texts.extend(texts)
         self.metadatas.extend(metas)
 
-    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        del query, k, metadata_filter
         return []
 
 

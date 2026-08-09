@@ -9,7 +9,7 @@ import blackfong_ecosystem.ecosystem_knowledge as ecosystem_knowledge_module
 import blackfong_ecosystem.model_routing as model_routing_module
 import pytest
 
-from blackfong_ecosystem.chat_backends import ChatBackendError, ChatBackendResult, OllamaChatBackend
+from blackfong_ecosystem.chat_backends import ChatBackendError, ChatBackendResult, HeuristicChatBackend, OllamaChatBackend
 from blackfong_ecosystem.config import Paths
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
 from blackfong_ecosystem.daise import DAISE
@@ -48,10 +48,19 @@ class FakeVectorStore:
     ) -> None:
         self.add(ids, texts, metadatas)
 
-    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         query_tokens = {token for token in query.lower().split() if token}
         ranked: List[Dict[str, Any]] = []
         for item_id, payload in self.docs.items():
+            if metadata_filter:
+                metadata = payload["metadata"]
+                if any(metadata.get(key) != value for key, value in metadata_filter.items()):
+                    continue
             haystack = " ".join(
                 [
                     payload["text"],
@@ -320,6 +329,80 @@ def test_standard_retrieval_prefers_collection_summary_for_spawn(tmp_path: Path,
     assert "Al Simmons" in bundle["knowledge_context"]
 
 
+def test_standard_retrieval_rescues_hinted_collection_without_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    temp_paths = Paths.from_root(tmp_path)
+    monkeypatch.setattr(conversation_memory_module, "paths", temp_paths)
+
+    vector_store = FakeVectorStore()
+    vector_store.upsert(
+        ids=["memory-doc-1", "spawn-1"],
+        texts=[
+            "Spawn startup test coverage for the dashboard and memory chamber.",
+            "Spawn follows Al Simmons after bargaining with Malebolgia and returning to Earth as Hellspawn.",
+        ],
+        metadatas=[
+            {
+                "path": "test_all_phases.py",
+                "source_id": "doc:test-all-phases",
+                "title": "All phases test",
+            },
+            {
+                "collection": "spawn",
+                "source_id": "spawn-src",
+                "source_path": "spawn/issues_001_008.md",
+                "title": "Spawn 1-8",
+            },
+        ],
+    )
+    memory = _build_memory(tmp_path, vector_store=vector_store)
+    collection_registry = CollectionRegistry(temp_paths.collection_registry_path)
+    collection_registry.upsert("spawn", domain="comics", description="Spawn comic universe and related series")
+    collection_registry.save()
+    source_registry = SourceRegistry(temp_paths.source_registry_path)
+    source_registry.register(
+        source_type="markdown",
+        path=tmp_path / "spawn-001.md",
+        series="Spawn",
+        issue_range="1-8",
+        collection="spawn",
+        domain="comics",
+        compute_hash=False,
+    )
+    source_registry.save()
+    intel_dir = temp_paths.knowledge_intel_path / "spawn"
+    intel_dir.mkdir(parents=True, exist_ok=True)
+    (intel_dir / "inventory.json").write_text(
+        json.dumps(
+            {
+                "collection": "spawn",
+                "domain": "comics",
+                "sources": 1,
+                "embedded": 1,
+                "total_chunks": 1,
+                "issue_ranges": ["1-8"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (intel_dir / "timeline.json").write_text(
+        json.dumps({"collection": "spawn", "event_count": 1}),
+        encoding="utf-8",
+    )
+
+    bundle = memory.build_context(
+        session_id=memory.create_session_id(),
+        query="tell me about spawn",
+        agent_name="daise",
+        analysis_mode="standard",
+        retrieval_profile="standard",
+    )
+
+    assert bundle["citations"][0]["collection"] == "spawn"
+    assert bundle["citations"][0]["kind"] == "collection_summary"
+    assert "Spawn comic universe and related series" in bundle["knowledge_context"]
+    assert "Al Simmons" in bundle["knowledge_context"]
+
+
 def test_knowledge_routes_use_existing_memory_stack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     reset_ui_services_for_tests()
     temp_paths = Paths.from_root(tmp_path)
@@ -564,3 +647,25 @@ def test_model_routing_falls_back_after_read_timeout(monkeypatch: pytest.MonkeyP
     assert all(item["timeout"] == model_routing_module.STANDARD_CHAIN_TIMEOUT_CAP_S for item in calls)
     assert result.text == "fallback succeeded"
     assert result.metadata["selected_model"] == "fast-model"
+
+
+def test_heuristic_fallback_uses_grounded_context_when_available() -> None:
+    backend = HeuristicChatBackend()
+    result = backend.generate(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Conversation memory and ecosystem context:\n"
+                    "[Source 1] title=Spawn | kind=collection_summary | collection=spawn\n"
+                    "Spawn is an OBEOS knowledge collection focused on Spawn comic universe and related series. "
+                    "Representative passages: Spawn follows Al Simmons after bargaining with Malebolgia and returning to Earth as Hellspawn.\n"
+                ),
+            },
+            {"role": "user", "content": "tell me about spawn"},
+        ]
+    )
+
+    assert "local OBEOS knowledge says" in result.text
+    assert "Al Simmons" in result.text
+    assert "fallback path" not in result.text
