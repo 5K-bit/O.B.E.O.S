@@ -25,6 +25,8 @@ class OperatorChatService:
         analysis_mode: str = "fast",
         stream_callback: Optional[Any] = None,
         include_memory: bool = False,
+        include_messages: bool = True,
+        include_trace: bool = True,
         modality: str = "text",
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -88,12 +90,14 @@ class OperatorChatService:
             "request_id": request_id,
             "result": result,
             "analysis_mode": analysis_mode,
-            "messages": self.memory_service.get_session_messages(session_id, limit=80),
-            "trace": self.memory_service.get_request_trace(request_id),
             "progress_events": progress_events,
             "reports": reports,
             "selection": selections[-1] if selections else None,
         }
+        if include_messages:
+            payload["messages"] = self.memory_service.get_session_messages(session_id, limit=80)
+        if include_trace:
+            payload["trace"] = self.memory_service.get_request_trace(request_id)
         if include_memory:
             payload["memory"] = self.memory_service.build_context(
                 session_id=session_id,

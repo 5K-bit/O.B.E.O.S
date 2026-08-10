@@ -35,6 +35,7 @@ from blackfong_ecosystem.model_routing import (
     resolve_response_mode,
     should_use_fast_path,
 )
+from blackfong_ecosystem.tinyprogrammer_companion import tinyprogrammer_companion
 from blackfong_ecosystem.voice_loop_controller import VoiceLoopController
 
 
@@ -75,6 +76,7 @@ class UnifiedOrchestrator:
         self.gps_service = GPSService(event_store=self.memory_service.event_store)
         self.awareness_service = SystemAwarenessService(
             memory_service=self.memory_service,
+            tinyprogrammer=tinyprogrammer_companion,
             gps_service=self.gps_service,
         )
         self.daise = DAISE.create_default(

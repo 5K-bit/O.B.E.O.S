@@ -289,8 +289,6 @@ class OllamaRoutingChatBackend(OllamaChatBackend):
             timeout_value = float(requested_timeout)
         except (TypeError, ValueError):
             return None
-        if chain_length <= 1:
-            return timeout_value
         mode = normalize_response_mode(options.get("mode"))
         if mode == "fast":
             return min(timeout_value, FAST_CHAIN_TIMEOUT_CAP_S)

@@ -80,6 +80,8 @@ class StubOperatorChat:
         analysis_mode: str = "standard",
         stream_callback: Optional[Any] = None,
         include_memory: bool = False,
+        include_messages: bool = True,
+        include_trace: bool = True,
         modality: str = "text",
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -92,6 +94,9 @@ class StubOperatorChat:
                     "request_id": request_id,
                     "agent_override": agent_override,
                     "analysis_mode": analysis_mode,
+                    "include_memory": include_memory,
+                    "include_messages": include_messages,
+                    "include_trace": include_trace,
                     "modality": modality,
                     "context": dict(context or {}),
                 }
@@ -311,6 +316,8 @@ def test_telegram_gateway_default_mode_is_standard(tmp_path: Path) -> None:
 
     assert accepted is True
     assert operator_chat.calls[0]["analysis_mode"] == "standard"
+    assert operator_chat.calls[0]["include_messages"] is False
+    assert operator_chat.calls[0]["include_trace"] is False
 
 
 def test_telegram_gateway_upgrades_legacy_non_explicit_fast_threads_to_standard(tmp_path: Path) -> None:
@@ -367,6 +374,56 @@ def test_telegram_gateway_upgrades_legacy_non_explicit_fast_threads_to_standard(
 
     assert accepted is True
     assert operator_chat.calls[0]["analysis_mode"] == "standard"
+    assert stored_mode == "standard"
+
+
+def test_telegram_gateway_normalizes_legacy_fast_threads_on_startup(tmp_path: Path) -> None:
+    memory = build_memory(tmp_path)
+    with memory.event_store.engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO telegram_thread_state (
+                    thread_key,
+                    telegram_chat_id,
+                    telegram_user_id,
+                    session_id,
+                    mode,
+                    created_at,
+                    last_seen_at,
+                    last_message_id,
+                    last_update_id,
+                    metadata_json
+                ) VALUES (
+                    'telegram:100:200',
+                    '100',
+                    '200',
+                    'legacy-session',
+                    'fast',
+                    :now,
+                    :now,
+                    1,
+                    1,
+                    '{}'
+                )
+                """
+            ),
+            {"now": time.time()},
+        )
+
+    TelegramGatewayService(
+        settings=build_settings(allowlist=(("100", "200"),)),
+        memory_service=memory,
+        operator_chat=StubOperatorChat(),
+        http_client=FakeTelegramClient(),
+        lock_path=tmp_path / "telegram.lock",
+    )
+
+    with memory.event_store.engine.begin() as conn:
+        stored_mode = conn.execute(
+            text("SELECT mode FROM telegram_thread_state WHERE thread_key = 'telegram:100:200'")
+        ).scalar_one()
+
     assert stored_mode == "standard"
 
 

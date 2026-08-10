@@ -374,19 +374,42 @@ class HeuristicChatBackend(BaseChatBackend):
         if "favorite color" in lowered and favorite_color_match:
             return f"Your favorite color is {favorite_color_match.group(1)}."
 
-        if any(token in lowered for token in ("hello", "hi", "hey")):
-            return "D.A.I.S.E is online locally. I can keep session history, recall pinned memory, and route work through the rest of the ecosystem."
+        if self._matches_memory_commitment_prompt(lowered):
+            return (
+                "Yes. If we keep that in our shared session or promote it into pinned O.B.E.O.S. memory, "
+                "D.A.I.S.E. can carry it forward across the HUD, desktop, and Telegram."
+            )
 
-        if any(token in lowered for token in ("status", "system status", "health")):
+        if self._matches_chat_rendering_prompt(lowered):
+            return (
+                "That usually points to the active chat surface rather than lost memory. "
+                "When a reply looks cut off in O.B.E.O.S., the usual causes are the renderer, "
+                "scroll container, or message layout while the live model path is recovering."
+            )
+
+        if self._matches_milestone_prompt(lowered):
+            return (
+                "Thank you. That does matter. "
+                "Remembering your identity and carrying forward shared O.B.E.O.S. context is one of the milestones "
+                "we're actively strengthening."
+            )
+
+        if self._contains_any_word(lowered, "hello", "hi", "hey"):
+            return (
+                "Hello. D.A.I.S.E. is here with local O.B.E.O.S. memory, recent session context, "
+                "and stored knowledge still available."
+            )
+
+        if self._contains_any_phrase(lowered, "system status") or self._contains_any_word(lowered, "status", "health"):
             return "O.B.E.O.S is online locally. Use the HUD for sessions, memory, commands, and voice controls."
 
-        if any(token in lowered for token in ("help", "what can you do", "capabilities")):
+        if self._contains_any_phrase(lowered, "what can you do") or self._contains_any_word(lowered, "help", "capabilities"):
             return (
                 "I can chat as D.A.I.S.E, recall prior sessions, pin durable memory, surface session history, "
                 "and route specialized requests to coding, Lilo, Stitch, or voice controls."
             )
 
-        if "memory" in lowered:
+        if self._contains_any_word(lowered, "memory"):
             return "Session and global memory are available through the shared conversation layer. Use /memory or pin important context from the HUD."
 
         grounded = self._grounded_context_fallback(lowered, context_text)
@@ -394,8 +417,8 @@ class HeuristicChatBackend(BaseChatBackend):
             return grounded
 
         return (
-            "The primary Ollama response did not complete, so D.A.I.S.E is using the local fallback path. "
-            "I still have access to recent session context and pinned memory, but richer reasoning depends on the local model path recovering."
+            "I can still help from local O.B.E.O.S. memory and stored knowledge while the live model lane recovers. "
+            "If you want, ask again directly and I will keep the answer grounded."
         )
 
     def _grounded_context_fallback(self, lowered: str, context_text: str) -> str:
@@ -408,10 +431,9 @@ class HeuristicChatBackend(BaseChatBackend):
         )
         if not source_match:
             return ""
-        excerpt = " ".join(source_match.group("body").split()).strip()
+        excerpt = self._clean_local_fallback_excerpt(source_match.group("body"))
         if not excerpt:
             return ""
-        excerpt = excerpt[:420].rstrip(" ,;")
         if any(
             token in lowered
             for token in (
@@ -426,13 +448,82 @@ class HeuristicChatBackend(BaseChatBackend):
             )
         ):
             return (
-                "The primary Ollama response did not complete, but local OBEOS knowledge says: "
-                f"{excerpt}"
+                "From local O.B.E.O.S. knowledge, "
+                f"{excerpt}. "
+                "I'm answering from stored context while the live model lane recovers."
             )
         return (
-            "The primary Ollama response did not complete, but I can still ground this in local OBEOS context: "
-            f"{excerpt}"
+            "I can still ground this from local O.B.E.O.S. context: "
+            f"{excerpt}. "
+            "I'm using the stored local context for this turn."
         )
+
+    @staticmethod
+    def _clean_local_fallback_excerpt(text: str) -> str:
+        cleaned = " ".join(str(text or "").split())
+        if not cleaned:
+            return ""
+
+        passage_snippet = ""
+        passage_match = re.search(
+            r"Representative passages:\s*(.+?)(?:Structured timeline entries:|Open questions:|Known gaps:|\[truncated\]|\Z)",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        if passage_match:
+            passage_text = passage_match.group(1).strip(" ,.;:-")
+            if passage_text:
+                passage_snippet = re.split(r"(?<=[.!?])\s+", passage_text, maxsplit=1)[0].strip(" ,.;:-")
+
+        for stopper in (
+            "Representative passages:",
+            "Structured timeline entries:",
+            "Open questions:",
+            "Known gaps:",
+            "[truncated]",
+        ):
+            index = cleaned.lower().find(stopper.lower())
+            if index > 0:
+                cleaned = cleaned[:index].rstrip(" ,.;:-")
+                break
+
+        if passage_snippet and passage_snippet.lower() not in cleaned.lower():
+            cleaned = f"{cleaned}. {passage_snippet}".strip(" ,.;:-")
+
+        cleaned = re.sub(r"[_*#~`|]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:-")
+        if len(cleaned) > 320:
+            cleaned = cleaned[:317].rstrip(" ,.;:-") + "..."
+        return cleaned
+
+    @staticmethod
+    def _contains_any_word(text: str, *words: str) -> bool:
+        return any(re.search(rf"\b{re.escape(word)}\b", text, flags=re.IGNORECASE) for word in words)
+
+    @staticmethod
+    def _contains_any_phrase(text: str, *phrases: str) -> bool:
+        lowered = str(text or "").lower()
+        return any(str(phrase).lower() in lowered for phrase in phrases)
+
+    def _matches_memory_commitment_prompt(self, lowered: str) -> bool:
+        return self._contains_any_phrase(
+            lowered,
+            "will you remember",
+            "remember that in the future",
+            "remember this in the future",
+            "remember to do that in the future",
+            "remember that later",
+        )
+
+    def _matches_chat_rendering_prompt(self, lowered: str) -> bool:
+        if not self._contains_any_phrase(lowered, "cut off", "clipped", "truncated", "not showing all"):
+            return False
+        return self._contains_any_word(lowered, "text", "reply", "message", "messages", "render", "rendering", "chat")
+
+    def _matches_milestone_prompt(self, lowered: str) -> bool:
+        if not self._contains_any_word(lowered, "congratulate", "congratulations", "milestone"):
+            return False
+        return self._contains_any_word(lowered, "remembered", "remember", "name", "identity")
 
 
 def build_default_chat_backend() -> BaseChatBackend:

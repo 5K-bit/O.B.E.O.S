@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import time
 import uuid
@@ -149,8 +150,12 @@ class DAISE:
             workspace_root=paths.root,
             start_watch=False,
         )
+        if awareness_service is None:
+            from ..tinyprogrammer_companion import tinyprogrammer_companion
+
         awareness_service = awareness_service or SystemAwarenessService(
             memory_service=memory_service,
+            tinyprogrammer=tinyprogrammer_companion,
             gps_service=GPSService(event_store=event_store),
         )
 
@@ -323,6 +328,8 @@ class DAISE:
                     confidence=0.72,
                     modality=modality,
                     parent_event_id=query_event.id,
+                    provider="policy_engine",
+                    model="policy-v1",
                     execution_time_ms=execution_time_ms,
                     success=True,
                     extras={
@@ -330,6 +337,8 @@ class DAISE:
                         "consulted_agents": [],
                         "synthesized": False,
                         "analysis_mode": analysis_mode,
+                        "retrieval_profile": retrieval_profile,
+                        "transport": context.get("transport"),
                         "decision_state": policy_decision.get("decision_state"),
                         "policy_decision": policy_decision,
                     },
@@ -343,8 +352,16 @@ class DAISE:
                         "success": True,
                         "decision_state": policy_decision.get("decision_state"),
                         "selected_agent": "daise",
+                        "output_agent": "daise",
                         "reason": "policy_gate",
                         "execution_time_ms": execution_time_ms,
+                        "provider": "policy_engine",
+                        "model": "policy-v1",
+                        "backend_error": None,
+                        "fallback_used": False,
+                        "retrieval_profile": retrieval_profile,
+                        "analysis_mode": analysis_mode,
+                        "transport": context.get("transport"),
                     },
                     confidence=0.72,
                     session_id=session_id,
@@ -560,6 +577,7 @@ class DAISE:
                     analysis_mode=analysis_mode,
                     skip_vector_search=skip_vector,
                     retrieval_profile=retrieval_profile,
+                    transport=context.get("transport"),
                 )
                 if use_chamber:
                     bundle["cognition_graph"] = self.memory_chamber.reasoning_context(
@@ -599,9 +617,12 @@ class DAISE:
                 source="daise",
                 event_type="memory_retrieval",
                 payload={
+                    "schema_version": "1.0",
                     "query": user_input,
                     "selected_candidates": candidate_agents,
                     "retrieval_profile": retrieval_profile,
+                    "analysis_mode": analysis_mode,
+                    "transport": context.get("transport"),
                     "retrievals": retrievals,
                     "session_messages": sum(item["session_messages"] for item in retrievals),
                     "session_summaries": sum(item["session_summaries"] for item in retrievals),
@@ -807,6 +828,8 @@ class DAISE:
                     "consulted_agents": candidate_agents,
                     "synthesized": synthesized,
                     "analysis_mode": analysis_mode,
+                    "retrieval_profile": retrieval_profile,
+                    "transport": context.get("transport"),
                     "trace_event_id": top_report.trace_event_id,
                     "task_type": top_report.task_type,
                     "backend_error": top_report.backend_error,
@@ -830,6 +853,9 @@ class DAISE:
                     "request_id": request_id,
                     "selected_agent": selected_agent,
                     "output_agent": output_agent,
+                    "retrieval_profile": retrieval_profile,
+                    "analysis_mode": analysis_mode,
+                    "transport": context.get("transport"),
                     "provider": top_report.provider,
                     "model": top_report.model,
                     "execution_time_ms": execution_time_ms,
@@ -858,6 +884,8 @@ class DAISE:
                 payload={
                     "schema_version": "1.0",
                     "retrieval_profile": retrieval_profile,
+                    "analysis_mode": analysis_mode,
+                    "transport": context.get("transport"),
                     "selected_candidates": candidate_agents,
                     "timing_ms": {
                         item["agent"]: item.get("timing_ms", {})
@@ -886,6 +914,13 @@ class DAISE:
                     "selection_event_id": selection_event.id,
                     "trust_update_event_id": trust_update_event.id,
                     "execution_time_ms": execution_time_ms,
+                    "provider": top_report.provider,
+                    "model": top_report.model,
+                    "backend_error": top_report.backend_error,
+                    "fallback_used": bool(top_report.backend_error),
+                    "retrieval_profile": retrieval_profile,
+                    "analysis_mode": analysis_mode,
+                    "transport": context.get("transport"),
                 },
                 confidence=response_confidence,
                 session_id=session_id,
@@ -961,7 +996,12 @@ class DAISE:
                     parent_event_id=query_event.id,
                     execution_time_ms=execution_time_ms,
                     success=False,
-                    extras={"error": str(exc)},
+                    extras={
+                        "error": str(exc),
+                        "analysis_mode": analysis_mode,
+                        "retrieval_profile": retrieval_profile,
+                        "transport": context.get("transport"),
+                    },
                     request_id=request_id,
                 )
                 self.conversation_memory.persist_workflow_event(
@@ -974,6 +1014,13 @@ class DAISE:
                         "selected_agent": "daise",
                         "reason": str(exc),
                         "execution_time_ms": execution_time_ms,
+                        "provider": "daise",
+                        "model": "exception-path",
+                        "backend_error": str(exc),
+                        "fallback_used": False,
+                        "retrieval_profile": retrieval_profile,
+                        "analysis_mode": analysis_mode,
+                        "transport": context.get("transport"),
                     },
                     confidence=0.0,
                     session_id=session_id,
@@ -1413,7 +1460,7 @@ class DAISE:
         request_started: float,
         progress_callback: Optional[TraceCallback],
     ) -> Optional[Dict[str, Any]]:
-        truth = self._grounded_truth_response(user_input)
+        truth = self._grounded_truth_response(user_input, session_id=session_id)
         if truth is None:
             return None
 
@@ -1427,7 +1474,11 @@ class DAISE:
             agent_override=context.get("agent_override"),
             request_id=request_id,
         )
-        event_type = "backend_health_observation" if truth["kind"] == "status" else "environment_snapshot"
+        event_type = (
+            "backend_health_observation"
+            if truth["kind"] in {"status", "tinyprogrammer_status"}
+            else "environment_snapshot"
+        )
         trace_event = self.conversation_memory.persist_workflow_event(
             source="daise",
             event_type=event_type,
@@ -1455,6 +1506,8 @@ class DAISE:
             confidence=0.94,
             modality=modality,
             parent_event_id=query_event.id,
+            provider="local_runtime_truth",
+            model="grounded-truth-v1",
             execution_time_ms=execution_time_ms,
             success=True,
             extras={
@@ -1462,6 +1515,8 @@ class DAISE:
                 "consulted_agents": [],
                 "synthesized": False,
                 "analysis_mode": context.get("analysis_mode"),
+                "retrieval_profile": normalize_retrieval_profile(context.get("retrieval_profile"), context.get("analysis_mode")),
+                "transport": context.get("transport"),
                 "decision_state": policy_decision.get("decision_state"),
                 "policy_decision": policy_decision,
                 "grounded_truth": {
@@ -1479,9 +1534,17 @@ class DAISE:
                 "success": True,
                 "decision_state": policy_decision.get("decision_state"),
                 "selected_agent": "daise",
+                "output_agent": "daise",
                 "reason": "grounded_truth",
                 "grounded_truth_kind": truth["kind"],
                 "execution_time_ms": execution_time_ms,
+                "provider": "local_runtime_truth",
+                "model": "grounded-truth-v1",
+                "backend_error": None,
+                "fallback_used": False,
+                "retrieval_profile": normalize_retrieval_profile(context.get("retrieval_profile"), context.get("analysis_mode")),
+                "analysis_mode": context.get("analysis_mode"),
+                "transport": context.get("transport"),
             },
             confidence=0.9,
             session_id=session_id,
@@ -1532,18 +1595,127 @@ class DAISE:
             "execution_time_ms": execution_time_ms,
         }
 
-    def _grounded_truth_response(self, user_input: str) -> Optional[Dict[str, Any]]:
+    def _grounded_truth_response(self, user_input: str, *, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         normalized = " ".join(str(user_input or "").strip().lower().split())
         if not normalized:
             return None
 
-        now = datetime.now().astimezone()
+        normalized_compact = self._compact_truth_text(normalized)
+        now, clock_source = self._runtime_truth_now()
         observation = {
             "local_date": f"{now.strftime('%A, %B')} {now.day}, {now.year}",
             "local_time": now.strftime("%I:%M %p %Z").lstrip("0"),
             "day_of_week": now.strftime("%A"),
             "timezone": str(now.tzinfo or ""),
+            "clock_source": clock_source,
         }
+        operator_profile: Dict[str, Any] = {}
+        if session_id:
+            try:
+                operator_profile = self.conversation_memory.operator_profile_snapshot(session_id=session_id)
+            except Exception:
+                operator_profile = {}
+        work_update_topics = self._extract_grounded_work_update_topics(user_input)
+
+        if self._matches_greeting_truth(normalized_compact):
+            greeting = self._build_grounded_greeting(
+                normalized_compact=normalized_compact,
+                operator_profile=operator_profile,
+            )
+            return {
+                "kind": "greeting",
+                "source": "obeos_session_awareness",
+                "response": greeting,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:3],
+                },
+            }
+
+        if self._matches_checkin_truth(normalized_compact):
+            check_in = self._build_grounded_checkin(operator_profile=operator_profile)
+            return {
+                "kind": "check_in",
+                "source": "obeos_session_awareness",
+                "response": check_in,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:3],
+                },
+            }
+
+        if self._matches_memory_progress_truth(normalized_compact):
+            memory_progress = self._build_grounded_memory_progress(
+                normalized_compact=normalized_compact,
+                operator_profile=operator_profile,
+                work_topics=work_update_topics,
+            )
+            return {
+                "kind": "memory_progress",
+                "source": "obeos_memory_layer",
+                "response": memory_progress,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:3],
+                    "work_update_topics": work_update_topics[:3],
+                },
+            }
+
+        if self._matches_memory_system_truth(normalized_compact):
+            memory_system = self._build_grounded_memory_system(
+                normalized_compact=normalized_compact,
+                operator_profile=operator_profile,
+            )
+            return {
+                "kind": "memory_system",
+                "source": "obeos_memory_layer",
+                "response": memory_system,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:3],
+                    "memory_components": [
+                        "operator_fact",
+                        "active_work_item",
+                        "pinned_memory",
+                        "session_summary",
+                    ],
+                },
+            }
+
+        if self._matches_chat_rendering_truth(normalized_compact):
+            rendering_truth = self._build_grounded_chat_rendering_truth(
+                operator_profile=operator_profile,
+            )
+            return {
+                "kind": "chat_rendering",
+                "source": "obeos_ui_contract",
+                "response": rendering_truth,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:3],
+                    "likely_causes": [
+                        "surface_truncation_path",
+                        "scroll_container_clipping",
+                        "message_renderer_layout",
+                    ],
+                },
+            }
+
+        if self._matches_work_update_truth(normalized_compact, work_update_topics):
+            work_update = self._build_grounded_work_update(
+                normalized_compact=normalized_compact,
+                operator_profile=operator_profile,
+                work_topics=work_update_topics,
+            )
+            return {
+                "kind": "work_update",
+                "source": "obeos_session_awareness",
+                "response": work_update,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "active_work": work_update_topics[:3],
+                },
+            }
 
         if self._matches_identity_truth(normalized):
             return {
@@ -1589,35 +1761,44 @@ class DAISE:
             ),
         )
         asks_status = self._matches_status_truth(normalized)
+        asks_tiny_status = self._matches_tinyprogrammer_truth(normalized_compact)
 
         if asks_date and asks_time:
             return {
                 "kind": "date_time",
-                "source": "local_system_clock",
+                "source": clock_source,
                 "response": f"It is {observation['local_date']}, and the local time is {observation['local_time']}.",
                 "observation": observation,
             }
         if asks_date:
             return {
                 "kind": "date",
-                "source": "local_system_clock",
+                "source": clock_source,
                 "response": f"Today is {observation['local_date']}.",
                 "observation": observation,
             }
         if asks_day:
             return {
                 "kind": "day_of_week",
-                "source": "local_system_clock",
+                "source": clock_source,
                 "response": f"Today is {observation['day_of_week']}.",
                 "observation": observation,
             }
         if asks_time:
             return {
                 "kind": "time",
-                "source": "local_system_clock",
+                "source": clock_source,
                 "response": f"The local time is {observation['local_time']}.",
                 "observation": observation,
             }
+        if asks_tiny_status:
+            snapshot = self.awareness_service.build_snapshot(emit=False) if self.awareness_service is not None else {}
+            tiny_truth = self._build_tinyprogrammer_truth(
+                normalized_compact=normalized_compact,
+                snapshot=snapshot,
+            )
+            if tiny_truth is not None:
+                return tiny_truth
         if asks_status:
             snapshot = self.awareness_service.build_snapshot(emit=False) if self.awareness_service is not None else {}
             observed = snapshot.get("observed", {}) if snapshot else {}
@@ -1648,8 +1829,364 @@ class DAISE:
         return None
 
     @staticmethod
+    def _runtime_truth_now() -> tuple[datetime, str]:
+        override = str(os.getenv("BLACKFONG_RUNTIME_TRUTH_NOW", "") or "").strip()
+        if override:
+            try:
+                parsed = datetime.fromisoformat(override.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    local_tz = datetime.now().astimezone().tzinfo
+                    parsed = parsed.replace(tzinfo=local_tz)
+                return parsed.astimezone(), "runtime_truth_override"
+            except ValueError:
+                pass
+        return datetime.now().astimezone(), "local_system_clock"
+
+    @staticmethod
     def _matches_any(normalized: str, phrases: Sequence[str]) -> bool:
         return any(phrase in normalized for phrase in phrases)
+
+    @staticmethod
+    def _compact_truth_text(normalized: str) -> str:
+        compact = re.sub(r"[^a-z0-9'\s]+", " ", str(normalized or "").lower())
+        return " ".join(compact.split())
+
+    def _matches_greeting_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact:
+            return False
+        greeting_phrases = {
+            "hello",
+            "hello there",
+            "hi",
+            "hi there",
+            "hey",
+            "hey there",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "im back",
+            "i'm back",
+            "we are back",
+            "were back",
+            "we're back",
+        }
+        token_count = len(normalized_compact.split())
+        if token_count <= 5 and normalized_compact in greeting_phrases:
+            return True
+        greeting_prefixes = ("hello ", "hi ", "hey ", "good morning ", "good afternoon ", "good evening ")
+        if token_count <= 6 and "back" in normalized_compact and normalized_compact.startswith(greeting_prefixes):
+            return True
+        return False
+
+    def _matches_checkin_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact:
+            return False
+        check_in_phrases = {
+            "how are you",
+            "how are you doing",
+            "how are you doing tonight",
+            "how are you tonight",
+            "hows it going",
+            "how's it going",
+            "are you there",
+            "you there",
+            "are you awake",
+            "you awake",
+            "are you doing okay",
+            "you doing okay",
+        }
+        token_count = len(normalized_compact.split())
+        return token_count <= 7 and normalized_compact in check_in_phrases
+
+    def _matches_work_update_truth(self, normalized_compact: str, work_topics: Sequence[str]) -> bool:
+        if not normalized_compact or not work_topics:
+            return False
+        if len(normalized_compact.split()) > 32:
+            return False
+        if any(token in normalized_compact for token in ("?", " why ", " status", " online", " offline")):
+            return False
+        update_markers = (
+            "i am working on",
+            "im working on",
+            "i'm working on",
+            "i am still working on",
+            "im still working on",
+            "i'm still working on",
+            "i have been working on",
+            "i've been working on",
+            "we are working on",
+            "we're working on",
+            "updates to your system",
+            "updates to the system",
+        )
+        if any(marker in normalized_compact for marker in update_markers):
+            return True
+        greeting_update_prefixes = (
+            "good morning i am ",
+            "good morning im ",
+            "good morning i'm ",
+            "good afternoon i am ",
+            "good afternoon im ",
+            "good afternoon i'm ",
+            "good evening i am ",
+            "good evening im ",
+            "good evening i'm ",
+        )
+        return normalized_compact.startswith(greeting_update_prefixes)
+
+    def _matches_memory_progress_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact or len(normalized_compact.split()) > 96:
+            return False
+        phrases = (
+            "made a good amount of changes",
+            "made a lot of changes",
+            "made alot of changes",
+            "made changes and they should reflect",
+            "noticed when i ask you what your name is you remembered it",
+            "congratulate you on that milestone",
+            "shows you have some kind of memory",
+            "have you noticed anything new",
+            "noticed anything new",
+            "improved the ecosystem alot",
+            "improved the ecosystem a lot",
+            "improved the system a lot",
+        )
+        if any(phrase in normalized_compact for phrase in phrases):
+            return True
+        memory_markers = (
+            "your name",
+            "remembered it",
+            "some kind of memory",
+            "milestone",
+            "remember your name",
+        )
+        change_markers = (
+            "what changed",
+            "changed",
+            "improved the ecosystem",
+            "improved the system",
+            "noticed anything new",
+            "notice anything new",
+        )
+        return any(marker in normalized_compact for marker in memory_markers) and any(
+            marker in normalized_compact for marker in change_markers
+        )
+
+    def _matches_memory_system_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact or len(normalized_compact.split()) > 40:
+            return False
+        phrases = (
+            "how did you add a note to yourself",
+            "how do you add a note to yourself",
+            "how does that work",
+            "how does memory work",
+            "will you remember to do that in the future",
+            "will you remember that in the future",
+            "will you remember to do that",
+            "will you remember that",
+            "did you save that",
+            "did you store that",
+            "keep that in mind",
+        )
+        return any(phrase in normalized_compact for phrase in phrases)
+
+    def _matches_chat_rendering_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact or len(normalized_compact.split()) > 36:
+            return False
+        phrases = (
+            "text is being cut off",
+            "text being cut off",
+            "reply is being cut off",
+            "reply being cut off",
+            "messages are cut off",
+            "message is cut off",
+            "message being cut off",
+            "message gets cut off",
+            "chat is cut off",
+            "chat gets cut off",
+            "not all of the text is visible",
+            "not all text is visible",
+            "cant see the whole reply",
+            "can't see the whole reply",
+            "reply tail is missing",
+            "response is clipped",
+            "message is clipped",
+            "reply is clipped",
+            "reply is truncated",
+            "message is truncated",
+        )
+        return any(phrase in normalized_compact for phrase in phrases)
+
+    def _build_grounded_greeting(
+        self,
+        *,
+        normalized_compact: str,
+        operator_profile: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        lowered = normalized_compact.lower()
+        salutation = "Hello"
+        if "good morning" in lowered:
+            salutation = "Good morning"
+        elif "good afternoon" in lowered:
+            salutation = "Good afternoon"
+        elif "good evening" in lowered:
+            salutation = "Good evening"
+        elif "back" in lowered and any(
+            token in lowered
+            for token in ("im back", "i'm back", "we are back", "were back", "we're back")
+        ):
+            salutation = "Welcome back"
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        active_work = [
+            str(item).strip()
+            for item in list(profile.get("active_work") or [])
+            if str(item).strip()
+        ]
+        response = f"{salutation}{', ' + preferred_name if preferred_name else ''}. I'm here in O.B.E.O.S and ready."
+        if active_work:
+            response += f" I still have our recent work around {self._join_grounded_items(active_work[:3])}."
+        return response
+
+    def _build_grounded_chat_rendering_truth(
+        self,
+        *,
+        operator_profile: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        active_work = [
+            str(item).strip()
+            for item in list(profile.get("active_work") or [])
+            if str(item).strip()
+        ]
+        response = (
+            f"{preferred_name + ', ' if preferred_name else ''}"
+            "that usually points to the active chat surface rather than the memory layer. "
+            "When replies get cut off in O.B.E.O.S, the most likely cause is a truncation or layout problem "
+            "in the current HUD or desktop message renderer, scroll container, or panel sizing."
+        )
+        response += " The underlying request can still complete even when the visible message tail is clipped."
+        if active_work:
+            response += f" I still have our recent work around {self._join_grounded_items(active_work[:3])} in focus."
+        return response
+
+    def _build_grounded_checkin(self, *, operator_profile: Optional[Dict[str, Any]] = None) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        active_work = [
+            str(item).strip()
+            for item in list(profile.get("active_work") or [])
+            if str(item).strip()
+        ]
+        response = f"I'm here{', ' + preferred_name if preferred_name else ''}, and operating normally inside O.B.E.O.S."
+        if active_work:
+            response += f" I still have our recent work around {self._join_grounded_items(active_work[:3])} in focus."
+        return response
+
+    def _build_grounded_work_update(
+        self,
+        *,
+        normalized_compact: str,
+        operator_profile: Optional[Dict[str, Any]] = None,
+        work_topics: Sequence[str],
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        salutation = "I've noted that"
+        if normalized_compact.startswith("good morning"):
+            salutation = f"Good morning{', ' + preferred_name if preferred_name else ''}. I've noted that"
+        elif normalized_compact.startswith("good afternoon"):
+            salutation = f"Good afternoon{', ' + preferred_name if preferred_name else ''}. I've noted that"
+        elif normalized_compact.startswith("good evening"):
+            salutation = f"Good evening{', ' + preferred_name if preferred_name else ''}. I've noted that"
+        elif preferred_name:
+            salutation = f"{preferred_name}, I've noted that"
+        response = f"{salutation} you're still working on {self._join_grounded_items(list(work_topics)[:3])}."
+        response += " I'm here if you want to drill into the next step or sanity-check the current direction."
+        return response
+
+    def _build_grounded_memory_progress(
+        self,
+        *,
+        normalized_compact: str = "",
+        operator_profile: Optional[Dict[str, Any]] = None,
+        work_topics: Sequence[str],
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        current_topics = [
+            str(item).strip()
+            for item in list(work_topics or [])
+            if str(item).strip()
+        ]
+        active_work = [
+            str(item).strip()
+            for item in (current_topics + list(profile.get("active_work") or []))
+            if str(item).strip()
+        ]
+        active_work = list(dict.fromkeys(active_work))
+        parts: List[str] = ["Yes, I can see the difference."]
+        if "your name" in normalized_compact or "remember your name" in normalized_compact or "remembered it" in normalized_compact:
+            parts.append("I can also carry forward that I am D.A.I.S.E. inside O.B.E.O.S.")
+        if preferred_name:
+            parts.append(f'I can now reliably carry forward that you prefer I call you "{preferred_name}".')
+        if active_work:
+            parts.append(f"I also still have our recent work around {self._join_grounded_items(active_work[:3])} in focus.")
+        parts.append(
+            "That tells me the shared O.B.E.O.S memory layer is carrying more of our history forward instead of losing it between turns."
+        )
+        return " ".join(parts)
+
+    def _build_grounded_memory_system(
+        self,
+        *,
+        normalized_compact: str = "",
+        operator_profile: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        active_work = [
+            str(item).strip()
+            for item in list(profile.get("active_work") or [])
+            if str(item).strip()
+        ]
+        remembers_future = "will you remember" in normalized_compact or "keep that in mind" in normalized_compact
+        if remembers_future:
+            if preferred_name:
+                opening = f"Yes, {preferred_name}, if we keep it in the shared O.B.E.O.S memory layer."
+            else:
+                opening = "Yes, if we keep it in the shared O.B.E.O.S memory layer."
+            response = (
+                f"{opening} Important context is written into conversation memory backed by events.db, "
+                "then derived into operator facts, active work items, pinned memory, and session summaries."
+            )
+        else:
+            opening = "I do not keep a separate hidden notebook."
+            if preferred_name:
+                opening = f"{preferred_name}, I do not keep a separate hidden notebook."
+            response = (
+                f"{opening} O.B.E.O.S writes important context into the shared conversation memory layer backed by events.db, "
+                "then derives operator facts, active work items, pinned memory, and session summaries from it."
+            )
+        if active_work:
+            response += f" That is how I can carry forward things like {self._join_grounded_items(active_work[:3])}."
+        else:
+            response += " That is how I can carry forward your preferences and recent work."
+        return response
+
+    def _extract_grounded_work_update_topics(self, user_input: str) -> List[str]:
+        try:
+            extractor = getattr(self.conversation_memory, "_extract_work_topics", None)
+            if callable(extractor):
+                return [
+                    str(item).strip()
+                    for item in list(extractor(user_input) or [])
+                    if str(item).strip()
+                ]
+        except Exception:
+            return []
+        return []
 
     def _matches_identity_truth(self, normalized: str) -> bool:
         if self._matches_any(
@@ -1658,8 +2195,11 @@ class DAISE:
                 "what does daise stand for",
                 "what does d.a.i.s.e stand for",
                 "what is daise",
+                "what's your name",
                 "who are you",
                 "what is your name",
+                "do you remember your name",
+                "remember your name",
             ),
         ):
             return True
@@ -1681,6 +2221,129 @@ class DAISE:
             "runtime status",
         )
         return self._matches_any(normalized, status_phrases)
+
+    def _matches_tinyprogrammer_truth(self, normalized_compact: str) -> bool:
+        if "tinyprogrammer" not in normalized_compact and "tiny programmer" not in normalized_compact:
+            return False
+        if len(normalized_compact.split()) > 18:
+            return False
+        if normalized_compact.startswith(
+            (
+                "i am ",
+                "im ",
+                "i'm ",
+                "we are ",
+                "were ",
+                "we're ",
+                "good morning i am ",
+                "good afternoon i am ",
+                "good evening i am ",
+                "good evening im ",
+                "good evening i'm ",
+            )
+        ):
+            return False
+        explicit_markers = (
+            "status",
+            "online",
+            "offline",
+            "why",
+            "available",
+            "availability",
+            "up and running",
+            "not working",
+            "isnt",
+            "isn't",
+            "failed",
+            "failure",
+            "error",
+        )
+        if any(marker in normalized_compact for marker in explicit_markers):
+            return True
+        explicit_phrases = (
+            "is tinyprogrammer working",
+            "is tiny programmer working",
+            "is tinyprogrammer up",
+            "is tiny programmer up",
+            "did tinyprogrammer start",
+            "did tiny programmer start",
+            "can tinyprogrammer start",
+            "can tiny programmer start",
+            "tinyprogrammer startup status",
+            "tiny programmer startup status",
+        )
+        return any(phrase in normalized_compact for phrase in explicit_phrases)
+
+    def _build_tinyprogrammer_truth(
+        self,
+        *,
+        normalized_compact: str,
+        snapshot: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        observed = snapshot.get("observed", {}) if isinstance(snapshot, dict) else {}
+        services = observed.get("services", {}) if isinstance(observed.get("services"), dict) else {}
+        tiny = services.get("tinyprogrammer", {}) if isinstance(services.get("tinyprogrammer"), dict) else {}
+        if not tiny:
+            return None
+        online = bool(tiny.get("online"))
+        state = str(tiny.get("state") or tiny.get("mode") or "unknown")
+        reason_candidates = (
+            tiny.get("last_error_summary"),
+            tiny.get("stream_human_reason"),
+            tiny.get("live_control_human_reason"),
+            tiny.get("native_window_human_reason"),
+            tiny.get("human_reason"),
+            tiny.get("error"),
+        )
+        reason = ""
+        for candidate in reason_candidates:
+            text = str(candidate or "").strip()
+            if not text:
+                continue
+            if text.lower() in {
+                "tinyprogrammer is offline or unreachable from o.b.e.o.s.",
+                "tinyprogrammer live controls are available.",
+            }:
+                continue
+            reason = text
+            break
+
+        if online:
+            response = f"TinyProgrammer is online right now. State is {state}."
+            if reason:
+                response += f" {reason}"
+        else:
+            if any(token in normalized_compact for token in ("why", "not working", "working online", "isnt", "isn't")):
+                response = f"TinyProgrammer is not online right now. State is {state}."
+                if reason:
+                    response += f" {reason}"
+                else:
+                    response += " O.B.E.O.S currently sees it as offline or unreachable."
+            else:
+                response = f"TinyProgrammer is offline right now. State is {state}."
+                if reason:
+                    response += f" {reason}"
+
+        return {
+            "kind": "tinyprogrammer_status",
+            "source": "local_awareness_snapshot",
+            "response": response,
+            "observation": {
+                "tinyprogrammer": tiny,
+                "health": snapshot.get("health", {}) if isinstance(snapshot, dict) else {},
+            },
+        }
+
+    @staticmethod
+    def _join_grounded_items(items: Sequence[str]) -> str:
+        cleaned = [str(item).strip() for item in items if str(item).strip()]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} and {cleaned[1]}"
+        return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
 
     def _handle_file_workflow_request(
         self,
@@ -1871,6 +2534,8 @@ class DAISE:
                 "consulted_agents": [],
                 "synthesized": False,
                 "analysis_mode": analysis_mode,
+                "retrieval_profile": normalize_retrieval_profile(context.get("retrieval_profile"), analysis_mode),
+                "transport": context.get("transport"),
                 "task_type": "file_workflow",
                 "backend_error": workflow_result.get("error"),
                 "backend_metadata": {"file_action": intent.action},
@@ -1888,6 +2553,9 @@ class DAISE:
                 "request_id": request_id,
                 "selected_agent": "daise",
                 "output_agent": "daise",
+                "retrieval_profile": normalize_retrieval_profile(context.get("retrieval_profile"), analysis_mode),
+                "analysis_mode": analysis_mode,
+                "transport": context.get("transport"),
                 "provider": "blackfong",
                 "model": "file-workflow-v2",
                 "execution_time_ms": execution_time_ms,
@@ -1914,6 +2582,13 @@ class DAISE:
                 "selection_event_id": selection_event.id,
                 "execution_time_ms": execution_time_ms,
                 "file_action": intent.action,
+                "provider": "blackfong",
+                "model": "file-workflow-v2",
+                "backend_error": workflow_result.get("error"),
+                "fallback_used": False,
+                "retrieval_profile": normalize_retrieval_profile(context.get("retrieval_profile"), analysis_mode),
+                "analysis_mode": analysis_mode,
+                "transport": context.get("transport"),
             },
             confidence=response_confidence,
             session_id=session_id,

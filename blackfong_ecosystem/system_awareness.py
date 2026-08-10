@@ -436,11 +436,21 @@ class SystemAwarenessService:
             except Exception:
                 pass
         try:
+            if hasattr(self.tinyprogrammer, "get_status"):
+                try:
+                    status = self.tinyprogrammer.get_status(
+                        require_stream=getattr(self.tinyprogrammer, "auto_stream", True)
+                    )
+                except TypeError:
+                    status = self.tinyprogrammer.get_status()
+                status = dict(status or {})
+                status.setdefault("awareness_probe", "companion_status")
+                return status
             if hasattr(self.tinyprogrammer, "_build_offline_status"):
                 status = self.tinyprogrammer._build_offline_status()
                 status["awareness_probe"] = "offline_snapshot_no_live_probe"
                 return status
-            return self.tinyprogrammer.get_status()
+            return {"online": False, "mode": "unavailable", "error": "tinyprogrammer_status_method_missing"}
         except Exception as exc:
             return {"online": False, "mode": "unavailable", "error": str(exc)}
 

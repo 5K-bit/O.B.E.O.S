@@ -22,6 +22,7 @@ from blackfong_ecosystem.config import chat_settings
 from blackfong_ecosystem.model_routing import (
     backend_options_for_context,
     build_routed_chat_backend,
+    detect_intent,
     normalize_response_mode,
 )
 from blackfong_ecosystem.event_client import EventClient
@@ -54,6 +55,7 @@ class JARVISAgent(Agent):
         )
         self.dispatcher = ToolDispatcher(event_client=event_client)
         self.session_id = str(uuid.uuid4())
+        self._chat_backend_explicit = chat_backend is not None
         self.chat_backend = chat_backend or build_agent_chat_backend("jarvis")
         self.fallback_backend = fallback_backend or HeuristicChatBackend()
     
@@ -172,7 +174,7 @@ class JARVISAgent(Agent):
     
     def _generate_response(self, user_input: str, context: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         """Generate a response with the configured local backend and safe fallback."""
-        grounded = self._grounded_knowledge_response(context)
+        grounded = self._grounded_memory_response(context) or self._grounded_knowledge_response(context)
         if grounded is not None:
             prompt_metrics = dict(((context.get("memory_context") or {}).get("prompt_metrics") or {}))
             metadata = dict(grounded["metadata"])
@@ -187,9 +189,38 @@ class JARVISAgent(Agent):
                 "backend_error": None,
             }
         messages, prompt_metrics = self._build_chat_messages(user_input, context)
-        backend_options = self._backend_options(context)
-        response_mode = normalize_response_mode(context.get("analysis_mode") or context.get("response_mode"))
-        chat_backend = build_routed_chat_backend("jarvis", response_mode)
+        generation_mode = self._effective_generation_mode(user_input, context)
+        backend_context = dict(context)
+        backend_context["analysis_mode"] = generation_mode
+        backend_context["response_mode"] = generation_mode
+        backend_options = self._backend_options(backend_context)
+        requested_mode = normalize_response_mode(context.get("analysis_mode") or context.get("response_mode"))
+        chat_backend = self.chat_backend if self._chat_backend_explicit else build_routed_chat_backend("jarvis", generation_mode)
+        backend_health = self._resolve_backend_health(context)
+        backend_options = self._apply_backend_health_overrides(backend_options, backend_health)
+        if self._should_force_fallback(backend_health):
+            backend_result = self.fallback_backend.generate(messages)
+            metadata = dict(backend_result.metadata or {})
+            metadata.update(
+                {
+                    "fallback_reason": self._backend_health_reason(backend_health),
+                    "backend_health": backend_health,
+                    "preemptive_fallback": True,
+                    "mode": backend_options.get("mode"),
+                }
+            )
+            metadata["prompt_metrics"] = prompt_metrics
+            metadata.setdefault("prompt_message_count", prompt_metrics.get("message_count"))
+            metadata.setdefault("prompt_chars", prompt_metrics.get("prompt_chars"))
+            metadata.setdefault("approx_prompt_tokens", prompt_metrics.get("approx_prompt_tokens"))
+            metadata["requested_mode"] = requested_mode
+            metadata["generation_mode"] = generation_mode
+            return backend_result.text, {
+                "provider": backend_result.provider,
+                "model": backend_result.model,
+                "metadata": metadata,
+                "backend_error": self._backend_health_reason(backend_health),
+            }
         try:
             stream_callback = context.get("stream_callback")
             if stream_callback is not None and hasattr(chat_backend, "generate_stream"):
@@ -214,6 +245,7 @@ class JARVISAgent(Agent):
                     "ollama_attempts": getattr(exc, "metadata", {}).get("ollama_attempts", 0),
                     "attempt_log": getattr(exc, "metadata", {}).get("attempt_log", []),
                     "mode": backend_options.get("mode"),
+                    "backend_health": backend_health,
                 }
             )
 
@@ -221,12 +253,119 @@ class JARVISAgent(Agent):
         metadata.setdefault("prompt_message_count", prompt_metrics.get("message_count"))
         metadata.setdefault("prompt_chars", prompt_metrics.get("prompt_chars"))
         metadata.setdefault("approx_prompt_tokens", prompt_metrics.get("approx_prompt_tokens"))
+        metadata["requested_mode"] = requested_mode
+        metadata["generation_mode"] = generation_mode
+        if backend_health:
+            metadata.setdefault("backend_health", backend_health)
 
         return backend_result.text, {
             "provider": backend_result.provider,
             "model": backend_result.model,
             "metadata": metadata,
             "backend_error": backend_error,
+        }
+
+    def _effective_generation_mode(self, user_input: str, context: Dict[str, Any]) -> str:
+        """Keep standard retrieval while letting lightweight chat use the faster generation lane."""
+        requested_mode = normalize_response_mode(context.get("analysis_mode") or context.get("response_mode"))
+        if requested_mode != "standard":
+            return requested_mode
+        transport = str(context.get("transport") or context.get("input_origin") or "").strip().lower()
+        if transport in {"telegram", "hud", "desktop"}:
+            return requested_mode
+        detected = context.get("detected_intent")
+        if isinstance(detected, dict):
+            is_casual = bool(detected.get("casual"))
+            is_heavy = any(
+                bool(detected.get(key))
+                for key in ("coding", "deep_reasoning", "file_ops", "diagnostics", "tinyprogrammer")
+            )
+        else:
+            inferred = detect_intent(user_input)
+            is_casual = inferred.casual
+            is_heavy = any(
+                (
+                    inferred.coding,
+                    inferred.deep_reasoning,
+                    inferred.file_ops,
+                    inferred.diagnostics,
+                    inferred.tinyprogrammer,
+                )
+            )
+        text = str(user_input or "").strip()
+        if is_casual and not is_heavy and len(text) <= 220:
+            return "fast"
+        return requested_mode
+
+    @staticmethod
+    def _resolve_backend_health(context: Dict[str, Any]) -> Dict[str, Any]:
+        memory_context = context.get("memory_context") or {}
+        candidate = memory_context.get("backend_health") or context.get("backend_health") or {}
+        return dict(candidate) if isinstance(candidate, dict) else {}
+
+    def _apply_backend_health_overrides(self, options: Dict[str, Any], backend_health: Dict[str, Any]) -> Dict[str, Any]:
+        state = str(backend_health.get("state") or "").strip().lower()
+        if state not in {"degraded", "unavailable"}:
+            return dict(options)
+        adjusted = dict(options)
+        mode = normalize_response_mode(adjusted.get("mode"))
+        if state == "unavailable":
+            adjusted["timeout"] = 0.0
+            adjusted["max_attempts"] = 0
+            adjusted["retry_read_timeout"] = False
+            return adjusted
+        degraded_timeout_caps = {
+            "fast": 8.0,
+            "standard": 18.0,
+            "deep": 45.0,
+        }
+        try:
+            current_timeout = float(adjusted.get("timeout") or 0.0)
+        except (TypeError, ValueError):
+            current_timeout = 0.0
+        adjusted["timeout"] = min(current_timeout, degraded_timeout_caps.get(mode, 18.0)) if current_timeout > 0 else degraded_timeout_caps.get(mode, 18.0)
+        adjusted["max_attempts"] = 1
+        adjusted["retry_read_timeout"] = False
+        return adjusted
+
+    @staticmethod
+    def _backend_health_reason(backend_health: Dict[str, Any]) -> str:
+        state = str(backend_health.get("state") or "").strip().lower()
+        error = str(backend_health.get("last_backend_error") or "").strip()
+        if state == "unavailable":
+            return error or "The local model backend is currently unavailable."
+        if state == "degraded":
+            return error or "The local model backend is currently degraded."
+        return error or "The local model backend reported a degraded state."
+
+    def _should_force_fallback(self, backend_health: Dict[str, Any]) -> bool:
+        state = str(backend_health.get("state") or "").strip().lower()
+        if state == "unavailable":
+            return True
+        if state != "degraded":
+            return False
+        return int(backend_health.get("recent_timeout_count") or 0) >= 2
+
+    def _grounded_memory_response(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        memory_context = context.get("memory_context") or {}
+        grounded = memory_context.get("grounded_memory_answer")
+        if not isinstance(grounded, dict):
+            return None
+        answer_text = str(grounded.get("answer") or "").strip()
+        if not answer_text:
+            return None
+        return {
+            "answer": answer_text,
+            "provider": "conversation_memory",
+            "model": "deterministic-memory-grounded",
+            "metadata": {
+                "grounded_memory": True,
+                "kind": grounded.get("kind"),
+                "retrieval_profile": grounded.get("retrieval_profile"),
+                "timing_ms": grounded.get("timing_ms", {}),
+                "evidence_counts": grounded.get("evidence_counts", {}),
+                "provenance": list(grounded.get("provenance") or []),
+            },
         }
 
     def _grounded_knowledge_response(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:

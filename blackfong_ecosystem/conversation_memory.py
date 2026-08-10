@@ -6,6 +6,7 @@ import re
 import shutil
 import time
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -172,6 +173,8 @@ class ConversationMemoryService:
         self._source_registry: Any = None
         self._collection_registry: Any = None
         self._provenance_service: Any = None
+        self._derived_memory_bootstrapped = False
+        self._derived_memory_signatures: Optional[set[tuple[str, str]]] = None
 
     @staticmethod
     def create_session_id() -> str:
@@ -211,6 +214,11 @@ class ConversationMemoryService:
         )
         self.event_store.add_event(event)
         self._store_lifecycle_item(event, "event")
+        self._capture_derived_user_memories(
+            session_id=session_id,
+            source_event_id=event.id,
+            text=text,
+        )
         return event
 
     def persist_agent_response(
@@ -407,6 +415,169 @@ class ConversationMemoryService:
         self._store_lifecycle_item(event, "indexed")
         return event
 
+    def _capture_derived_user_memories(
+        self,
+        *,
+        session_id: str,
+        source_event_id: str,
+        text: str,
+    ) -> None:
+        cleaned = self._clean_grounded_memory_text(text)
+        lowered = cleaned.lower()
+        if not cleaned:
+            return
+
+        derived: List[Dict[str, Any]] = []
+        if (
+            "direct artificial intelligence system environment" in lowered
+            or "you are d.a.i.s.e" in lowered
+            or "you are daise" in lowered
+        ):
+            derived.append(
+                {
+                    "memory_kind": "operator_fact",
+                    "title": "DAISE identity doctrine",
+                    "text": "The operator named the assistant D.A.I.S.E. and defined it as Direct Artificial Intelligence System Environment.",
+                    "tags": ["operator_fact", "identity", "daise"],
+                }
+            )
+        if (
+            "i am your creator" in lowered
+            or "creator of this blackfong ecosystem" in lowered
+            or "i made the whole system" in lowered
+            or "creator of obeos" in lowered
+        ):
+            derived.append(
+                {
+                    "memory_kind": "operator_fact",
+                    "title": "Operator role",
+                    "text": "The operator described themself as the creator of O.B.E.O.S.",
+                    "tags": ["operator_fact", "creator"],
+                }
+            )
+        name_match = re.search(r'call+\s+me ["“]?([a-z0-9 _-]{2,24})["”]?', cleaned, re.IGNORECASE)
+        if name_match:
+            preferred_name = " ".join(name_match.group(1).split()).strip()
+            derived.append(
+                {
+                    "memory_kind": "operator_fact",
+                    "title": "Operator preferred name",
+                    "text": f'The operator asked to be called "{preferred_name}".',
+                    "tags": ["operator_fact", "preferred_name"],
+                }
+            )
+        for topic in self._extract_work_topics(cleaned):
+            derived.append(
+                {
+                    "memory_kind": "active_work_item",
+                    "title": f"Active work: {topic}",
+                    "text": f"The operator has been working on {topic}.",
+                    "tags": ["active_work_item", "work_topic"],
+                }
+            )
+
+        for item in derived:
+            self._persist_derived_memory(
+                session_id=session_id,
+                source_event_id=source_event_id,
+                memory_kind=str(item["memory_kind"]),
+                title=str(item["title"]),
+                text=str(item["text"]),
+                tags=list(item.get("tags") or []),
+            )
+
+    def _ensure_derived_memory_bootstrap(self) -> None:
+        if self._derived_memory_bootstrapped:
+            return
+        try:
+            for event in reversed(self.event_store.list_events_by_type("agent_query", limit=320)):
+                text = str(event.payload.get("text") or "")
+                if not text.strip():
+                    continue
+                self._capture_derived_user_memories(
+                    session_id=str((event.metadata or {}).get("session_id") or ""),
+                    source_event_id=event.id,
+                    text=text,
+                )
+        finally:
+            self._derived_memory_bootstrapped = True
+
+    def _persist_derived_memory(
+        self,
+        *,
+        session_id: str,
+        source_event_id: str,
+        memory_kind: str,
+        title: str,
+        text: str,
+        tags: List[str],
+    ) -> None:
+        normalized_text = self._clean_grounded_memory_text(text)
+        if not normalized_text or self._derived_memory_exists(memory_kind=memory_kind, text=normalized_text):
+            return
+        event = Event.new(
+            source="daise",
+            type="knowledge_ingested",
+            payload={
+                "memory_kind": memory_kind,
+                "title": title,
+                "text": normalized_text,
+                "session_id": session_id,
+                "source_event_id": source_event_id,
+                "derived": True,
+                "tags": tags,
+            },
+            confidence=0.92,
+            session_id=session_id,
+            parent_event=source_event_id,
+            tags=["conversation", memory_kind, *tags],
+        )
+        self.event_store.add_event(event)
+        self._remember_derived_memory_signature(memory_kind=memory_kind, text=normalized_text)
+        vector_hash = hashlib.sha1(f"{memory_kind}:{normalized_text.lower()}".encode("utf-8")).hexdigest()[:16]
+        self._store_vector_memory(
+            vector_id=f"{memory_kind}:{vector_hash}",
+            text=normalized_text,
+            metadata={
+                "memory_type": memory_kind,
+                "session_id": session_id,
+                "event_id": event.id,
+                "title": title,
+                "derived": True,
+            },
+        )
+        self._store_lifecycle_item(event, "indexed")
+
+    def _derived_memory_exists(self, *, memory_kind: str, text: str) -> bool:
+        normalized = self._clean_grounded_memory_text(text).lower()
+        if not normalized:
+            return False
+        signatures = self._derived_memory_signature_index()
+        return (memory_kind, normalized) in signatures
+
+    def _derived_memory_signature_index(self) -> set[tuple[str, str]]:
+        if self._derived_memory_signatures is not None:
+            return self._derived_memory_signatures
+        signatures: set[tuple[str, str]] = set()
+        for event in self.event_store.list_events_by_type("knowledge_ingested", limit=2000):
+            payload = event.payload or {}
+            memory_kind = str(payload.get("memory_kind") or "").strip()
+            if not memory_kind:
+                continue
+            normalized = self._clean_grounded_memory_text(str(payload.get("text") or "")).lower()
+            if not normalized:
+                continue
+            signatures.add((memory_kind, normalized))
+        self._derived_memory_signatures = signatures
+        return signatures
+
+    def _remember_derived_memory_signature(self, *, memory_kind: str, text: str) -> None:
+        normalized = self._clean_grounded_memory_text(text).lower()
+        if not normalized:
+            return
+        signatures = self._derived_memory_signature_index()
+        signatures.add((memory_kind, normalized))
+
     def build_context(
         self,
         *,
@@ -419,8 +590,11 @@ class ConversationMemoryService:
         prompt_budget_tokens: Optional[int] = None,
         skip_vector_search: bool = False,
         retrieval_profile: Optional[str] = None,
+        transport: Optional[str] = None,
     ) -> Dict[str, Any]:
+        self._ensure_derived_memory_bootstrap()
         resolved_retrieval_profile = normalize_retrieval_profile(retrieval_profile, analysis_mode)
+        recall_kind = self._detect_grounded_memory_query(query)
         retrieval_settings = retrieval_profile_settings(resolved_retrieval_profile)
         profile = self._resolve_memory_profile(
             agent_name=agent_name,
@@ -450,7 +624,7 @@ class ConversationMemoryService:
 
         session_messages = self.get_session_messages(session_id, limit=transcript_limit * 2)
         session_summaries = self._get_session_summaries(session_id, limit=summary_limit)
-        memory_query = "" if skip_vector_search else query
+        memory_query = "" if (skip_vector_search or recall_kind is not None) else query
         global_memories = self.list_global_memories(
             query=memory_query,
             limit=memory_limit,
@@ -466,15 +640,38 @@ class ConversationMemoryService:
         semantic_bundle = self._retrieve_semantic_context(
             query=query,
             retrieval_profile=resolved_retrieval_profile,
-            skip_vector_search=skip_vector_search,
+            skip_vector_search=(skip_vector_search or recall_kind is not None),
         )
-        grounded_knowledge_answer = self.grounded_collection_answer(
+        grounded_knowledge_answer = None
+        if recall_kind is None:
+            grounded_knowledge_answer = self.grounded_collection_answer(
+                query=query,
+                retrieval_profile=resolved_retrieval_profile,
+                analysis_mode=analysis_mode,
+            )
+        operator_profile = self.operator_profile_snapshot(
+            session_id=session_id,
+            global_memories=global_memories,
+            session_messages=session_messages,
+        )
+        grounded_memory_answer = self.grounded_memory_answer(
+            session_id=session_id,
             query=query,
+            agent_name=profile["agent"],
             retrieval_profile=resolved_retrieval_profile,
             analysis_mode=analysis_mode,
+            session_messages=session_messages,
+            session_summaries=session_summaries,
+            global_memories=global_memories,
+            recent_events=recent_events,
+            operator_profile=operator_profile,
         )
         semantic_bundle["timing_ms"]["grounded_answer"] = round(
             float(((grounded_knowledge_answer or {}).get("timing_ms") or {}).get("librarian") or 0.0),
+            2,
+        )
+        semantic_bundle["timing_ms"]["grounded_memory"] = round(
+            float(((grounded_memory_answer or {}).get("timing_ms") or {}).get("memory_grounding") or 0.0),
             2,
         )
         focus_tokens = self._salient_query_tokens(query)
@@ -514,6 +711,7 @@ class ConversationMemoryService:
             global_memories=global_memories,
             recent_events=recent_events,
             knowledge_context=semantic_bundle["context"],
+            operator_profile=operator_profile,
             transcript_window=transcript_limit,
             prompt_budget_tokens=prompt_budget_tokens,
             prompt_mode=prompt_mode,
@@ -530,6 +728,8 @@ class ConversationMemoryService:
             "recent_events": len(recent_events),
             "semantic_hits": len(semantic_bundle["hits"]),
             "grounded_answer": bool(grounded_knowledge_answer),
+            "grounded_memory": bool(grounded_memory_answer),
+            "operator_profile": bool(operator_profile.get("fact_statements") or operator_profile.get("active_work")),
             "truncated": (max(1, len(prompt_context) // 4) if prompt_context else 0) >= int(prompt_budget_tokens or 0),
         }
         retrieval_contract = {
@@ -539,6 +739,7 @@ class ConversationMemoryService:
             ),
             "usage": "prompt_context",
         }
+        backend_health = self.recent_backend_health(transport=transport)
 
         return {
             "agent_name": profile["agent"],
@@ -559,6 +760,9 @@ class ConversationMemoryService:
             "knowledge_context": semantic_bundle["context"],
             "citations": semantic_bundle["citations"],
             "grounded_knowledge_answer": grounded_knowledge_answer,
+            "grounded_memory_answer": grounded_memory_answer,
+            "operator_profile": operator_profile,
+            "backend_health": backend_health,
             "retrieval_profile": resolved_retrieval_profile,
             "retrieval_contract": retrieval_contract,
             "timing_ms": semantic_bundle["timing_ms"],
@@ -609,6 +813,7 @@ class ConversationMemoryService:
             return None
         summary_payload, _summary_path = self._collection_summary_payload(hinted_collections[0])
         answer_text = self._compose_grounded_collection_answer(
+            query=query,
             collection=hinted_collections[0],
             summary_payload=summary_payload,
             fallback_text=answer_text,
@@ -623,6 +828,87 @@ class ConversationMemoryService:
             "retrieval_profile": resolved_profile,
             "mode": "deterministic",
             "timing_ms": {"librarian": elapsed_ms},
+        }
+
+    def grounded_memory_answer(
+        self,
+        *,
+        session_id: str,
+        query: str,
+        agent_name: Optional[str] = None,
+        retrieval_profile: Optional[str] = None,
+        analysis_mode: Optional[str] = None,
+        session_messages: Optional[List[Dict[str, Any]]] = None,
+        session_summaries: Optional[List[Dict[str, Any]]] = None,
+        global_memories: Optional[List[Dict[str, Any]]] = None,
+        recent_events: Optional[List[Dict[str, Any]]] = None,
+        operator_profile: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        recall_kind = self._detect_grounded_memory_query(query)
+        if recall_kind is None:
+            return None
+
+        started = time.perf_counter()
+        resolved_retrieval_profile = normalize_retrieval_profile(retrieval_profile, analysis_mode)
+        messages = list(session_messages or self.get_session_messages(session_id, limit=24))
+        summaries = list(session_summaries or self._get_session_summaries(session_id, limit=3))
+        if global_memories is None:
+            memory_query = ""
+            memories = self.list_global_memories(
+                query=memory_query,
+                limit=6 if resolved_retrieval_profile != "fast" else 4,
+                agent_name=agent_name,
+                session_id=session_id,
+            )
+        else:
+            memories = list(global_memories)
+        events = list(
+            recent_events
+            or self._get_recent_events_for_agent(
+                query=query,
+                agent_name=agent_name,
+                session_id=session_id,
+                limit=4,
+            )
+        )
+        recent_global_summaries = self._list_recent_session_summaries(limit=4, exclude_session_id=session_id)
+        resolved_operator_profile = operator_profile or self.operator_profile_snapshot(
+            session_id=session_id,
+            global_memories=memories,
+            session_messages=messages,
+        )
+        operator_facts = list(resolved_operator_profile.get("fact_statements") or self._recent_operator_facts(limit=4))
+        answer, provenance = self._compose_grounded_memory_answer(
+            session_id=session_id,
+            recall_kind=recall_kind,
+            query=query,
+            session_messages=messages,
+            session_summaries=summaries,
+            global_memories=memories,
+            recent_events=events,
+            recent_global_summaries=recent_global_summaries,
+            operator_facts=operator_facts,
+            operator_profile=resolved_operator_profile,
+        )
+        if not answer:
+            return None
+
+        timing_ms = round((time.perf_counter() - started) * 1000, 2)
+        return {
+            "kind": recall_kind,
+            "answer": answer,
+            "retrieval_profile": resolved_retrieval_profile,
+            "timing_ms": {"memory_grounding": timing_ms},
+            "provenance": provenance,
+            "operator_profile": resolved_operator_profile,
+            "evidence_counts": {
+                "session_messages": len(messages),
+                "session_summaries": len(summaries),
+                "global_memories": len(memories),
+                "recent_events": len(events),
+                "global_summaries": len(recent_global_summaries),
+                "operator_facts": len(operator_facts),
+            },
         }
 
     def knowledge_status(
@@ -1158,6 +1444,57 @@ class ConversationMemoryService:
             "event_count": session["event_count"],
         }
 
+    def review_conversations(
+        self,
+        *,
+        limit: int = 8,
+        session_id: Optional[str] = None,
+        transport: Optional[str] = None,
+        message_limit: int = 3,
+    ) -> Dict[str, Any]:
+        """Summarize real session health across local and transport-backed chats."""
+        normalized_transport = str(transport or "").strip().lower() or None
+        bounded_limit = max(1, int(limit or 1))
+        bounded_message_limit = max(1, min(int(message_limit or 3), 8))
+        if session_id:
+            session_ids = [str(session_id)]
+        else:
+            pool = self.list_sessions(limit=max(bounded_limit * 12, 120))
+            session_ids = [str(item["session_id"]) for item in pool]
+
+        summaries: List[Dict[str, Any]] = []
+        for current_session_id in session_ids:
+            details = self.get_session_details(current_session_id)
+            if details is None:
+                continue
+            events = self.event_store.list_events_for_session(
+                current_session_id,
+                limit=600,
+                ascending=True,
+            )
+            summary = self._summarize_conversation_session(
+                details["session"],
+                events,
+                message_limit=bounded_message_limit,
+            )
+            if normalized_transport and normalized_transport not in summary["transports"]:
+                continue
+            summaries.append(summary)
+            if not session_id and len(summaries) >= bounded_limit:
+                break
+
+        return {
+            "generated_at": time.time(),
+            "filters": {
+                "session_id": session_id,
+                "transport": normalized_transport,
+                "limit": bounded_limit,
+                "message_limit": bounded_message_limit,
+            },
+            "sessions": summaries,
+            "matched_sessions": len(summaries),
+        }
+
     def list_recent_events(self, limit: int = 50) -> List[Dict[str, Any]]:
         events = self.event_store.recent_events(limit=limit)
         payloads = []
@@ -1216,6 +1553,9 @@ class ConversationMemoryService:
         policy_decisions = [event.payload for event in events if event.type == "policy_decision"]
         queue_events = [event.payload for event in events if event.type == "queue_pressure_observation"]
         latency_events = [event.payload for event in events if event.type == "latency_observation"]
+        retrieval_events = [event.payload for event in events if event.type == "memory_retrieval"]
+        retrieval_observations = [event.payload for event in events if event.type == "memory_retrieval_observation"]
+        request_outcomes = [event.payload for event in events if event.type == "request_outcome"]
         contradictions = [event.payload for event in events if event.type == "consistency_conflict"]
         diagnostic_hints = [event.payload for event in events if event.type in {"performance_snapshot", "backend_health_observation"}]
         provenance = [
@@ -1234,8 +1574,11 @@ class ConversationMemoryService:
             "events": trace_events,
             "phases": phases,
             "policy_decisions": policy_decisions,
+            "memory_retrieval": retrieval_events[-1] if retrieval_events else None,
+            "memory_retrieval_observation": retrieval_observations[-1] if retrieval_observations else None,
             "queue_pressure": queue_events[-1] if queue_events else None,
             "latency_observation": latency_events[-1] if latency_events else None,
+            "request_outcome": request_outcomes[-1] if request_outcomes else None,
             "contradictions": contradictions,
             "diagnostic_hints": diagnostic_hints[-3:],
             "provenance": provenance[-8:],
@@ -1249,6 +1592,7 @@ class ConversationMemoryService:
         agent_name: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        allowed_memory_types = {"session_summary", "pinned_memory", "operator_fact", "active_work_item"}
         candidates: List[Dict[str, Any]] = []
         if query and not isinstance(self.vector_store, NullVectorStore):
             try:
@@ -1257,7 +1601,7 @@ class ConversationMemoryService:
                 results = []
             for result in results:
                 metadata = result.get("metadata", {})
-                if metadata.get("memory_type") not in {"session_summary", "pinned_memory"}:
+                if metadata.get("memory_type") not in allowed_memory_types:
                     continue
                 candidates.append(
                     {
@@ -1272,15 +1616,16 @@ class ConversationMemoryService:
         pinned_events = self.event_store.list_events_by_type("knowledge_ingested", limit=100)
         summary_events = self.event_store.list_events_by_type("session_summary", limit=100)
         for event in pinned_events:
-            if event.payload.get("memory_kind") != "pinned_memory":
+            memory_kind = str(event.payload.get("memory_kind") or "")
+            if memory_kind not in {"pinned_memory", "operator_fact", "active_work_item"}:
                 continue
             candidates.append(
                 {
                     "id": event.id,
-                    "memory_type": "pinned_memory",
+                    "memory_type": memory_kind,
                     "text": str(event.payload.get("text", "")),
                     "metadata": event.payload,
-                    "relevance": 0.5,
+                    "relevance": 0.58 if memory_kind == "operator_fact" else (0.54 if memory_kind == "active_work_item" else 0.5),
                 }
             )
         for event in summary_events:
@@ -1313,6 +1658,212 @@ class ConversationMemoryService:
             "pinned_memories": len(pinned_memories),
             "recent_summaries": len(self.event_store.list_events_by_type("session_summary", limit=200)),
         }
+
+    def recent_backend_health(
+        self,
+        *,
+        transport: Optional[str] = None,
+        lookback_seconds: float = 900.0,
+        limit: int = 24,
+    ) -> Dict[str, Any]:
+        normalized_transport = str(transport or "").strip().lower()
+        cutoff_ms = (time.time() - max(30.0, float(lookback_seconds))) * 1000.0
+        state = "unknown"
+        provider = ""
+        configured_model = ""
+        last_backend_error = ""
+        last_observed_at = 0.0
+        recent_timeout_count = 0
+        recent_fallback_count = 0
+
+        latency_events = self.event_store.list_events_by_type("latency_observation", limit=limit)
+        for event in latency_events:
+            if event.timestamp < cutoff_ms:
+                continue
+            payload = event.payload or {}
+            event_transport = str(payload.get("transport") or "").strip().lower()
+            if normalized_transport and event_transport and event_transport != normalized_transport:
+                continue
+            execution_time_ms = float(payload.get("execution_time_ms") or 0.0)
+            fallback_used = bool(payload.get("fallback_used"))
+            backend_error = str(payload.get("backend_error") or "").strip()
+            fallback_reason = str(payload.get("fallback_reason") or payload.get("timeout_reason") or "").strip()
+            if fallback_used or backend_error:
+                recent_fallback_count += 1
+                if "timed out" in backend_error.lower() or "timed out" in fallback_reason.lower():
+                    recent_timeout_count += 1
+                state = "degraded"
+                provider = str(payload.get("provider") or provider or "")
+                configured_model = str(payload.get("model") or configured_model or "")
+                last_backend_error = backend_error or fallback_reason or last_backend_error
+                last_observed_at = max(last_observed_at, event.timestamp / 1000.0)
+            elif execution_time_ms > 0 and last_observed_at <= 0:
+                provider = str(payload.get("provider") or provider or "")
+                configured_model = str(payload.get("model") or configured_model or "")
+                last_observed_at = max(last_observed_at, event.timestamp / 1000.0)
+                if state == "unknown":
+                    state = "healthy"
+
+        health_events = self.event_store.list_events_by_type("backend_health_observation", limit=max(limit, 8))
+        for event in health_events:
+            if event.timestamp < cutoff_ms:
+                continue
+            payload = event.payload or {}
+            if payload.get("grounded_truth"):
+                continue
+            observed_status = str(payload.get("status") or "").strip().lower()
+            if not observed_status:
+                continue
+            provider = str(payload.get("provider") or provider or "")
+            configured_model = str(payload.get("configured_model") or configured_model or "")
+            error = str(payload.get("error") or "").strip()
+            last_observed_at = max(last_observed_at, event.timestamp / 1000.0)
+            if observed_status in {"unavailable", "offline"}:
+                state = "unavailable"
+                last_backend_error = error or last_backend_error
+                break
+            if observed_status == "degraded" and state != "unavailable":
+                state = "degraded"
+                last_backend_error = error or last_backend_error
+            elif observed_status == "available" and state == "unknown":
+                state = "healthy"
+
+        if state == "unknown" and recent_timeout_count > 0:
+            state = "degraded"
+        return {
+            "state": state,
+            "transport": normalized_transport or None,
+            "provider": provider,
+            "configured_model": configured_model,
+            "recent_timeout_count": recent_timeout_count,
+            "recent_fallback_count": recent_fallback_count,
+            "last_backend_error": last_backend_error,
+            "last_observed_at": last_observed_at or None,
+            "lookback_seconds": max(30.0, float(lookback_seconds)),
+        }
+
+    def _summarize_conversation_session(
+        self,
+        session: Dict[str, Any],
+        events: List[Event],
+        *,
+        message_limit: int,
+    ) -> Dict[str, Any]:
+        transport_counts: Counter[str] = Counter()
+        provider_counts: Counter[str] = Counter()
+        retrieval_profile_counts: Counter[str] = Counter()
+        execution_times: List[float] = []
+        recent_queries: List[Dict[str, Any]] = []
+        recent_responses: List[Dict[str, Any]] = []
+        fallback_requests: List[Dict[str, Any]] = []
+        last_query_by_request: Dict[str, str] = {}
+        grounded_truth_count = 0
+        fallback_count = 0
+        timeout_count = 0
+
+        for event in events:
+            payload = event.payload or {}
+            request_id = str(event.metadata.get("request_id") or "")
+            if event.type == "agent_query":
+                query_text = self._compact_review_text(payload.get("text"))
+                if query_text:
+                    last_query_by_request[request_id] = query_text
+                    recent_queries.append(
+                        {
+                            "request_id": request_id,
+                            "timestamp": event.timestamp / 1000.0,
+                            "text": query_text,
+                        }
+                    )
+                continue
+
+            if event.type == "agent_response":
+                response_text = self._compact_review_text(payload.get("text") or payload.get("response"))
+                if response_text:
+                    recent_responses.append(
+                        {
+                            "request_id": request_id,
+                            "timestamp": event.timestamp / 1000.0,
+                            "text": response_text,
+                            "provider": str(payload.get("provider") or ""),
+                        }
+                    )
+                continue
+
+            if event.type != "request_outcome":
+                continue
+
+            resolved_transport = str(payload.get("transport") or "local").strip().lower() or "local"
+            provider = str(payload.get("provider") or "unknown").strip() or "unknown"
+            retrieval_profile = str(payload.get("retrieval_profile") or "unknown").strip() or "unknown"
+            backend_error = str(payload.get("backend_error") or "").strip()
+            fallback_reason = str(payload.get("fallback_reason") or "").strip()
+            execution_time_ms = float(payload.get("execution_time_ms") or 0.0)
+            fallback_used = bool(payload.get("fallback_used"))
+
+            transport_counts[resolved_transport] += 1
+            provider_counts[provider] += 1
+            retrieval_profile_counts[retrieval_profile] += 1
+            if execution_time_ms > 0:
+                execution_times.append(execution_time_ms)
+            if payload.get("reason") == "grounded_truth" or payload.get("grounded_truth_kind"):
+                grounded_truth_count += 1
+            if fallback_used or backend_error:
+                fallback_count += 1
+                if "timed out" in backend_error.lower() or "timed out" in fallback_reason.lower():
+                    timeout_count += 1
+                fallback_requests.append(
+                    {
+                        "request_id": request_id,
+                        "timestamp": event.timestamp / 1000.0,
+                        "query": last_query_by_request.get(request_id, ""),
+                        "provider": provider,
+                        "model": str(payload.get("model") or ""),
+                        "backend_error": backend_error,
+                        "execution_time_ms": round(execution_time_ms, 2) if execution_time_ms > 0 else 0.0,
+                    }
+                )
+
+        primary_transport = "local"
+        if transport_counts:
+            primary_transport = max(transport_counts.items(), key=lambda item: (item[1], item[0]))[0]
+        average_execution_time_ms = round(sum(execution_times) / len(execution_times), 2) if execution_times else 0.0
+        latest_execution_time_ms = round(execution_times[-1], 2) if execution_times else 0.0
+        health = "healthy"
+        if timeout_count > 0:
+            health = "degraded"
+        elif fallback_count > 0:
+            health = "watch"
+
+        return {
+            "session_id": session["session_id"],
+            "status": health,
+            "start_time": session["start_time"],
+            "last_activity": session["last_activity"],
+            "duration": session["duration"],
+            "event_count": session["event_count"],
+            "total_requests": session["total_requests"],
+            "preview": session.get("preview") or "",
+            "primary_transport": primary_transport,
+            "transports": dict(transport_counts),
+            "providers": dict(provider_counts),
+            "retrieval_profiles": dict(retrieval_profile_counts),
+            "fallback_count": fallback_count,
+            "timeout_count": timeout_count,
+            "grounded_truth_count": grounded_truth_count,
+            "average_execution_time_ms": average_execution_time_ms,
+            "latest_execution_time_ms": latest_execution_time_ms,
+            "recent_queries": recent_queries[-message_limit:],
+            "recent_responses": recent_responses[-message_limit:],
+            "fallback_requests": fallback_requests[-message_limit:],
+        }
+
+    @staticmethod
+    def _compact_review_text(value: Any, *, max_chars: int = 220) -> str:
+        cleaned = " ".join(str(value or "").split()).strip()
+        if len(cleaned) <= max_chars:
+            return cleaned
+        return cleaned[: max_chars - 3].rstrip(" ,;:.") + "..."
 
     def _retrieve_semantic_context(
         self,
@@ -1357,7 +1908,12 @@ class ConversationMemoryService:
         rerank_started = time.perf_counter()
         annotated_hits: List[Dict[str, Any]] = []
         for collection in hinted_collections:
-            summary_hit = self._collection_summary_hit(collection, query_tokens=query_tokens, retrieval_profile=retrieval_profile)
+            summary_hit = self._collection_summary_hit(
+                collection,
+                query=query,
+                query_tokens=query_tokens,
+                retrieval_profile=retrieval_profile,
+            )
             if summary_hit is not None:
                 annotated_hits.append(summary_hit)
         for result in self._search_hinted_collection_results(
@@ -1391,6 +1947,7 @@ class ConversationMemoryService:
         selected_hits = deduped_hits[: int(settings.get("citation_limit") or vector_k)]
         selected_hits = self._limit_collection_focused_hits(
             selected_hits,
+            query=query,
             retrieval_profile=retrieval_profile,
             hinted_collections=hinted_collections,
         )
@@ -1566,17 +2123,941 @@ class ConversationMemoryService:
         token_count = len(self._tokenize(normalized_focus))
         return token_count <= 4 and any(term in normalized_focus for term in focus_terms)
 
+    def _detect_grounded_memory_query(self, query: str) -> Optional[str]:
+        normalized = " ".join(str(query or "").strip().lower().split())
+        if not normalized:
+            return None
+        if normalized.startswith("remember to ") or " and remember to " in normalized:
+            return None
+
+        hinted_collections = self._detect_collection_hints(query)
+        memory_specific = (
+            "about me",
+            "about us",
+            "our work",
+            "our conversation",
+            "we leave off",
+            "we left off",
+            "working on",
+            "recall about me",
+        )
+        if hinted_collections and not any(token in normalized for token in memory_specific):
+            return None
+
+        operator_phrases = (
+            "what do you remember about me",
+            "what do you know about me",
+            "what can you recall about me",
+            "who am i to you",
+            "who am i",
+            "what is my name",
+            "what's my name",
+            "do you remember my name",
+            "do you know my name",
+            "remember about me",
+        )
+        session_phrases = (
+            "where did we leave off",
+            "where we left off",
+            "what are we working on",
+            "what are we working on now",
+            "what were we working on",
+            "what have we been working on",
+            "what were we doing",
+            "what changed",
+            "what were the last changes",
+        )
+        general_phrases = (
+            "what do you remember",
+            "what can you remember",
+            "what do you recall",
+            "what can you recall",
+            "do you remember",
+        )
+        if any(phrase in normalized for phrase in operator_phrases):
+            return "operator"
+        if any(phrase in normalized for phrase in session_phrases):
+            return "session"
+        if any(phrase in normalized for phrase in general_phrases):
+            return "general"
+        return None
+
+    def _compose_grounded_memory_answer(
+        self,
+        *,
+        session_id: str,
+        recall_kind: str,
+        query: str,
+        session_messages: List[Dict[str, Any]],
+        session_summaries: List[Dict[str, Any]],
+        global_memories: List[Dict[str, Any]],
+        recent_events: List[Dict[str, Any]],
+        recent_global_summaries: List[Dict[str, Any]],
+        operator_facts: List[str],
+        operator_profile: Optional[Dict[str, Any]] = None,
+    ) -> tuple[str, List[Dict[str, Any]]]:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        operator_role = str(profile.get("operator_role") or "").strip().rstrip(".")
+        asking_for_name = "my name" in query.lower()
+        profile_topics = [
+            str(item).strip()
+            for item in list(profile.get("active_work") or [])
+            if str(item).strip()
+        ]
+        profile_facts = [
+            str(item).strip()
+            for item in list(profile.get("fact_statements") or operator_facts)
+            if str(item).strip()
+        ]
+        direct_topics = self._recent_user_topics(session_messages, current_query=query, limit=3)
+        stored_work_topics = self._stored_work_topics(global_memories, limit=3, session_id=session_id)
+        summary_topics = [
+            topic
+            for summary in session_summaries
+            for topic in self._extract_summary_topics(summary.get("summary"))
+        ]
+        global_summary_topics = [
+            topic
+            for summary in recent_global_summaries
+            for topic in self._extract_summary_topics(summary.get("summary"))
+        ]
+        topic_pool: List[str] = []
+        topic_pool.extend(profile_topics)
+        topic_pool.extend(stored_work_topics)
+        if recall_kind in {"session", "general"}:
+            topic_pool.extend(direct_topics)
+        if recall_kind == "general" and not topic_pool:
+            topic_pool.extend(summary_topics)
+            topic_pool.extend(global_summary_topics)
+        elif recall_kind == "session" and not topic_pool:
+            topic_pool.extend(summary_topics)
+            topic_pool.extend(global_summary_topics)
+        recent_topics = self._unique_grounded_memory_items(topic_pool, limit=4)
+        assistant_snapshot = self._recent_assistant_snapshot(session_messages)
+        memory_snippets = self._unique_grounded_memory_items(
+            [
+                self._trim_grounded_memory_snippet(str(item.get("text") or ""), max_chars=150)
+                for item in global_memories
+                if str(item.get("text") or "").strip() and str(item.get("memory_type") or "") == "pinned_memory"
+            ],
+            limit=2,
+        )
+        event_snippets = self._unique_grounded_memory_items(
+            [
+                self._trim_grounded_memory_snippet(str(item.get("message") or ""), max_chars=140)
+                for item in recent_events
+                if str(item.get("message") or "").strip()
+            ],
+            limit=2,
+        )
+        additional_operator_facts: List[str] = []
+        for fact in profile_facts:
+            lowered_fact = fact.lower()
+            if preferred_name and preferred_name.lower() in lowered_fact and "call" in lowered_fact:
+                continue
+            if operator_role and "creator of o.b.e.o.s" in lowered_fact:
+                continue
+            if "d.a.i.s.e" in lowered_fact and "direct artificial intelligence system environment" in lowered_fact:
+                continue
+            additional_operator_facts.append(fact)
+
+        parts: List[str] = []
+        if recall_kind == "operator":
+            if asking_for_name and preferred_name:
+                parts.append(f'You asked me to call you "{preferred_name}".')
+            else:
+                parts.append("I remember a few concrete things about you in O.B.E.O.S.")
+            if preferred_name:
+                if not asking_for_name:
+                    parts.append(f'You asked me to call you "{preferred_name}".')
+            if operator_role:
+                parts.append(f"You described yourself as the {operator_role}.")
+            if additional_operator_facts:
+                parts.append(f"I also remember that {self._join_grounded_memory_items(additional_operator_facts[:2])}.")
+            if recent_topics:
+                parts.append(f"More recently, you were working on {self._join_grounded_memory_items(recent_topics[:3])}.")
+        elif recall_kind == "session":
+            if recent_topics:
+                parts.append(f"Where we left off, we were working on {self._join_grounded_memory_items(recent_topics[:3])}.")
+            else:
+                parts.append("I can anchor us from the stored session history.")
+            if preferred_name:
+                parts.append(f'You still prefer that I call you "{preferred_name}".')
+            elif operator_role:
+                parts.append(f"I also remember that you described yourself as the {operator_role}.")
+        else:
+            parts.append("I remember a few concrete things from our shared O.B.E.O.S history.")
+            if recent_topics:
+                parts.append(f"Recently we were discussing {self._join_grounded_memory_items(recent_topics[:3])}.")
+            if preferred_name:
+                parts.append(f'You asked me to call you "{preferred_name}".')
+            if operator_role:
+                parts.append(f"You described yourself as the {operator_role}.")
+            elif additional_operator_facts:
+                parts.append(f"I also remember that {self._join_grounded_memory_items(additional_operator_facts[:2])}.")
+
+        if assistant_snapshot and recall_kind == "session" and not recent_topics:
+            parts.append(f"The last assistant reply before this was about {assistant_snapshot.rstrip('.')}.")
+        if memory_snippets and recall_kind == "general" and not recent_topics:
+            parts.append(f"Summarized memory also notes {self._join_grounded_memory_items(memory_snippets)}.")
+        elif event_snippets and recall_kind == "general" and not recent_topics:
+            parts.append(f"Recent ecosystem traces mention {self._join_grounded_memory_items(event_snippets)}.")
+
+        answer = " ".join(part.strip() for part in parts if part.strip()).strip()
+        if not answer or answer in {
+            "I remember a few concrete things from our shared O.B.E.O.S history.",
+            "I remember a few concrete things about you in O.B.E.O.S.",
+            "I can anchor us from the stored session history.",
+        }:
+            return "", []
+
+        provenance: List[Dict[str, Any]] = []
+        for summary in session_summaries[:2]:
+            provenance.append(
+                {
+                    "kind": "session_summary",
+                    "event_id": summary.get("event_id"),
+                    "timestamp": summary.get("timestamp"),
+                }
+            )
+        for summary in recent_global_summaries[:2]:
+            provenance.append(
+                {
+                    "kind": "global_session_summary",
+                    "event_id": summary.get("event_id"),
+                    "session_id": summary.get("session_id"),
+                    "timestamp": summary.get("timestamp"),
+                }
+            )
+        for item in global_memories[:2]:
+            provenance.append(
+                {
+                    "kind": str(item.get("memory_type") or "memory"),
+                    "event_id": (item.get("metadata") or {}).get("event_id") or item.get("id"),
+                    "session_id": (item.get("metadata") or {}).get("session_id"),
+                }
+            )
+        return answer, provenance
+
+    def operator_profile_snapshot(
+        self,
+        *,
+        session_id: str,
+        global_memories: Optional[List[Dict[str, Any]]] = None,
+        session_messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        messages = list(session_messages or self.get_session_messages(session_id, limit=24))
+        memories = list(
+            global_memories
+            or self.list_global_memories(
+                query="",
+                limit=8,
+                agent_name="jarvis",
+                session_id=session_id,
+            )
+        )
+        fact_statements: List[str] = []
+        preferred_name = ""
+        operator_role = ""
+        assistant_identity = ""
+        for item in memories:
+            if str(item.get("memory_type") or "") != "operator_fact":
+                continue
+            statement = self._render_operator_fact_statement(str(item.get("text") or ""))
+            if statement:
+                fact_statements.append(statement)
+            lowered_statement = statement.lower()
+            if not preferred_name:
+                preferred_name = self._extract_operator_preferred_name(statement)
+            if not operator_role and "creator of o.b.e.o.s" in lowered_statement:
+                operator_role = "creator of O.B.E.O.S"
+            if (
+                not assistant_identity
+                and "d.a.i.s.e" in lowered_statement
+                and "direct artificial intelligence system environment" in lowered_statement
+            ):
+                assistant_identity = "D.A.I.S.E. (Direct Artificial Intelligence System Environment)"
+
+        if not preferred_name or not operator_role or not assistant_identity:
+            history_messages = messages if len(messages) >= 40 else self.get_session_messages(session_id, limit=80)
+            for message in history_messages:
+                if str(message.get("role") or "") != "user":
+                    continue
+                text = self._clean_grounded_memory_text(str(message.get("text") or ""))
+                lowered_text = text.lower()
+                if not preferred_name:
+                    preferred_name = self._extract_operator_preferred_name(text)
+                if not operator_role and (
+                    "i am your creator" in lowered_text
+                    or "creator of obeos" in lowered_text
+                    or "creator of this blackfong ecosystem" in lowered_text
+                    or "i made the whole system" in lowered_text
+                ):
+                    operator_role = "creator of O.B.E.O.S"
+                if not assistant_identity and (
+                    "you are d.a.i.s.e" in lowered_text
+                    or (
+                        "d.a.i.s.e" in lowered_text
+                        and "direct artificial intelligence system environment" in lowered_text
+                    )
+                ):
+                    assistant_identity = "D.A.I.S.E. (Direct Artificial Intelligence System Environment)"
+
+        fallback_facts = self._recent_operator_facts(limit=4)
+        fact_statements = self._unique_grounded_memory_items(fact_statements + fallback_facts, limit=5)
+        if not preferred_name:
+            for fact in fact_statements:
+                preferred_name = self._extract_operator_preferred_name(fact)
+                if preferred_name:
+                    break
+        if not operator_role:
+            for fact in fact_statements:
+                if "creator of o.b.e.o.s" in fact.lower():
+                    operator_role = "creator of O.B.E.O.S"
+                    break
+        if not assistant_identity:
+            for fact in fact_statements:
+                lowered_fact = fact.lower()
+                if "d.a.i.s.e" in lowered_fact and "direct artificial intelligence system environment" in lowered_fact:
+                    assistant_identity = "D.A.I.S.E. (Direct Artificial Intelligence System Environment)"
+                    break
+
+        active_work = self._unique_grounded_memory_items(
+            self._stored_work_topics(memories, limit=4, session_id=session_id)
+            + self._recent_user_topics(messages, current_query="", limit=4),
+            limit=4,
+        )
+        return {
+            "session_id": session_id,
+            "preferred_name": preferred_name,
+            "operator_role": operator_role,
+            "assistant_identity": assistant_identity,
+            "fact_statements": fact_statements,
+            "active_work": active_work,
+        }
+
+    def _list_recent_session_summaries(
+        self,
+        *,
+        limit: int = 4,
+        exclude_session_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        summaries: List[Dict[str, Any]] = []
+        seen_sessions = set()
+        for event in self.event_store.list_events_by_type("session_summary", limit=max(limit * 6, 12)):
+            session_id = str(event.payload.get("session_id") or event.session_id or "")
+            if exclude_session_id and session_id == exclude_session_id:
+                continue
+            if session_id and session_id in seen_sessions:
+                continue
+            seen_sessions.add(session_id)
+            summaries.append(
+                {
+                    "event_id": event.id,
+                    "session_id": session_id,
+                    "summary": str(event.payload.get("summary", "")),
+                    "timestamp": event.timestamp / 1000.0,
+                }
+            )
+            if len(summaries) >= limit:
+                break
+        return summaries
+
+    def _extract_summary_topics(self, summary_text: Any) -> List[str]:
+        cleaned = self._clean_grounded_memory_text(str(summary_text or ""))
+        if not cleaned:
+            return []
+        match = re.search(
+            r"user recently discussed (.+?)\. latest assistant response:",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if not match:
+            snippet = self._trim_grounded_memory_snippet(cleaned, max_chars=110)
+            if snippet and not self._looks_like_question_topic(snippet):
+                return [snippet]
+            return []
+        topics = [
+            self._trim_grounded_memory_snippet(part, max_chars=100)
+            for part in match.group(1).split(";")
+        ]
+        return [topic for topic in topics if topic and not self._looks_like_question_topic(topic)]
+
+    def _recent_user_topics(
+        self,
+        session_messages: List[Dict[str, Any]],
+        *,
+        current_query: str,
+        limit: int,
+    ) -> List[str]:
+        normalized_query = self._clean_grounded_memory_text(current_query).lower()
+        topics: List[str] = []
+        for message in reversed(session_messages):
+            if message.get("role") != "user":
+                continue
+            text = str(message.get("text") or "")
+            extracted_topics = self._extract_work_topics(text)
+            for item in extracted_topics:
+                cleaned_item = self._trim_grounded_memory_snippet(item, max_chars=90)
+                if (
+                    cleaned_item
+                    and cleaned_item.lower() != normalized_query
+                    and not self._looks_like_noise_topic(cleaned_item)
+                    and not self._looks_like_identity_fact(cleaned_item)
+                ):
+                    topics.append(cleaned_item)
+                    if len(topics) >= limit:
+                        return list(reversed(topics))
+            if extracted_topics:
+                continue
+            snippet = self._trim_grounded_memory_snippet(text, max_chars=100)
+            if not snippet or snippet.lower() == normalized_query:
+                continue
+            if self._looks_like_question_topic(snippet):
+                continue
+            if self._looks_like_identity_fact(snippet):
+                continue
+            if self._looks_like_noise_topic(snippet):
+                continue
+            topics.append(snippet)
+            if len(topics) >= limit:
+                break
+        return list(reversed(topics))
+
+    def _recent_assistant_snapshot(self, session_messages: List[Dict[str, Any]]) -> str:
+        for message in reversed(session_messages):
+            if message.get("role") != "assistant":
+                continue
+            snippet = self._trim_grounded_memory_snippet(str(message.get("text") or ""), max_chars=150)
+            if snippet and not self._looks_like_low_value_assistant_snapshot(snippet):
+                return snippet
+        return ""
+
+    def _recent_operator_facts(self, *, limit: int = 4) -> List[str]:
+        facts: List[str] = []
+        for event in reversed(self.event_store.list_events_by_type("agent_query", limit=240)):
+            text = self._clean_grounded_memory_text(str(event.payload.get("text") or ""))
+            lowered = text.lower()
+            if not lowered:
+                continue
+            if (
+                "direct artificial intelligence system environment" in lowered
+                or "you are d.a.i.s.e" in lowered
+                or "you are daise" in lowered
+            ):
+                facts.append("you named me D.A.I.S.E. and defined it as Direct Artificial Intelligence System Environment")
+            if (
+                "i am your creator" in lowered
+                or "creator of this blackfong ecosystem" in lowered
+                or "i made the whole system" in lowered
+                or "creator of obeos" in lowered
+            ):
+                facts.append("you described yourself as the creator of O.B.E.O.S.")
+            match = re.search(r'call+\s+me ["“]?([a-z0-9 _-]{2,24})["”]?', text, re.IGNORECASE)
+            if match:
+                facts.append(f'you asked me to call you "{match.group(1).strip()}"')
+            if len(self._unique_grounded_memory_items(facts, limit=limit)) >= limit:
+                break
+        return self._unique_grounded_memory_items(facts, limit=limit)
+
+    def _render_operator_fact_statement(self, text: str) -> str:
+        cleaned = self._clean_grounded_memory_text(text)
+        lowered = cleaned.lower()
+        if not cleaned:
+            return ""
+        if lowered.startswith("the operator named the assistant d.a.i.s.e."):
+            return "you named me D.A.I.S.E. and defined it as Direct Artificial Intelligence System Environment"
+        if lowered.startswith("the operator described themself as "):
+            suffix = cleaned[len("The operator described themself as ") :].strip()
+            if suffix:
+                return f"you described yourself as {suffix}".rstrip(".")
+        if lowered.startswith("the operator asked to be called "):
+            preferred_name = self._extract_operator_preferred_name(cleaned)
+            if preferred_name:
+                return f'you asked me to call you "{preferred_name}"'
+        return cleaned.rstrip(".")
+
+    def _extract_operator_preferred_name(self, text: str) -> str:
+        cleaned = self._clean_grounded_memory_text(text)
+        if not cleaned:
+            return ""
+        for pattern in (
+            r'calling you ["“]?([^"”]{2,24})["”]?',
+            r'call+\s+you ["“]?([^"”]{2,24})["”]?',
+            r'call+\s+me ["“]?([^"”]{2,24})["”]?',
+            r'be called ["“]?([^"”]{2,24})["”]?',
+        ):
+            match = re.search(pattern, cleaned, re.IGNORECASE)
+            if match:
+                candidate = " ".join(match.group(1).split()).strip()
+                if self._is_plausible_operator_name(candidate):
+                    return self._normalize_operator_display_name(candidate)
+        return ""
+
+    def _is_plausible_operator_name(self, value: str) -> bool:
+        cleaned = " ".join(str(value or "").split()).strip().strip('"\'')
+        lowered = cleaned.lower()
+        if not cleaned or len(cleaned) > 24:
+            return False
+        if len(cleaned.split()) > 4:
+            return False
+        if any(
+            token in lowered
+            for token in (
+                "http",
+                "api/",
+                "127.0.0.1",
+                "info:",
+                "if that's",
+                "if thats",
+            )
+        ):
+            return False
+        return True
+
+    def _normalize_operator_display_name(self, value: str) -> str:
+        cleaned = " ".join(str(value or "").split()).strip()
+        if cleaned.islower() and re.fullmatch(r"[a-z]+(?: [a-z]+){0,2}", cleaned):
+            return " ".join(part.capitalize() for part in cleaned.split())
+        return cleaned
+
+    def _stored_work_topics(
+        self,
+        memories: List[Dict[str, Any]],
+        *,
+        limit: int,
+        session_id: Optional[str] = None,
+    ) -> List[str]:
+        topics: List[str] = []
+        for item in memories:
+            if str(item.get("memory_type") or "") != "active_work_item":
+                continue
+            memory_session_id = str(
+                ((item.get("metadata") or {}).get("session_id") or item.get("session_id") or "")
+            ).strip()
+            if session_id and memory_session_id != session_id:
+                continue
+            text = self._clean_grounded_memory_text(str(item.get("text") or ""))
+            working_match = re.search(r"working on (.+?)(?:[.?!]|$)", text, re.IGNORECASE)
+            if working_match:
+                for topic in self._canonical_work_topics(working_match.group(1)):
+                    topics.append(topic)
+                continue
+            for topic in self._canonical_work_topics(text):
+                topics.append(topic)
+        return self._unique_grounded_memory_items(topics, limit=limit)
+
+    def _extract_work_topics(self, text: str) -> List[str]:
+        cleaned = self._clean_grounded_memory_text(text)
+        if not cleaned:
+            return []
+        cleaned = self._strip_work_topic_greeting_prefix(cleaned)
+        topics: List[str] = list(self._canonical_work_topics(cleaned))
+        lowered = cleaned.lower()
+        for pattern in (
+            r"working on ([^.]+)",
+            r"trying to improve ([^.]+)",
+            r"improve ([^.]+)",
+            r"updates? to ([^.]+)",
+        ):
+            for match in re.finditer(pattern, lowered):
+                fragment = cleaned[match.start(1) : match.end(1)]
+                for topic in self._canonical_work_topics(fragment):
+                    topics.append(topic)
+        return self._unique_grounded_memory_items(topics, limit=4)
+
+    def _strip_work_topic_greeting_prefix(self, text: str) -> str:
+        cleaned = self._clean_grounded_memory_text(text)
+        if not cleaned:
+            return ""
+        lowered = cleaned.lower()
+        greeting_prefixes = (
+            "hello, ",
+            "hello ",
+            "hi, ",
+            "hi ",
+            "hey, ",
+            "hey ",
+            "good morning, ",
+            "good morning ",
+            "good afternoon, ",
+            "good afternoon ",
+            "good evening, ",
+            "good evening ",
+            "im back, ",
+            "im back ",
+            "i'm back, ",
+            "i'm back ",
+            "we are back, ",
+            "we are back ",
+            "we're back, ",
+            "we're back ",
+        )
+        for prefix in greeting_prefixes:
+            if lowered.startswith(prefix) and len(cleaned) > len(prefix):
+                return cleaned[len(prefix) :].strip(" ,.;:-")
+        return cleaned
+
+    def _canonical_work_topics(self, text: str) -> List[str]:
+        cleaned = self._strip_work_topic_greeting_prefix(text).strip(" ,.;:-")
+        lowered = cleaned.lower()
+        if not cleaned or len(cleaned) <= 1:
+            return []
+        if lowered in {
+            "hello",
+            "hi",
+            "im back",
+            "i'm back",
+            "we are back",
+            "we're back",
+            "were back",
+            "good afternoon",
+            "good evening",
+            "good morning",
+        }:
+            return []
+        if any(
+            token in lowered
+            for token in (
+                "test message",
+                "im back",
+                "i'm back",
+                "what is your name",
+                "what's your name",
+                "what do you remember",
+                "what can you recall",
+                "what about a memory",
+                "do you remember your name",
+                "did you get",
+                "you can get this message",
+                "100% offline",
+                "debug test session",
+                "lets test",
+                "let's test",
+                "max amount of characters",
+                "hint",
+                "you never responded",
+                "know about obeos",
+            )
+        ):
+            return []
+        if lowered in {"obeos", "obeos?", "your system", "the system", "d"}:
+            return []
+
+        topics: List[str] = []
+        if "tinyprogrammer" in lowered or "tiny programmer" in lowered:
+            if "integration" in lowered:
+                topics.append("TinyProgrammer integration")
+            if "up and running" in lowered or "online" in lowered or "availability" in lowered:
+                topics.append("TinyProgrammer availability")
+            if "startup" in lowered or "auto starting" in lowered:
+                topics.append("TinyProgrammer startup")
+            if "failing" in lowered or "failure" in lowered or "keeps failing" in lowered:
+                topics.append("TinyProgrammer reliability")
+            if not topics:
+                topics.append("TinyProgrammer updates")
+        if "improve obeos" in lowered or "improve your system" in lowered or "improve the ecosystem" in lowered:
+            topics.append("OBEOS improvements")
+        if "files in obeos" in lowered or "see the files" in lowered:
+            topics.append("OBEOS file visibility")
+        if "file system" in lowered or "filesystem" in lowered:
+            topics.append("OBEOS file visibility")
+        if "enable the hud" in lowered or ("notification" in lowered and ("prefrence" in lowered or "preference" in lowered or "preferences" in lowered)):
+            topics.append("HUD notifications")
+        if "building you" in lowered or "learn more about building you" in lowered:
+            topics.append("D.A.I.S.E. knowledge growth")
+        if (
+            "memory is something we are working on" in lowered
+            or "overall memory" in lowered
+            or ("working on" in lowered and "memory" in lowered)
+            or ("remembered it" in lowered and "name" in lowered)
+            or "some kind of memory" in lowered
+            or ("memory" in lowered and "milestone" in lowered)
+        ):
+            topics.append("OBEOS memory system")
+        if "latency" in lowered or "response time" in lowered or "delay in your reply time" in lowered or "what happened to your response" in lowered:
+            topics.append("response latency")
+        if "chat rendering" in lowered or "chatbox" in lowered:
+            topics.append("chat rendering")
+        if "hud" in lowered and ("design" in lowered or "layout" in lowered or "workspace" in lowered):
+            topics.append("HUD layout improvements")
+        if "spawn" in lowered:
+            topics.append("Spawn knowledge recall")
+        if "backend" in lowered and any(
+            token in lowered
+            for token in (
+                "working",
+                "changes",
+                "change",
+                "update",
+                "updates",
+                "improve",
+                "improving",
+                "refactor",
+                "latency",
+            )
+        ):
+            topics.append("OBEOS backend work")
+        for fragment in re.split(r",|\band\b", cleaned, flags=re.IGNORECASE):
+            candidate = fragment.strip(" ,.;:-")
+            if not self._looks_like_plausible_work_fragment(candidate):
+                continue
+            if self._fragment_is_covered_by_existing_topic(candidate, topics):
+                continue
+            if any(candidate.lower() == existing.lower() for existing in topics):
+                continue
+            topics.append(candidate)
+        deduped = self._unique_grounded_memory_items(topics, limit=4)
+        if deduped:
+            return deduped
+        return []
+
+    def _looks_like_plausible_work_fragment(self, text: str) -> bool:
+        cleaned = self._clean_grounded_memory_text(text)
+        lowered = cleaned.lower()
+        if not cleaned:
+            return False
+        if len(cleaned) > 48 or len(cleaned.split()) > 4:
+            return False
+        if len(cleaned.split()) < 2:
+            return False
+        if self._looks_like_question_topic(cleaned):
+            return False
+        if self._looks_like_identity_fact(cleaned):
+            return False
+        if self._looks_like_noise_topic(cleaned):
+            return False
+        boilerplate_prefixes = (
+            "call me",
+            "i am working on",
+            "i'm working on",
+            "working on",
+            "i am",
+            "i'm",
+        )
+        if lowered.startswith(boilerplate_prefixes):
+            return False
+        if lowered.startswith(("you ", "your ", "yes ", "add ", "as of ", "from ")):
+            return False
+        if lowered in {
+            "yes for now",
+            "add to you",
+            "you see",
+            "your latency",
+            "as of now",
+            "from hud smoke",
+            "you adapt",
+            "you are not static",
+        }:
+            return False
+        return True
+
+    def _fragment_is_covered_by_existing_topic(self, fragment: str, existing_topics: List[str]) -> bool:
+        lowered_fragment = self._clean_grounded_memory_text(fragment).lower()
+        lowered_topics = [self._clean_grounded_memory_text(item).lower() for item in existing_topics]
+        anchor_groups = (
+            ("latency",),
+            ("hud",),
+            ("notification",),
+            ("spawn",),
+            ("memory",),
+            ("backend",),
+            ("telegram",),
+            ("tinyprogrammer", "tiny programmer"),
+            ("file", "filesystem"),
+        )
+        for anchors in anchor_groups:
+            if any(anchor in lowered_fragment for anchor in anchors) and any(
+                any(anchor in topic for anchor in anchors) for topic in lowered_topics
+            ):
+                return True
+        return False
+
+    def _looks_like_identity_fact(self, text: str) -> bool:
+        lowered = self._clean_grounded_memory_text(text).lower()
+        return any(
+            token in lowered
+            for token in (
+                "you are d.a.i.s.e",
+                "direct artificial intelligence system environment",
+                "i am your creator",
+                "call me",
+            )
+        )
+
+    def _looks_like_noise_topic(self, text: str) -> bool:
+        lowered = self._clean_grounded_memory_text(text).lower()
+        if not lowered:
+            return True
+        if lowered in {
+            "hello",
+            "hi",
+            "im back",
+            "i'm back",
+            "we are back",
+            "we're back",
+            "hello we are back",
+            "hello, we are back",
+            "hi we are back",
+            "hi, we are back",
+            "hey we are back",
+            "hey, we are back",
+            "good afternoon",
+            "good evening",
+        }:
+            return True
+        return any(
+            token in lowered
+            for token in (
+                "test message",
+                "debug test session",
+                "lets test",
+                "let's test",
+                "max amount of characters",
+                "respond if so",
+                "did you get that",
+                "you never responded",
+                "interesting that you were able to detect that",
+                "info:werkzeug",
+                "127.0.0.1",
+                "http/1.1",
+                "/api/",
+                "made a good amount of changes",
+                "they should reflect",
+                "congratulate you on that milestone",
+                "some kind of memory",
+            )
+        )
+
+    def _looks_like_low_value_assistant_snapshot(self, text: str) -> bool:
+        lowered = self._clean_grounded_memory_text(text).lower()
+        if not lowered:
+            return True
+        if lowered in {
+            "hello, five.",
+            "hello, five",
+            "welcome back, five.",
+            "welcome back, five",
+            "welcome back.",
+            "welcome back",
+        }:
+            return True
+        return any(
+            token in lowered
+            for token in (
+                "this appears to be a test message",
+                "would you like to proceed with a legitimate question",
+                "i see multiple possible intents here",
+                "i will keep that in mind",
+                "offline-first assistant",
+                "yes, i can see the difference",
+                "shared o.b.e.o.s memory layer",
+                "separate hidden notebook",
+                "conversation memory backed by events.db",
+                "d.a.i.s.e is online locally",
+                "route work through the rest of the ecosystem",
+                "hello, five. i'm here in o.b.e.o.s and ready",
+                "hello, i’m here in o.b.e.o.s and ready",
+                "welcome back, five. i'm here in o.b.e.o.s and ready",
+                "welcome back. i'm here in o.b.e.o.s and ready",
+            )
+        )
+
+    def _looks_like_question_topic(self, text: str) -> bool:
+        cleaned = self._clean_grounded_memory_text(text)
+        lowered = cleaned.lower()
+        if not cleaned:
+            return False
+        if "?" in str(text or ""):
+            return True
+        question_prefixes = (
+            "what ",
+            "what's ",
+            "whats ",
+            "who ",
+            "who's ",
+            "whos ",
+            "why ",
+            "how ",
+            "when ",
+            "where ",
+            "can you ",
+            "could you ",
+            "would you ",
+            "do you ",
+            "did you ",
+            "are you ",
+            "is tinyprogrammer ",
+            "is tiny programmer ",
+            "tell me ",
+            "explain ",
+            "describe ",
+            "summarize ",
+            "show me ",
+        )
+        return any(lowered.startswith(prefix) for prefix in question_prefixes)
+
+    def _clean_grounded_memory_text(self, text: str) -> str:
+        normalized = " ".join(str(text or "").strip().split())
+        normalized = normalized.replace("INFO:werkzeug:", "").strip()
+        return normalized
+
+    def _trim_grounded_memory_snippet(self, text: str, *, max_chars: int = 120) -> str:
+        cleaned = self._clean_grounded_memory_text(text)
+        if not cleaned:
+            return ""
+        sentence = re.split(r"(?<=[.!?])\s+", cleaned, maxsplit=1)[0].strip()
+        candidate = sentence or cleaned
+        candidate = re.sub(r"^Session summary:\s*", "", candidate, flags=re.IGNORECASE)
+        candidate = candidate.strip(" -")
+        if len(candidate) > max_chars:
+            candidate = candidate[: max_chars - 3].rstrip(" ,;:-") + "..."
+        return candidate
+
+    def _unique_grounded_memory_items(self, items: List[str], *, limit: int) -> List[str]:
+        deduped: List[str] = []
+        seen = set()
+        for item in items:
+            cleaned = self._clean_grounded_memory_text(item)
+            if not cleaned:
+                continue
+            key = cleaned.lower().strip(" .")
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(cleaned.rstrip("."))
+            if len(deduped) >= limit:
+                break
+        return deduped
+
+    @staticmethod
+    def _join_grounded_memory_items(items: List[str]) -> str:
+        cleaned = [str(item).strip().rstrip(".") for item in items if str(item).strip()]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} and {cleaned[1]}"
+        return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
+
     def _collection_summary_hit(
         self,
         collection: str,
         *,
+        query: str,
         query_tokens: List[str],
         retrieval_profile: str,
     ) -> Optional[Dict[str, Any]]:
         payload, summary_path = self._collection_summary_payload(collection)
         if payload is None:
             return None
-        text = str(payload.get("text") or payload.get("extractive_text") or payload.get("summary") or "").strip()
+        text = self._compact_collection_summary_text(
+            payload,
+            query=query,
+            collection_label=self._collection_display_name(collection),
+        )
         if not text:
             return None
         collection_slug = str(payload.get("collection") or collection or "").strip().lower().replace("-", "_")
@@ -1699,9 +3180,61 @@ class ConversationMemoryService:
             return None, None
         return fallback, paths.knowledge_intel_path / collection / "summary.fallback.json"
 
+    def _compact_collection_summary_text(
+        self,
+        payload: Dict[str, Any],
+        *,
+        query: str = "",
+        collection_label: str = "",
+    ) -> str:
+        if not isinstance(payload, dict):
+            return ""
+        overview = self._clean_grounded_collection_text(str(payload.get("overview") or ""))
+        description = self._clean_grounded_collection_text(str(payload.get("description") or ""))
+        title = str(collection_label or payload.get("title") or payload.get("collection") or "Collection").strip()
+        domain = str(payload.get("domain") or "").strip()
+        sources = int(payload.get("sources") or 0)
+        embedded = int(payload.get("embedded") or 0)
+        total_chunks = int(payload.get("total_chunks") or 0)
+        issue_ranges = list(payload.get("issue_ranges") or [])
+        timeline_events = int(payload.get("timeline_events") or payload.get("event_count") or 0)
+        fallback_generated = bool(payload.get("fallback_generated"))
+        wants_coverage = self._collection_query_wants_coverage(query)
+        cleaned_text = self._clean_grounded_collection_text(
+            str(payload.get("text") or payload.get("extractive_text") or payload.get("summary") or "")
+        )
+        if cleaned_text and not fallback_generated:
+            return cleaned_text
+
+        lines: List[str] = []
+        if overview:
+            lines.append(overview.rstrip(".") + ".")
+        if description:
+            lines.append(f"{title} is an O.B.E.O.S. knowledge collection focused on {description.rstrip('.')}.")
+        elif domain:
+            lines.append(f"{title} is covered in the local {domain} collection.")
+        if wants_coverage:
+            coverage_bits = []
+            if sources:
+                coverage_bits.append(f"{sources} source(s)")
+            if embedded:
+                coverage_bits.append(f"{embedded} embedded")
+            if total_chunks:
+                coverage_bits.append(f"{total_chunks} searchable chunk(s)")
+            if coverage_bits:
+                lines.append(f"Coverage: {', '.join(coverage_bits)}.")
+            if issue_ranges:
+                preview = ", ".join(issue_ranges[:6])
+                suffix = ", and more" if len(issue_ranges) > 6 else ""
+                lines.append(f"Issue ranges: {preview}{suffix}.")
+            if timeline_events:
+                lines.append(f"Structured timeline entries: {timeline_events}.")
+        return " ".join(line.strip() for line in lines if line.strip())
+
     def _compose_grounded_collection_answer(
         self,
         *,
+        query: str,
         collection: str,
         summary_payload: Optional[Dict[str, Any]],
         fallback_text: str,
@@ -1721,10 +3254,6 @@ class ConversationMemoryService:
         )
         if cleaned_summary and not fallback_generated:
             parts.append(cleaned_summary.rstrip(".") + ".")
-        elif description:
-            parts.append(f"this collection covers {description.rstrip('.')}.")
-        elif domain:
-            parts.append(f"{collection_label} is a local {domain} collection inside OBEOS.")
         raw_support_excerpt = self._clean_grounded_collection_text(
             str(representative_passages[0] if representative_passages else "")
         )
@@ -1736,14 +3265,42 @@ class ConversationMemoryService:
             raw_support_excerpt,
             collection_label=collection_label,
         )
-        if support_summary:
-            parts.append(f"One grounded passage frames {collection_label} as {support_summary.rstrip('.')}.")
-        elif support_excerpt and not self._is_collection_excerpt_boilerplate(support_excerpt):
-            if support_summary:
-                parts.append(f"One grounded passage frames {collection_label} as {support_summary.rstrip('.')}.")
+        wants_overview = self._is_collection_overview_style_query(query, collection_label=collection_label)
+        wants_coverage = self._collection_query_wants_coverage(query)
+        architecture_summary = self._compose_architecture_collection_summary(
+            collection=collection,
+            collection_label=collection_label,
+            domain=domain,
+            description=description,
+            cleaned_summary=cleaned_summary,
+            support_summary=support_summary,
+            support_excerpt=support_excerpt,
+            representative_passages=representative_passages,
+        )
+        if architecture_summary and wants_overview:
+            parts.append(architecture_summary.rstrip(".") + ".")
+        elif support_summary:
+            if cleaned_summary and not fallback_generated and support_summary.lower() in cleaned_summary.lower():
+                pass
+            elif collection_label.lower() in support_summary.lower():
+                parts.append(support_summary.rstrip(".") + ".")
+            elif wants_overview:
+                parts.append(f"{collection_label} centers on {support_summary.rstrip('.')}.")
             else:
+                parts.append(f"A grounded passage frames {collection_label} as {support_summary.rstrip('.')}.")
+        elif support_excerpt and not self._is_collection_excerpt_boilerplate(support_excerpt):
+            if wants_overview and not cleaned_summary:
+                parts.append(f"{collection_label} is described here as {support_excerpt.rstrip('.')}.")
+            elif not cleaned_summary:
                 parts.append(f"One retrieved passage describes {support_excerpt.rstrip('.')}.")
-        if sources or embedded or total_chunks:
+        if not parts:
+            if architecture_summary:
+                parts.append(architecture_summary.rstrip(".") + ".")
+            elif description:
+                parts.append(f"{collection_label} is covered in local O.B.E.O.S. knowledge around {description.rstrip('.')}.")
+            elif domain:
+                parts.append(f"{collection_label} is a local {domain} collection inside O.B.E.O.S.")
+        if wants_coverage and (sources or embedded or total_chunks):
             coverage_bits = []
             if sources:
                 coverage_bits.append(f"{sources} registered source(s)")
@@ -1753,15 +3310,109 @@ class ConversationMemoryService:
                 coverage_bits.append(f"{total_chunks} searchable chunk(s)")
             if coverage_bits:
                 parts.append(f"Current local coverage includes {', '.join(coverage_bits)}.")
-        if issue_ranges:
+        if wants_coverage and issue_ranges:
             preview = ", ".join(issue_ranges[:6])
             suffix = ", and more" if len(issue_ranges) > 6 else ""
             parts.append(f"The current collection spans issue ranges {preview}{suffix}.")
         if parts:
-            return f"According to the local {collection_label} collection, {' '.join(parts)}".strip()
+            return " ".join(parts).strip()
         if not cleaned_summary:
             return fallback_text
-        return f"According to the local {collection_label} collection, {cleaned_summary}"
+        return cleaned_summary
+
+    def _compose_architecture_collection_summary(
+        self,
+        *,
+        collection: str,
+        collection_label: str,
+        domain: str,
+        description: str,
+        cleaned_summary: str,
+        support_summary: str,
+        support_excerpt: str,
+        representative_passages: List[str],
+    ) -> str:
+        normalized_collection = str(collection or "").strip().lower()
+        lowered = " ".join(
+            part
+            for part in (
+                cleaned_summary,
+                support_summary,
+                support_excerpt,
+                description,
+                *[self._clean_grounded_collection_text(str(passage or "")) for passage in representative_passages[:3]],
+            )
+            if str(part or "").strip()
+        ).lower()
+        if str(domain or "").strip().lower() != "architecture" and normalized_collection not in {"obeos", "blackfong"}:
+            return ""
+        if (
+            "official blackfong environment operating system" in lowered
+            or normalized_collection == "obeos"
+        ):
+            summary = (
+                f"{collection_label} is the Official Blackfong Environment Operating System: "
+                "an offline-first intelligence environment built around one governing spine, "
+                "one shared memory system, and multiple operator surfaces"
+            )
+            if normalized_collection == "obeos" or any(
+                token in lowered for token in ("d.a.i.s.e", "daise", "thoughtglass", "memory chamber")
+            ):
+                summary += (
+                    ", with Blackfong as the governing spine, D.A.I.S.E. as the visible assistant, "
+                    "Thoughtglass as the live cognition surface, and Memory Chamber as the deeper workbench"
+                )
+            return summary
+        if "governing spine" in lowered and "shared memory" in lowered:
+            return (
+                f"{collection_label} is an offline-first architecture built around one governing spine, "
+                "one shared memory system, and multiple operator surfaces"
+            )
+        if "operator shell" in lowered or "canonical native operator shell" in lowered:
+            return (
+                f"{collection_label} is described as a multi-surface operating environment "
+                "with a canonical native workspace and secondary remote operator surfaces"
+            )
+        return ""
+
+    def _is_collection_overview_style_query(self, query: str, *, collection_label: str) -> bool:
+        normalized = " ".join(str(query or "").strip().lower().split())
+        if not normalized:
+            return False
+        collection_forms = {
+            str(collection_label or "").strip().lower(),
+            str(collection_label or "").strip().lower().replace("_", " "),
+        }
+        mentions_collection = any(form and form in normalized for form in collection_forms)
+        if not mentions_collection:
+            return False
+        starters = (
+            "tell me about",
+            "who is",
+            "what is",
+            "what's",
+            "give me an overview of",
+            "explain",
+        )
+        return any(starter in normalized for starter in starters)
+
+    def _collection_query_wants_coverage(self, query: str) -> bool:
+        normalized = " ".join(str(query or "").strip().lower().split())
+        if not normalized:
+            return False
+        coverage_markers = (
+            "how much do you know",
+            "what do you have on",
+            "coverage",
+            "sources",
+            "issue range",
+            "issue ranges",
+            "which issues",
+            "span",
+            "how many",
+            "what is in the collection",
+        )
+        return any(marker in normalized for marker in coverage_markers)
 
     def _clean_grounded_collection_text(self, text: str) -> str:
         cleaned = " ".join(str(text or "").split())
@@ -1825,16 +3476,33 @@ class ConversationMemoryService:
 
     def _summarize_collection_excerpt(self, text: str, *, collection_label: str) -> str:
         lowered = str(text or "").lower()
+        label = str(collection_label or "").strip() or "This collection"
+        if "official blackfong environment operating system" in lowered:
+            return (
+                f"{label} is the Official Blackfong Environment Operating System, "
+                "an offline-first intelligence environment built around one governing spine, "
+                "one shared memory system, and multiple operator surfaces"
+            )
+        if "governing spine" in lowered and "shared memory" in lowered:
+            return (
+                f"{label} is an offline-first architecture built around one governing spine "
+                "and one shared memory system"
+            )
+        if "visible assistant" in lowered and ("thoughtglass" in lowered or "memory chamber" in lowered):
+            return (
+                f"{label} keeps Blackfong as the governing spine, D.A.I.S.E. as the visible assistant, "
+                "Thoughtglass as the live cognition surface, and Memory Chamber as the deeper workbench"
+            )
         if "brought back to life" in lowered and "identity" in lowered:
-            return "a dead man brought back to life, stripped of his identity, and charged with dangerous power"
+            return f"{label} follows a dead man brought back to life, stripped of his identity, and charged with dangerous power"
         if "agent of hell" in lowered:
-            return "an agent of hell whose existence sets dangerous consequences in motion"
+            return f"{label} is an agent of hell whose existence sets dangerous consequences in motion"
         if "al simmons" in lowered and ("soldier of h" in lowered or "hell" in lowered):
-            return "Al Simmons, also known as Spawn, struggling against the role of a soldier of hell"
+            return f"{label} centers on Al Simmons, who struggles against the role of a soldier of hell"
         if "al simmons" in lowered and "wanda" in lowered:
-            return "Al Simmons, also known as Spawn, and his ties to Wanda and Terry"
+            return f"{label} follows Al Simmons and his ties to Wanda and Terry"
         if collection_label.lower() in lowered and "understood" in lowered:
-            return "a figure the story itself says people never fully understood"
+            return f"{label} is treated as a figure the story itself says people never fully understood"
         return ""
 
     def _build_collection_summary_fallback(self, collection: str) -> Optional[Dict[str, Any]]:
@@ -1864,8 +3532,15 @@ class ConversationMemoryService:
         issue_ranges = list((inventory or {}).get("issue_ranges") or [])
         timeline_events = int((timeline or {}).get("event_count") or 0)
         representative = self._collection_summary_passages(collection_slug, description=description, domain=domain, limit=2)
+        overview = ""
+        for excerpt in representative:
+            overview = self._summarize_collection_excerpt(excerpt, collection_label=title)
+            if overview:
+                break
 
         lines: List[str] = []
+        if overview:
+            lines.append(f"Overview: {overview.rstrip('.')}.")
         if description:
             lines.append(f"{title} is an OBEOS knowledge collection focused on {description.rstrip('.')}.")
         else:
@@ -1902,6 +3577,7 @@ class ConversationMemoryService:
             "domain": domain,
             "kind": "collection_summary",
             "title": summary_title,
+            "overview": overview,
             "description": description,
             "sources": sources,
             "embedded": embedded,
@@ -1938,7 +3614,12 @@ class ConversationMemoryService:
             for part in [
                 collection.replace("_", " "),
                 description,
-                "overview character story context origin identity protagonist relationships",
+                (
+                    "official blackfong environment operating system governing spine shared memory "
+                    "operator surfaces daise thoughtglass memory chamber workspace architecture"
+                    if str(domain or "").strip().lower() == "architecture"
+                    else "overview character story context origin identity protagonist relationships"
+                ),
             ]
             if str(part or "").strip()
         )
@@ -1959,7 +3640,7 @@ class ConversationMemoryService:
             cleaned = " ".join(str(match.get("text") or "").split())
             if not cleaned:
                 continue
-            excerpt = cleaned[:220]
+            excerpt = cleaned[:320] if str(domain or "").strip().lower() == "architecture" else cleaned[:220]
             if self._is_collection_excerpt_boilerplate(excerpt):
                 continue
             readability = self._collection_excerpt_readability(excerpt)
@@ -1985,6 +3666,8 @@ class ConversationMemoryService:
         if not text:
             return 0.0
         lowered = text.lower()
+        if text.lstrip().startswith("#") and len(re.findall(r"[A-Za-z]{3,}", text)) < 12:
+            return 0.0
         alpha_chars = sum(1 for char in text if char.isalpha())
         if alpha_chars <= 0:
             return 0.0
@@ -2014,6 +3697,22 @@ class ConversationMemoryService:
     def _collection_excerpt_descriptor_score(self, excerpt: str, *, domain: str = "") -> float:
         lowered = str(excerpt or "").lower()
         score = 0.0
+        if str(domain or "").lower() == "architecture":
+            keyword_weights = {
+                "official blackfong environment operating system": 1.4,
+                "offline-first": 0.4,
+                "governing spine": 0.7,
+                "shared memory": 0.7,
+                "operator surfaces": 0.45,
+                "thoughtglass": 0.25,
+                "memory chamber": 0.25,
+                "d.a.i.s.e": 0.2,
+                "daise": 0.2,
+                "blackfong workspace": 0.2,
+            }
+            for token, weight in keyword_weights.items():
+                if token in lowered:
+                    score += weight
         if str(domain or "").lower() in {"comics", "fiction", "novels", "stories"}:
             keyword_weights = {
                 "brought back to life": 0.9,
@@ -2064,6 +3763,7 @@ class ConversationMemoryService:
         self,
         hits: List[Dict[str, Any]],
         *,
+        query: str,
         retrieval_profile: str,
         hinted_collections: List[str],
     ) -> List[Dict[str, Any]]:
@@ -2075,7 +3775,14 @@ class ConversationMemoryService:
         focus_collection = str(summary_hits[0].get("collection") or hinted_collections[0] or "")
         if not focus_collection:
             return hits
-        supporting_cap = 2 if retrieval_profile in {"deep", "architecture"} else 1
+        focus_label = self._collection_display_name(focus_collection)
+        if retrieval_profile not in {"deep", "architecture"} and self._is_collection_overview_style_query(
+            query,
+            collection_label=focus_label,
+        ):
+            supporting_cap = 0
+        else:
+            supporting_cap = 2 if retrieval_profile in {"deep", "architecture"} else 1
         supporting_hits = [
             hit
             for hit in hits
@@ -2092,6 +3799,9 @@ class ConversationMemoryService:
         return limited
 
     def _collection_display_name(self, collection: str) -> str:
+        normalized = str(collection or "").strip().lower()
+        if normalized == "obeos":
+            return "O.B.E.O.S."
         _source_registry, collection_registry = self._knowledge_registries()
         if collection_registry is not None:
             meta = collection_registry.get(collection)
@@ -2309,7 +4019,7 @@ class ConversationMemoryService:
         if not text.strip() or isinstance(self.vector_store, NullVectorStore):
             return
         try:
-            self.vector_store.add(ids=[vector_id], texts=[text], metadatas=[metadata])
+            self.vector_store.upsert(ids=[vector_id], texts=[text], metadatas=[metadata])
         except Exception:  # pragma: no cover - duplicate IDs or backend failures
             log_action(
                 LogLevel.WARNING,
@@ -2378,6 +4088,7 @@ class ConversationMemoryService:
         global_memories: List[Dict[str, Any]],
         recent_events: List[Dict[str, Any]],
         knowledge_context: str,
+        operator_profile: Optional[Dict[str, Any]] = None,
         transcript_window: int,
         prompt_budget_tokens: Optional[int] = None,
         prompt_mode: str = "standard",
@@ -2386,6 +4097,24 @@ class ConversationMemoryService:
         sections: List[str] = [f"Retrieval profile: {agent_name} ({prompt_mode}, {retrieval_profile})"]
         if knowledge_context:
             sections.append("Bounded retrieval context:\n" + knowledge_context)
+        profile_lines: List[str] = []
+        profile = dict(operator_profile or {})
+        if profile.get("assistant_identity"):
+            profile_lines.append(f"- Assistant identity: {profile['assistant_identity']}")
+        if profile.get("preferred_name"):
+            profile_lines.append(f"- Preferred operator name: {profile['preferred_name']}")
+        if profile.get("operator_role"):
+            profile_lines.append(f"- Operator role: {profile['operator_role']}")
+        if profile.get("active_work"):
+            profile_lines.append(
+                "- Active work: " + "; ".join(str(item) for item in list(profile.get("active_work") or [])[:3])
+            )
+        if profile.get("fact_statements"):
+            profile_lines.append(
+                "- Grounded facts: " + "; ".join(str(item) for item in list(profile.get("fact_statements") or [])[:2])
+            )
+        if profile_lines:
+            sections.append("Operator profile:\n" + "\n".join(profile_lines))
         if session_summaries:
             sections.append(
                 "Session summaries:\n" + "\n".join(
@@ -2553,12 +4282,32 @@ class ConversationMemoryService:
         haystack = f"{text}\n{title}\n{metadata}".lower()
         query_tokens = self._tokenize(query)
         keyword_tokens = [str(token).lower() for token in profile.get("memory_keywords", ())]
+        recall_kind = self._detect_grounded_memory_query(query)
+        memory_type = str(candidate.get("memory_type") or "")
+        candidate_session_id = str(metadata.get("session_id", ""))
 
         score = float(candidate.get("relevance", 0.0))
         if candidate.get("memory_type") == "pinned_memory":
             score += 0.18
-        if session_id and str(metadata.get("session_id", "")) == session_id:
+        if memory_type == "operator_fact":
+            score += 0.26
+        if memory_type == "active_work_item":
             score += 0.22
+            match = re.search(r"working on (.+?)(?:[.?!]|$)", text, re.IGNORECASE)
+            if match and not self._canonical_work_topics(match.group(1)):
+                score -= 0.42
+        if session_id and candidate_session_id == session_id:
+            score += 0.22
+        elif memory_type == "active_work_item" and session_id and not query_tokens:
+            score -= 0.26
+        if recall_kind == "operator" and memory_type == "operator_fact":
+            score += 0.32
+        if recall_kind == "session" and memory_type == "active_work_item":
+            score += 0.28
+        if recall_kind == "operator" and memory_type == "active_work_item":
+            score += 0.16
+        if "name" in query.lower() and any(token in haystack for token in ("d.a.i.s.e", "preferred name", "call you")):
+            score += 0.18
         score += self._token_overlap_score(query_tokens, haystack, weight=0.08)
         score += self._token_overlap_score(keyword_tokens, haystack, weight=0.05)
         return score
@@ -2771,11 +4520,20 @@ class ConversationMemoryService:
                         prompt_bits.append(
                             f"{agent_name}~{metrics.get('prompt_context_tokens_estimate', metrics.get('approx_prompt_tokens', '?'))} tokens"
                         )
+            retrieval_profile = payload.get("retrieval_profile") or "unknown"
+            transport = payload.get("transport") or "local"
             return (
-                f"Memory retrieval used {payload.get('session_messages', 0)} transcript items, "
+                f"Memory retrieval ({retrieval_profile}, {transport}) used {payload.get('session_messages', 0)} transcript items, "
                 f"{payload.get('session_summaries', 0)} summaries, {payload.get('global_memories', 0)} memories, "
                 f"and {payload.get('recent_events', 0)} recent events"
                 f"{' (' + ', '.join(prompt_bits) + ')' if prompt_bits else ''}."
+            )
+        if event.type == "memory_retrieval_observation":
+            return (
+                f"Retrieval observation profile={payload.get('retrieval_profile', 'unknown')} "
+                f"transport={payload.get('transport', 'local')} "
+                f"knowledge_hits={payload.get('knowledge_hits', 0)} "
+                f"graph_matches={payload.get('graph_matches', 0)}."
             )
         if event.type == "latency_observation":
             prompt_metrics = payload.get("prompt_metrics") or {}
@@ -2848,9 +4606,19 @@ class ConversationMemoryService:
         if event.type == "consistency_conflict":
             return f"Consistency conflict: {payload.get('summary', payload.get('risk_flag', 'unknown conflict'))}."
         if event.type == "request_outcome":
+            provider = payload.get("provider") or "unknown"
+            model = payload.get("model") or "unknown"
+            retrieval_profile = payload.get("retrieval_profile") or "unknown"
+            transport = payload.get("transport") or "local"
+            fallback = payload.get("fallback_used")
+            fallback_text = ""
+            if fallback is not None:
+                fallback_text = f" fallback={bool(fallback)}"
             return (
                 f"Request outcome {payload.get('decision_state', 'unknown')} "
-                f"success={payload.get('success', 'unknown')}."
+                f"success={payload.get('success', 'unknown')} "
+                f"via {provider}/{model} "
+                f"profile={retrieval_profile} transport={transport}{fallback_text}."
             )
         if event.type == "agent_trust_update":
             return (
@@ -2968,6 +4736,7 @@ class ConversationMemoryService:
             "correlation_id": event.metadata.get("correlation_id"),
             "request_id": event.metadata.get("request_id"),
             "summary": summary,
+            "message": summary,
             "payload": payload,
             "metadata": event.metadata,
         }

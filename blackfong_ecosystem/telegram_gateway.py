@@ -263,8 +263,12 @@ class TelegramGatewayService:
         self.operator_chat = operator_chat
         if awareness_service is None:
             from .system_awareness import SystemAwarenessService
+            from .tinyprogrammer_companion import tinyprogrammer_companion
 
-            awareness_service = SystemAwarenessService(memory_service=self.memory_service)
+            awareness_service = SystemAwarenessService(
+                memory_service=self.memory_service,
+                tinyprogrammer=tinyprogrammer_companion,
+            )
         self.awareness_service = awareness_service
         self._http_client = http_client or httpx.Client(timeout=self.settings.request_timeout_seconds)
         self._owns_http_client = http_client is None
@@ -277,6 +281,7 @@ class TelegramGatewayService:
         self._bot_username: Optional[str] = None
         self._terminal_status: Optional[str] = None
         self._worker_attempt_limit = 3
+        self._normalize_legacy_thread_modes()
 
     def start(self) -> Dict[str, Any]:
         if not self.settings.enabled or not self.settings.bot_token:
@@ -719,6 +724,8 @@ class TelegramGatewayService:
             request_id=request_id,
             agent_override=requested_agent_text,
             analysis_mode=analysis_mode,
+            include_messages=False,
+            include_trace=False,
             modality=modality,
             context=self._operator_context(payload, requested_agent=requested_agent_text),
         )
@@ -1052,6 +1059,43 @@ class TelegramGatewayService:
                     },
                 )
         return normalized
+
+    def _normalize_legacy_thread_modes(self) -> int:
+        now = time.time()
+        migrated = 0
+        with self.event_store.engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT thread_key, mode, metadata_json
+                    FROM telegram_thread_state
+                    """
+                )
+            ).mappings().all()
+            for row in rows:
+                metadata = self._decode_thread_metadata(row.get("metadata_json"))
+                current_mode = str(row.get("mode") or "")
+                if bool(metadata.get("mode_explicit")) or current_mode == DEFAULT_MODE:
+                    continue
+                conn.execute(
+                    text(
+                        """
+                        UPDATE telegram_thread_state
+                        SET mode = :mode,
+                            last_seen_at = :last_seen_at,
+                            metadata_json = :metadata_json
+                        WHERE thread_key = :thread_key
+                        """
+                    ),
+                    {
+                        "mode": DEFAULT_MODE,
+                        "last_seen_at": now,
+                        "metadata_json": json.dumps(metadata),
+                        "thread_key": str(row["thread_key"]),
+                    },
+                )
+                migrated += 1
+        return migrated
 
     def _set_thread_mode(self, thread_key: str, mode: str) -> None:
         with self.event_store.engine.begin() as conn:

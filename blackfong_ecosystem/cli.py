@@ -290,6 +290,28 @@ def memory_query_command(keyword: str) -> None:
     for e in reversed(evs):
         click.echo(f"{e.timestamp} {e.source}/{e.type} {e.payload}")
 
+
+@cli.command("conversation-review")
+@click.option("--session-id", type=str, help="Review one specific session id.")
+@click.option("--transport", type=str, help="Filter to a transport such as telegram or hud.")
+@click.option("--limit", type=int, default=5, show_default=True, help="Number of matching sessions to return.")
+@click.option("--message-limit", type=int, default=3, show_default=True, help="Recent query/response samples per session.")
+def conversation_review_command(
+    session_id: Optional[str],
+    transport: Optional[str],
+    limit: int,
+    message_limit: int,
+) -> None:
+    """Summarize real conversation health across sessions/transports."""
+    memory = _memory_service_with_best_vector_store()
+    payload = memory.review_conversations(
+        session_id=session_id,
+        transport=transport,
+        limit=limit,
+        message_limit=message_limit,
+    )
+    click.echo(json.dumps(payload, indent=2))
+
 @cli.command("instability-stats")
 @click.option("--last", type=int, default=100, help="Number of recent mobray events to include.")
 @click.option("--format", "fmt", type=click.Choice(["csv", "json"]), default="csv")
