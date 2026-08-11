@@ -2548,6 +2548,28 @@ class WebDashboard:
         agent_override: Optional[str],
     ) -> Dict[str, Any]:
         selected_agent = str(result.get("selected_agent") or result.get("agent") or agent_override or "daise")
+        bundle = self.memory_service.build_context(
+            session_id=session_id,
+            query=message,
+            agent_name=selected_agent,
+            analysis_mode=str(result.get("analysis_mode") or "quick"),
+            request_id=request_id,
+        )
+        try:
+            self._publish_live_event(
+                "memory_retrieval",
+                {
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "retrieval_profile": bundle.get("retrieval_profile"),
+                    "knowledge_hits": bundle.get("knowledge_hits"),
+                    "grounded_memory_answer": bundle.get("grounded_memory_answer"),
+                    "citations": bundle.get("citations"),
+                    "timing_ms": bundle.get("timing_ms"),
+                },
+            )
+        except Exception:
+            logger.exception("Failed to publish memory_retrieval live event")
         return {
             "status": "error" if result.get("error") else "complete",
             "session_id": session_id,
@@ -2555,12 +2577,7 @@ class WebDashboard:
             "result": result,
             "messages": self.memory_service.get_session_messages(session_id, limit=40),
             "trace": self._get_request_snapshot(request_id) or self.memory_service.get_request_trace(request_id),
-            "memory": self.memory_service.build_context(
-                session_id=session_id,
-                query=message,
-                agent_name=selected_agent,
-                analysis_mode=str(result.get("analysis_mode") or "quick"),
-            ),
+            "memory": bundle,
         }
 
     def _get_request_snapshot(self, request_id: str) -> Optional[Dict[str, Any]]:
