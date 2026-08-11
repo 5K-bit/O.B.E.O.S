@@ -1139,6 +1139,7 @@ class WebDashboard:
                 analysis_mode=str(payload.get("analysis_mode") or retrieval_profile),
                 skip_vector_search=bool(payload.get("skip_vector_search", False)),
                 retrieval_profile=retrieval_profile,
+                request_id=str(payload.get("request_id") or ""),
             )
             settings = retrieval_profile_settings(retrieval_profile)
             cognition_graph = None
@@ -1157,6 +1158,10 @@ class WebDashboard:
                 "retrieval_contract": bundle.get("retrieval_contract"),
                 "context": bundle.get("prompt_context"),
                 "knowledge_context": bundle.get("knowledge_context"),
+                "knowledge_hits": bundle.get("knowledge_hits"),
+                "global_memories": bundle.get("global_memories"),
+                "grounded_memory_answer": bundle.get("grounded_memory_answer"),
+                "operator_profile": bundle.get("operator_profile"),
                 "citations": bundle.get("citations"),
                 "prompt_metrics": bundle.get("prompt_metrics"),
                 "timing_ms": bundle.get("timing_ms"),
@@ -2446,6 +2451,7 @@ class WebDashboard:
         response_payload = self._build_chat_response_payload(
             message=message,
             session_id=session_id,
+            request_id=request_id,
             result=result,
             agent_override=agent_override,
         )
@@ -2473,6 +2479,17 @@ class WebDashboard:
                 "response_text": result.get("response"),
             }
         )
+
+        self._handle_chat_phase(
+            {
+                "request_id": request_id,
+                "session_id": session_id,
+                "phase": "error" if result.get("error") or result.get("backend_error") else "complete",
+                "agent": result.get("selected_agent") or result.get("agent") or "daise",
+                "message": result.get("error") or result.get("backend_error") or "Request complete.",
+            }
+        )
+
         intent_id = state.get("intent_id")
         if intent_id:
             self.operator_actions.transition(
@@ -2526,11 +2543,11 @@ class WebDashboard:
         *,
         message: str,
         session_id: str,
+        request_id: str,
         result: Dict[str, Any],
         agent_override: Optional[str],
     ) -> Dict[str, Any]:
         selected_agent = str(result.get("selected_agent") or result.get("agent") or agent_override or "daise")
-        request_id = str(result.get("request_id") or "")
         return {
             "status": "error" if result.get("error") else "complete",
             "session_id": session_id,

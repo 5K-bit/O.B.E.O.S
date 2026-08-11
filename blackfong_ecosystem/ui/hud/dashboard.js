@@ -2083,9 +2083,15 @@
     if (eventType === "chat_phase") {
       state.requestId = payload.request_id || state.requestId;
       state.sessionId = payload.session_id || state.sessionId;
-      updateConversationStatus(payload.phase || "working", "active");
+      const phase = String(payload.phase || "working");
+      const phaseLabel = payload.phase_message || phase;
+      const status = phase === "accepted" ? "pending" : phase === "complete" ? "finalizing" : phase === "error" ? "error" : "active";
+      updateConversationStatus(phaseLabel, status);
       if (payload.fast_path) {
         el.pendingDetail.textContent = "Fast path: single-agent quick route.";
+      }
+      if (phase === "complete" || phase === "error") {
+        state.streamingReply = state.streamingReply ? { ...state.streamingReply, complete: true } : null;
       }
       refreshTrace().catch(() => {});
       refreshOperatorSummary().catch(() => {});
@@ -2103,14 +2109,21 @@
       refreshNotifications().catch(() => {});
       refreshOperatorSummary().catch(() => {});
       if (eventType === "chat_complete") {
-        updateConversationStatus("finalizing", "active");
-        state.streamingReply = null;
+        const hasError = payload.status === "error" || payload.error || (payload.result && payload.result.error);
+        if (hasError) {
+          const label = payload.error || (payload.result && payload.result.error) || "failed";
+          updateConversationStatus(`failed: ${label}`, "error");
+        } else {
+          updateConversationStatus("completed", "idle");
+        }
+        state.streamingReply = state.streamingReply ? { ...state.streamingReply, complete: true } : null;
         refreshMessages().catch(() => {});
         refreshMemory().catch(() => {});
         refreshCognition().catch(() => {});
       }
       if (eventType === "chat_error") {
-        updateConversationStatus("failed", "error");
+        const label = payload.error ? `failed: ${payload.error}` : "failed";
+        updateConversationStatus(label, "error");
         state.streamingReply = null;
       }
       return;
