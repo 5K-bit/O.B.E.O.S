@@ -577,6 +577,7 @@ class DAISE:
                     analysis_mode=analysis_mode,
                     skip_vector_search=skip_vector,
                     retrieval_profile=retrieval_profile,
+                    request_id=request_id,
                     transport=context.get("transport"),
                 )
                 if use_chamber:

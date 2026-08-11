@@ -1457,7 +1457,10 @@ def test_knowledge_routes_use_existing_memory_stack(tmp_path: Path, monkeypatch:
     status = client.get("/api/knowledge/status?ensure_ecosystem=false").get_json()
     sync = client.post("/api/knowledge/sync", json={"background": False, "max_files_per_root": 10}).get_json()
     search = client.post("/api/knowledge/search", json={"query": "architecture routing graph", "mode": "standard"}).get_json()
-    context = client.post("/api/knowledge/context", json={"query": "architecture routing graph", "mode": "deep"}).get_json()
+    context = client.post(
+        "/api/knowledge/context",
+        json={"query": "architecture routing graph", "mode": "deep", "request_id": "knowledge-context-1"},
+    ).get_json()
     bench = client.post("/api/knowledge/bench", json={"query": "architecture routing graph", "profiles": ["fast", "standard", "deep"]}).get_json()
     ingested = client.post(
         "/api/knowledge/ingest/text",
@@ -1477,6 +1480,7 @@ def test_knowledge_routes_use_existing_memory_stack(tmp_path: Path, monkeypatch:
     assert search["retrieval_profile"] == "standard"
     assert search["citations"]
     assert context["retrieval_profile"] == "deep"
+    assert context["request_id"] == "knowledge-context-1"
     assert context["cognition_graph"] is not None
     assert len(bench["profiles"]) == 3
     assert ingested["status"] == "ok"

@@ -104,6 +104,7 @@ class OperatorChatService:
                 query=text,
                 agent_name=selected_agent,
                 analysis_mode=analysis_mode,
+                request_id=request_id,
             )
         return payload
 

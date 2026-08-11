@@ -590,6 +590,7 @@ class ConversationMemoryService:
         prompt_budget_tokens: Optional[int] = None,
         skip_vector_search: bool = False,
         retrieval_profile: Optional[str] = None,
+        request_id: Optional[str] = None,
         transport: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._ensure_derived_memory_bootstrap()

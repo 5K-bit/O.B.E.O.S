@@ -1132,6 +1132,7 @@ class WebDashboard:
 
             session_id = str(payload.get("session_id") or self.memory_service.create_session_id())
             retrieval_profile = str(payload.get("retrieval_profile") or payload.get("mode") or payload.get("analysis_mode") or "standard")
+            request_id = payload.get("request_id") or None
             bundle = self.memory_service.build_context(
                 session_id=session_id,
                 query=query,
@@ -1139,7 +1140,8 @@ class WebDashboard:
                 analysis_mode=str(payload.get("analysis_mode") or retrieval_profile),
                 skip_vector_search=bool(payload.get("skip_vector_search", False)),
                 retrieval_profile=retrieval_profile,
-                request_id=str(payload.get("request_id") or ""),
+                request_id=request_id,
+                transport=str(payload.get("transport") or "").strip() or None,
             )
             settings = retrieval_profile_settings(retrieval_profile)
             cognition_graph = None
@@ -1154,6 +1156,7 @@ class WebDashboard:
             result = {
                 "query": query,
                 "session_id": session_id,
+                "request_id": request_id,
                 "retrieval_profile": bundle.get("retrieval_profile"),
                 "retrieval_contract": bundle.get("retrieval_contract"),
                 "context": bundle.get("prompt_context"),
