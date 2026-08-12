@@ -271,7 +271,7 @@ class JARVISAgent(Agent):
         if requested_mode != "standard":
             return requested_mode
         transport = str(context.get("transport") or context.get("input_origin") or "").strip().lower()
-        if transport in {"telegram", "hud", "desktop"}:
+        if transport in {"telegram", "hud", "desktop", "legion"}:
             return requested_mode
         detected = context.get("detected_intent")
         if isinstance(detected, dict):

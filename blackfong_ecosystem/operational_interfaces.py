@@ -578,6 +578,40 @@ class WebDashboard:
             return None, self._legion_unauthorized()
         return client, None
 
+    @staticmethod
+    def _normalize_chat_transport(value: Optional[str]) -> str:
+        normalized = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "browser": "hud",
+            "dashboard": "hud",
+            "mobile": "legion",
+            "legion_pwa": "legion",
+            "thoughtglass": "hud",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized in {"hud", "desktop", "legion", "telegram", "frame", "operator_chat", "tui"}:
+            return normalized
+        return "hud"
+
+    @staticmethod
+    def _shared_surface_for_transport(transport: str) -> str:
+        if transport in {"desktop", "legion", "tui"}:
+            return transport
+        return "hud"
+
+    def _resolve_chat_session(self, payload: Dict[str, Any]) -> tuple[str, str, str]:
+        from .operator_session import get_shared_session_id, link_surface
+
+        transport = self._normalize_chat_transport(
+            payload.get("transport") or payload.get("input_origin") or payload.get("surface")
+        )
+        surface = self._shared_surface_for_transport(transport)
+        session_id = str(payload.get("session_id") or "").strip()
+        if session_id:
+            link_surface(surface)
+            return session_id, transport, surface
+        return get_shared_session_id(surface=surface), transport, surface
+
     def _authorize_device_report(self) -> bool:
         token = request.headers.get("X-Sentinel-Agent-Token") or request.headers.get("X-Blackfong-Agent-Token")
         auth_header = request.headers.get("Authorization", "")
@@ -783,6 +817,21 @@ class WebDashboard:
                 samesite="Strict",
             )
             return response
+
+        @self.app.route("/api/legion/session")
+        def legion_session():
+            client, error = self._require_legion_session()
+            if error is not None:
+                return error
+            from .operator_session import load_operator_session
+
+            session_id, transport, surface = self._resolve_chat_session({"transport": "legion"})
+            payload = load_operator_session()
+            payload["session_id"] = session_id
+            payload["transport"] = transport
+            payload["surface"] = surface
+            payload["legion_client_id"] = str((client or {}).get("client_id") or "")
+            return jsonify(payload)
 
         @self.app.route("/api/devices")
         def devices():
@@ -1922,16 +1971,14 @@ class WebDashboard:
             message = str(payload.get("message", "")).strip()
             if not message:
                 return jsonify({"error": "Message is required"}), 400
-            from .operator_session import get_shared_session_id, link_surface
-
-            session_id = payload.get("session_id") or get_shared_session_id(surface="hud")
-            link_surface("hud")
+            session_id, transport, _surface = self._resolve_chat_session(payload)
             request_id = str(payload.get("request_id") or self.memory_service.create_correlation_id()[:8])
             agent_override = payload.get("agent") or payload.get("agent_override")
             from .model_routing import normalize_response_mode
 
-            analysis_mode = normalize_response_mode(str(payload.get("analysis_mode", "fast") or "fast"))
+            analysis_mode = normalize_response_mode(str(payload.get("analysis_mode") or "standard"))
             background = bool(payload.get("background", True))
+            input_origin = str(payload.get("input_origin") or transport).strip().lower() or transport
 
             self._initialize_request_state(
                 request_id=request_id,
@@ -1939,6 +1986,7 @@ class WebDashboard:
                 message=message,
                 agent_override=agent_override,
                 analysis_mode=analysis_mode,
+                transport=transport,
             )
 
             if background:
@@ -1950,6 +1998,8 @@ class WebDashboard:
                         "request_id": request_id,
                         "agent_override": agent_override,
                         "analysis_mode": analysis_mode,
+                        "transport": transport,
+                        "input_origin": input_origin,
                     },
                     daemon=True,
                 )
@@ -1965,6 +2015,8 @@ class WebDashboard:
                             "message": "Request accepted by D.A.I.S.E.",
                             "agent_override": agent_override,
                             "analysis_mode": analysis_mode,
+                            "transport": transport,
+                            "input_origin": input_origin,
                         }
                     ),
                     202,
@@ -1978,6 +2030,8 @@ class WebDashboard:
                 request_id=request_id,
                 agent_override=agent_override,
                 analysis_mode=analysis_mode,
+                transport=transport,
+                input_origin=input_origin,
             )
             status_code = 500 if response_payload.get("result", {}).get("error") else 200
             return jsonify(response_payload), status_code
@@ -2249,6 +2303,7 @@ class WebDashboard:
         message: str,
         agent_override: Optional[str],
         analysis_mode: str,
+        transport: Optional[str] = None,
     ) -> None:
         intent = self.operator_actions.create_intent(
             action="chat_request",
@@ -2267,6 +2322,7 @@ class WebDashboard:
             "query": message,
             "agent_override": agent_override,
             "analysis_mode": analysis_mode,
+            "transport": str(transport or "hud"),
             "status": "pending",
             "phase": "accepted",
             "phase_message": "Request accepted by D.A.I.S.E.",
@@ -2298,6 +2354,8 @@ class WebDashboard:
         request_id: str,
         agent_override: Optional[str],
         analysis_mode: str,
+        transport: str,
+        input_origin: str,
     ) -> None:
         try:
             if self.orchestrator is None:
@@ -2316,6 +2374,8 @@ class WebDashboard:
                 request_id=request_id,
                 agent_override=agent_override,
                 analysis_mode=analysis_mode,
+                transport=transport,
+                input_origin=input_origin,
             )
             if HAS_SOCKETIO and self.socketio:
                 self.socketio.emit("chat_complete", response_payload)
@@ -2388,6 +2448,8 @@ class WebDashboard:
         request_id: str,
         agent_override: Optional[str],
         analysis_mode: str,
+        transport: str,
+        input_origin: str,
     ) -> Dict[str, Any]:
         if not self._ensure_orchestrator():
             raise RuntimeError("Unified orchestrator is unavailable")
@@ -2418,6 +2480,8 @@ class WebDashboard:
                 "request_id": request_id,
                 "agent_override": agent_override,
                 "analysis_mode": analysis_mode,
+                "transport": transport,
+                "input_origin": input_origin,
                 "progress_callback": progress_callback,
                 "agent_report_callback": report_callback,
                 "agent_selection_callback": selection_callback,
@@ -2457,6 +2521,7 @@ class WebDashboard:
             request_id=request_id,
             result=result,
             agent_override=agent_override,
+            transport=transport,
         )
 
         state = self.request_states.setdefault(
@@ -2549,6 +2614,7 @@ class WebDashboard:
         request_id: str,
         result: Dict[str, Any],
         agent_override: Optional[str],
+        transport: str,
     ) -> Dict[str, Any]:
         selected_agent = str(result.get("selected_agent") or result.get("agent") or agent_override or "daise")
         bundle = self.memory_service.build_context(
@@ -2557,6 +2623,7 @@ class WebDashboard:
             agent_name=selected_agent,
             analysis_mode=str(result.get("analysis_mode") or "quick"),
             request_id=request_id,
+            transport=transport,
         )
         try:
             self._publish_live_event(
@@ -2564,6 +2631,7 @@ class WebDashboard:
                 {
                     "request_id": request_id,
                     "session_id": session_id,
+                    "transport": transport,
                     "retrieval_profile": bundle.get("retrieval_profile"),
                     "knowledge_hits": bundle.get("knowledge_hits"),
                     "grounded_memory_answer": bundle.get("grounded_memory_answer"),
@@ -2577,6 +2645,7 @@ class WebDashboard:
             "status": "error" if result.get("error") else "complete",
             "session_id": session_id,
             "request_id": request_id,
+            "transport": transport,
             "result": result,
             "messages": self.memory_service.get_session_messages(session_id, limit=40),
             "trace": self._get_request_snapshot(request_id) or self.memory_service.get_request_trace(request_id),

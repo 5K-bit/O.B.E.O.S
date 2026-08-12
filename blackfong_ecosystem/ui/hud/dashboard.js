@@ -2466,7 +2466,9 @@
           session_id: state.sessionId,
           request_id: state.requestId || undefined,
           agent: el.agentSelect.value || undefined,
-          analysis_mode: el.analysisSelect.value || "fast",
+          analysis_mode: el.analysisSelect.value || "standard",
+          transport: "hud",
+          input_origin: "hud",
           background: true,
         }),
       });

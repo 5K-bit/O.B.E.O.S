@@ -1,12 +1,21 @@
 (function () {
   "use strict";
 
+  const LEGION_UI_STATE_KEY = "blackfong.legion.ui.v2";
+  const DEFAULT_ANALYSIS_MODE = "standard";
+
   const state = {
     devices: [],
     selectedDeviceId: "blackcomputer",
     liveSource: null,
     loading: false,
     devicesRequest: null,
+    sessionId: null,
+    requestId: null,
+    analysisMode: DEFAULT_ANALYSIS_MODE,
+    messages: [],
+    localMessages: [],
+    streamingReply: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -35,6 +44,9 @@
     chatForm: $("chatForm"),
     chatInput: $("chatInput"),
     chatStatus: $("chatStatus"),
+    sessionMeta: $("sessionMeta"),
+    analysisSelect: $("analysisSelect"),
+    messagesPanel: $("messagesPanel"),
     eventList: $("eventList"),
     notificationList: $("notificationList"),
   };
@@ -48,8 +60,40 @@
       .replace(/'/g, "&#39;");
   }
 
+  function normalizeAnalysisMode(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return normalized === "fast" || normalized === "deep" || normalized === "standard"
+      ? normalized
+      : DEFAULT_ANALYSIS_MODE;
+  }
+
+  function loadUiState() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(LEGION_UI_STATE_KEY) || "{}");
+      state.analysisMode = normalizeAnalysisMode(parsed.analysisMode);
+    } catch {
+      state.analysisMode = DEFAULT_ANALYSIS_MODE;
+    }
+    if (el.analysisSelect) {
+      el.analysisSelect.value = state.analysisMode;
+    }
+  }
+
+  function persistUiState() {
+    try {
+      window.localStorage.setItem(
+        LEGION_UI_STATE_KEY,
+        JSON.stringify({
+          analysisMode: state.analysisMode,
+        }),
+      );
+    } catch {
+      // Ignore storage failures in restrictive browser modes.
+    }
+  }
+
   function fmtTime(value) {
-    if (!value) return "never";
+    if (!value) return "now";
     const raw = Number(value);
     const ms = raw > 100000000000 ? raw : raw * 1000;
     try {
@@ -63,6 +107,12 @@
     const n = Number(value);
     if (!Number.isFinite(n)) return "n/a";
     return `${Math.round(n)}${suffix || ""}`;
+  }
+
+  function shortId(value) {
+    const text = String(value || "").trim();
+    if (!text) return "unknown";
+    return text.length > 12 ? `${text.slice(0, 8)}...` : text;
   }
 
   async function fetchJSON(url, options) {
@@ -110,6 +160,31 @@
 
   function selectedDevice() {
     return state.devices.find((device) => device.id === state.selectedDeviceId) || state.devices[0] || null;
+  }
+
+  function updateSessionMeta() {
+    if (!el.sessionMeta) {
+      return;
+    }
+    el.sessionMeta.textContent = state.sessionId
+      ? `Linked session ${shortId(state.sessionId)}`
+      : "Linking shared session...";
+  }
+
+  function updateChatStatus(text, stateKind) {
+    if (!el.chatStatus) {
+      return;
+    }
+    el.chatStatus.textContent = String(text || "idle");
+    el.chatStatus.classList.remove("online", "stale", "offline");
+    const normalized = String(stateKind || "").toLowerCase();
+    if (normalized === "complete" || normalized === "streaming" || normalized === "working") {
+      el.chatStatus.classList.add("online");
+    } else if (normalized === "error" || normalized === "failed") {
+      el.chatStatus.classList.add("offline");
+    } else if (normalized === "accepted" || normalized === "pending") {
+      el.chatStatus.classList.add("stale");
+    }
   }
 
   function renderDevices() {
@@ -172,12 +247,14 @@
     el.focusStatus.textContent = device.status || "unknown";
     el.focusStatus.className = `state-badge ${statusClass(device.status)}`;
     el.metricBand.innerHTML = metricEntries(device)
-      .map(([key, value]) => `
+      .map(
+        ([key, value]) => `
         <div class="metric">
           <div class="metric-key">${escapeHtml(key)}</div>
           <div class="metric-value">${escapeHtml(value)}</div>
         </div>
-      `)
+      `,
+      )
       .join("");
     renderSensors(device);
     renderHistory(device);
@@ -230,13 +307,137 @@
       return;
     }
     el.historyList.innerHTML = history
-      .map((item) => `
+      .map(
+        (item) => `
         <div class="history-row">
           <strong>${escapeHtml(item.status || item.sensor_mode || "update")}</strong>
           <div class="event-meta">${escapeHtml(fmtTime(item.timestamp))} | ${escapeHtml(item.source || "device")}</div>
         </div>
-      `)
+      `,
+      )
       .join("");
+  }
+
+  function summarize(payload) {
+    if (payload == null) return "";
+    const raw = typeof payload === "string" ? payload : JSON.stringify(payload);
+    return raw.length > 140 ? `${raw.slice(0, 140)}...` : raw;
+  }
+
+  function formatMessageBody(text) {
+    return escapeHtml(String(text || "")).replace(/\n/g, "<br>");
+  }
+
+  function displayMessageLabel(message) {
+    const role = String(message.role || "assistant").toLowerCase();
+    if (role === "user") return "You";
+    if (role === "system") return "System";
+    const agent = String(message.agent || message.author || "daise").trim();
+    if (!agent || agent.toLowerCase() === "daise") {
+      return "D.A.I.S.E";
+    }
+    return agent;
+  }
+
+  function isMessagesPanelNearBottom() {
+    if (!el.messagesPanel) {
+      return true;
+    }
+    const distance = el.messagesPanel.scrollHeight - el.messagesPanel.scrollTop - el.messagesPanel.clientHeight;
+    return distance < 80;
+  }
+
+  function renderMessages(payload) {
+    if (!el.messagesPanel) {
+      return;
+    }
+    const incoming = payload && Array.isArray(payload.messages) ? payload.messages : state.messages;
+    const shouldStick = isMessagesPanelNearBottom();
+    const previousScrollTop = el.messagesPanel.scrollTop || 0;
+    const previousScrollHeight = el.messagesPanel.scrollHeight || 0;
+    state.messages = incoming;
+    const combined = incoming.slice();
+    state.localMessages.forEach((message) => combined.push(message));
+    if (state.streamingReply && state.streamingReply.text) {
+      combined.push({
+        role: "assistant",
+        text: state.streamingReply.text,
+        timestamp: state.streamingReply.timestamp || Date.now() / 1000,
+        streaming: !state.streamingReply.complete,
+      });
+    }
+    el.messagesPanel.innerHTML = combined.length
+      ? combined
+          .map((message) => {
+            const role = message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : "user";
+            const label = displayMessageLabel(message);
+            return `
+              <article class="message-card ${role}">
+                <div class="message-head">
+                  <strong>${escapeHtml(label)}</strong>
+                  <span class="event-meta">${escapeHtml(fmtTime(message.timestamp || message.created_at || 0))}</span>
+                </div>
+                <div class="message-body">${formatMessageBody(message.text || message.content || "")}</div>
+              </article>
+            `;
+          })
+          .join("")
+      : `<div class="empty-state">The linked O.B.E.O.S conversation will appear here.</div>`;
+    if (shouldStick) {
+      el.messagesPanel.scrollTop = el.messagesPanel.scrollHeight;
+    } else {
+      const heightDelta = el.messagesPanel.scrollHeight - previousScrollHeight;
+      el.messagesPanel.scrollTop = previousScrollTop + Math.max(0, heightDelta);
+    }
+  }
+
+  function beginLocalUserMessage(text) {
+    state.localMessages.push({
+      role: "user",
+      text,
+      timestamp: Date.now() / 1000,
+    });
+  }
+
+  function activeRequestMatches(payload) {
+    if (!payload || typeof payload !== "object") {
+      return false;
+    }
+    if (state.requestId && payload.request_id && payload.request_id === state.requestId) {
+      return true;
+    }
+    return Boolean(state.sessionId && payload.session_id && payload.session_id === state.sessionId);
+  }
+
+  async function loadLegionSession() {
+    const payload = await fetchJSON("/api/legion/session");
+    if (payload.session_id) {
+      state.sessionId = payload.session_id;
+      updateSessionMeta();
+    }
+    return payload;
+  }
+
+  async function refreshMessages() {
+    if (!state.sessionId) {
+      renderMessages({ messages: [] });
+      return;
+    }
+    try {
+      const payload = await fetchJSON(`/api/session/${encodeURIComponent(state.sessionId)}/messages`);
+      state.localMessages = [];
+      state.streamingReply = null;
+      renderMessages(payload);
+    } catch (error) {
+      if (String(error.message || "").toLowerCase().includes("session not found")) {
+        state.messages = [];
+        state.localMessages = [];
+        state.streamingReply = null;
+        renderMessages({ messages: [] });
+        return;
+      }
+      throw error;
+    }
   }
 
   async function loadDevices() {
@@ -274,13 +475,15 @@
       el.eventList.innerHTML = events.length
         ? events
             .slice(0, 20)
-            .map((event) => `
+            .map(
+              (event) => `
               <div class="event-row">
                 <strong>${escapeHtml(event.type || "event")}</strong>
                 <div class="event-meta">${escapeHtml(event.source || "source")} | ${escapeHtml(fmtTime(event.timestamp))}</div>
                 <div>${escapeHtml(summarize(event.payload))}</div>
               </div>
-            `)
+            `,
+            )
             .join("")
         : `<div class="empty-state">No events yet.</div>`;
     } catch {
@@ -294,24 +497,20 @@
       const notifications = payload.notifications || payload.items || [];
       el.notificationList.innerHTML = notifications.length
         ? notifications
-            .map((item) => `
+            .map(
+              (item) => `
               <div class="notification-row">
                 <strong>${escapeHtml(item.title || item.category || "Notification")}</strong>
                 <div class="event-meta">${escapeHtml(item.level || "info")} | ${escapeHtml(fmtTime(item.created_at || item.timestamp))}</div>
                 <div>${escapeHtml(item.message || "")}</div>
               </div>
-            `)
+            `,
+            )
             .join("")
         : `<div class="empty-state">No notifications.</div>`;
     } catch {
       el.notificationList.innerHTML = `<div class="empty-state">Notifications unavailable.</div>`;
     }
-  }
-
-  function summarize(payload) {
-    if (payload == null) return "";
-    const raw = typeof payload === "string" ? payload : JSON.stringify(payload);
-    return raw.length > 140 ? `${raw.slice(0, 140)}...` : raw;
   }
 
   async function diagnoseSelected() {
@@ -320,7 +519,7 @@
       method: "POST",
       body: "{}",
     });
-    el.chatStatus.textContent = (result.recommendations || []).join(" ");
+    updateChatStatus((result.recommendations || []).join(" ") || "Diagnostics complete.", "complete");
   }
 
   async function refreshSelected() {
@@ -348,16 +547,37 @@
     event.preventDefault();
     const message = el.chatInput.value.trim();
     if (!message) return;
+    if (!state.sessionId) {
+      await loadLegionSession();
+    }
+    state.analysisMode = normalizeAnalysisMode(el.analysisSelect ? el.analysisSelect.value : state.analysisMode);
+    persistUiState();
     el.chatInput.value = "";
-    el.chatStatus.textContent = "Accepted by D.A.I.S.E.";
+    beginLocalUserMessage(message);
+    state.streamingReply = { text: "", timestamp: Date.now() / 1000, complete: false };
+    renderMessages({ messages: state.messages });
+    updateChatStatus("Accepted by D.A.I.S.E.", "accepted");
     try {
       const payload = await fetchJSON("/api/chat", {
         method: "POST",
-        body: JSON.stringify({ message, background: true, analysis_mode: "fast" }),
+        body: JSON.stringify({
+          message,
+          background: true,
+          analysis_mode: state.analysisMode,
+          session_id: state.sessionId,
+          request_id: state.requestId || undefined,
+          transport: "legion",
+          input_origin: "legion",
+        }),
       });
-      el.chatStatus.textContent = payload.message || "Request accepted.";
+      state.sessionId = payload.session_id || state.sessionId;
+      state.requestId = payload.request_id || state.requestId;
+      updateSessionMeta();
+      updateChatStatus(payload.message || `Accepted (${state.analysisMode})`, "working");
     } catch (error) {
-      el.chatStatus.textContent = error.message;
+      state.streamingReply = null;
+      updateChatStatus(error.message, "error");
+      renderMessages({ messages: state.messages });
     }
   }
 
@@ -404,21 +624,69 @@
       source.addEventListener("device_update", async () => {
         await loadDevices();
       });
+      source.addEventListener("chat_phase", (event) => {
+        try {
+          const payload = JSON.parse(event.data || "{}");
+          if (!activeRequestMatches(payload)) {
+            return;
+          }
+          updateChatStatus(payload.message || payload.phase || "Working", payload.phase || "pending");
+        } catch {
+          // Ignore malformed phase events.
+        }
+      });
+      source.addEventListener("chat_token", (event) => {
+        try {
+          const payload = JSON.parse(event.data || "{}");
+          if (!state.requestId || payload.request_id !== state.requestId) {
+            return;
+          }
+          state.streamingReply = {
+            text: String(payload.text || payload.token || ""),
+            timestamp: Date.now() / 1000,
+            complete: false,
+          };
+          renderMessages({ messages: state.messages });
+          updateChatStatus("Streaming response...", "streaming");
+        } catch {
+          // Ignore malformed token events.
+        }
+      });
       source.addEventListener("chat_complete", async (event) => {
         try {
           const payload = JSON.parse(event.data || "{}");
-          el.chatStatus.textContent = payload.response || "D.A.I.S.E. complete.";
+          if (!activeRequestMatches(payload)) {
+            return;
+          }
+          state.sessionId = payload.session_id || state.sessionId;
+          if (payload.request_id) {
+            state.requestId = payload.request_id;
+          }
+          updateSessionMeta();
+          state.localMessages = [];
+          state.streamingReply = null;
+          if (Array.isArray(payload.messages)) {
+            renderMessages({ messages: payload.messages });
+          } else {
+            await refreshMessages();
+          }
+          updateChatStatus("D.A.I.S.E complete.", "complete");
           await loadEvents();
         } catch {
-          el.chatStatus.textContent = "D.A.I.S.E. complete.";
+          updateChatStatus("D.A.I.S.E complete.", "complete");
         }
       });
       source.addEventListener("chat_error", (event) => {
         try {
           const payload = JSON.parse(event.data || "{}");
-          el.chatStatus.textContent = payload.error || "D.A.I.S.E. error.";
+          if (!activeRequestMatches(payload)) {
+            return;
+          }
+          state.streamingReply = null;
+          updateChatStatus(payload.error || "D.A.I.S.E. error.", "error");
+          renderMessages({ messages: state.messages });
         } catch {
-          el.chatStatus.textContent = "D.A.I.S.E. error.";
+          updateChatStatus("D.A.I.S.E. error.", "error");
         }
       });
       source.onerror = () => {
@@ -431,19 +699,28 @@
   }
 
   async function bootData() {
-    await Promise.all([loadDevices(), loadEvents(), loadNotifications()]);
+    await Promise.all([loadLegionSession(), loadDevices(), loadEvents(), loadNotifications()]);
+    await refreshMessages();
     connectLiveStream();
   }
 
   async function boot() {
+    loadUiState();
+    updateSessionMeta();
+    updateChatStatus("idle", "idle");
+    renderMessages({ messages: [] });
     startClock();
     el.pairingForm.addEventListener("submit", pair);
     el.chatForm.addEventListener("submit", sendChat);
+    el.analysisSelect?.addEventListener("change", () => {
+      state.analysisMode = normalizeAnalysisMode(el.analysisSelect.value);
+      persistUiState();
+    });
     el.refreshButton.addEventListener("click", () => bootData().catch(() => {}));
-    el.diagnoseButton.addEventListener("click", () => diagnoseSelected().catch((error) => (el.chatStatus.textContent = error.message)));
-    el.refreshDeviceButton.addEventListener("click", () => refreshSelected().catch((error) => (el.chatStatus.textContent = error.message)));
-    el.startSensorsButton.addEventListener("click", () => setSensors(true).catch((error) => (el.chatStatus.textContent = error.message)));
-    el.stopSensorsButton.addEventListener("click", () => setSensors(false).catch((error) => (el.chatStatus.textContent = error.message)));
+    el.diagnoseButton.addEventListener("click", () => diagnoseSelected().catch((error) => updateChatStatus(error.message, "error")));
+    el.refreshDeviceButton.addEventListener("click", () => refreshSelected().catch((error) => updateChatStatus(error.message, "error")));
+    el.startSensorsButton.addEventListener("click", () => setSensors(true).catch((error) => updateChatStatus(error.message, "error")));
+    el.stopSensorsButton.addEventListener("click", () => setSensors(false).catch((error) => updateChatStatus(error.message, "error")));
 
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/legion/service-worker.js").catch(() => {});
@@ -456,6 +733,7 @@
         loadDevices().catch(() => {});
         loadEvents().catch(() => {});
         loadNotifications().catch(() => {});
+        refreshMessages().catch(() => {});
       }, 15000);
     } catch {
       showPairing("Enter the Blackcomputer pairing token.");

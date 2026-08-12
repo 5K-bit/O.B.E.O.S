@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
@@ -8,15 +9,86 @@ from blackfong_ecosystem.operational_interfaces import WebDashboard
 from blackfong_ecosystem.storage import EventStore, NullVectorStore
 
 
+class EchoLegionOrchestrator:
+    def __init__(self, memory_service: ConversationMemoryService):
+        self.memory_service = memory_service
+
+    def process_input(self, user_input, modality, context=None):
+        context = dict(context or {})
+        request_id = str(context.get("request_id") or "legion-request")
+        session_id = str(context.get("session_id") or self.memory_service.create_session_id())
+        correlation_id = str(context.get("correlation_id") or self.memory_service.create_correlation_id())
+
+        query_event = self.memory_service.persist_user_turn(
+            session_id=session_id,
+            correlation_id=correlation_id,
+            text=user_input,
+            modality="text",
+            routed_agent="jarvis",
+            analysis_mode=str(context.get("analysis_mode") or "standard"),
+            agent_override=context.get("agent_override"),
+            request_id=request_id,
+        )
+
+        self.memory_service.persist_agent_response(
+            session_id=session_id,
+            correlation_id=correlation_id,
+            agent_name="jarvis",
+            response_text=f"Echo: {user_input}",
+            confidence=0.91,
+            modality="text",
+            parent_event_id=query_event.id,
+            provider="heuristic",
+            model="legion-test-model",
+            execution_time_ms=80.0,
+            success=True,
+            extras={
+                "selected_agent": "jarvis",
+                "consulted_agents": ["jarvis"],
+                "synthesized": False,
+                "analysis_mode": str(context.get("analysis_mode") or "standard"),
+                "task_type": "general_conversation",
+                "transport": context.get("transport"),
+                "input_origin": context.get("input_origin"),
+            },
+            request_id=request_id,
+        )
+
+        return {
+            "response": f"Echo: {user_input}",
+            "confidence": 0.91,
+            "agent": "jarvis",
+            "selected_agent": "jarvis",
+            "consulted_agents": ["jarvis"],
+            "synthesized": False,
+            "provider": "heuristic",
+            "model": "legion-test-model",
+            "backend_error": None,
+            "backend_metadata": {},
+            "task_type": "general_conversation",
+            "analysis_mode": str(context.get("analysis_mode") or "standard"),
+            "request_id": request_id,
+            "session_id": session_id,
+            "correlation_id": correlation_id,
+            "response_event_id": None,
+            "event_payload": {
+                "selected_agent": "jarvis",
+                "provider": "heuristic",
+                "model": "legion-test-model",
+            },
+            "timestamp": time.time(),
+        }
+
+
 def build_memory(tmp_path: Path) -> ConversationMemoryService:
     event_store = EventStore(tmp_path / "events.db")
     event_store.init_db()
     return ConversationMemoryService(event_store=event_store, vector_store=NullVectorStore())
 
 
-def build_dashboard(tmp_path: Path) -> WebDashboard:
+def build_dashboard(tmp_path: Path, *, orchestrator_instance=None) -> WebDashboard:
     memory = build_memory(tmp_path)
-    dashboard = WebDashboard(host="127.0.0.1", port=8099, memory_service=memory, orchestrator_instance=None)
+    dashboard = WebDashboard(host="127.0.0.1", port=8099, memory_service=memory, orchestrator_instance=orchestrator_instance)
     dashboard.device_registry = DeviceRegistryService(
         state_path=tmp_path / "device_registry.json",
         event_store=memory.event_store,
@@ -59,7 +131,9 @@ def test_legion_routes_and_assets_render(tmp_path: Path):
     assert "[hidden]" in css
     assert "overflow-wrap" in css
     assert "/api/devices" in js
+    assert "/api/legion/session" in js
     assert "hiddenSensorNames" in js
+    assert "messages-panel" in html
     combined = "\n".join([html, css]).lower()
     blocked_v1_terms = ["screen streaming", "remote desktop", "vnc", "rdp", "webrtc", "moonlight"]
     assert not any(term in combined for term in blocked_v1_terms)
@@ -83,6 +157,61 @@ def test_legion_pairing_protects_device_apis(tmp_path: Path):
     assert {"blackcomputer", "sentinel"}.issubset(ids)
     blackcomputer = next(device for device in devices["devices"] if device["id"] == "blackcomputer")
     assert blackcomputer["status"] == "online"
+
+
+def test_legion_session_endpoint_links_shared_operator_session(tmp_path: Path):
+    dashboard = build_dashboard(tmp_path)
+    client = dashboard.app.test_client()
+    pair_client(client, dashboard)
+
+    payload = client.get("/api/legion/session").get_json()
+
+    assert payload["transport"] == "legion"
+    assert payload["surface"] == "legion"
+    assert payload["session_id"]
+    assert "legion" in payload["linked_surfaces"]
+
+
+def test_legion_chat_uses_shared_session_and_legion_transport(tmp_path: Path):
+    memory = build_memory(tmp_path)
+    dashboard = WebDashboard(
+        host="127.0.0.1",
+        port=8099,
+        memory_service=memory,
+        orchestrator_instance=EchoLegionOrchestrator(memory),
+    )
+    dashboard.device_registry = DeviceRegistryService(
+        state_path=tmp_path / "device_registry.json",
+        event_store=memory.event_store,
+        history_limit=3,
+        stale_after_seconds=60,
+    )
+    dashboard.legion_auth = LegionAuthService(
+        dashboard.device_registry,
+        token_path=tmp_path / "legion_pairing_token.txt",
+        session_ttl_hours=1,
+    )
+    client = dashboard.app.test_client()
+    pair_client(client, dashboard)
+
+    session_payload = client.get("/api/legion/session").get_json()
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "Carry this through Legion.",
+            "background": False,
+            "analysis_mode": "standard",
+            "transport": "legion",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["transport"] == "legion"
+    assert payload["session_id"] == session_payload["session_id"]
+    assert payload["request_id"]
+    assert payload["messages"][0]["role"] == "user"
+    assert payload["messages"][1]["role"] == "assistant"
 
 
 def test_legion_device_list_uses_cached_blackcomputer_state(tmp_path: Path):

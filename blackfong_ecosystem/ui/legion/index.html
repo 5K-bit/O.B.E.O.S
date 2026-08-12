@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07090c">
   <title>Legion O.B.E.O.S Cockpit</title>
   <link rel="manifest" href="/legion/manifest.webmanifest">
-  <link rel="stylesheet" href="/legion-static/app.css?v=20260726-legion-v5">
+  <link rel="stylesheet" href="/legion-static/app.css?v=20260812-legion-v6">
 </head>
 <body>
   <section class="pairing-screen" id="pairingScreen" hidden>
@@ -82,14 +82,27 @@
           <div class="section-head compact">
             <div>
               <div class="kicker">D.A.I.S.E</div>
-              <h2>Quick Ask</h2>
+              <h2>Operator Chat</h2>
             </div>
           </div>
-          <form id="chatForm" class="chat-form">
-            <textarea id="chatInput" rows="4" placeholder="Ask D.A.I.S.E"></textarea>
-            <button type="submit">Send</button>
-          </form>
-          <div id="chatStatus" class="message-line"></div>
+          <div class="chat-stage">
+            <div class="chat-meta-row">
+              <div id="sessionMeta" class="message-line">Linking shared session...</div>
+              <div id="chatStatus" class="status-pill">idle</div>
+            </div>
+            <div id="messagesPanel" class="messages-panel"></div>
+            <form id="chatForm" class="chat-form">
+              <textarea id="chatInput" rows="4" placeholder="Talk to D.A.I.S.E from Legion"></textarea>
+              <div class="chat-controls">
+                <select id="analysisSelect" aria-label="Response mode">
+                  <option value="fast">Fast</option>
+                  <option value="standard" selected>Standard</option>
+                  <option value="deep">Deep</option>
+                </select>
+                <button type="submit">Send</button>
+              </div>
+            </form>
+          </div>
         </section>
 
         <section class="activity-panel">
@@ -115,6 +128,6 @@
     </main>
   </div>
 
-  <script src="/legion-static/app.js?v=20260726-legion-v5" defer></script>
+  <script src="/legion-static/app.js?v=20260812-legion-v6" defer></script>
 </body>
 </html>

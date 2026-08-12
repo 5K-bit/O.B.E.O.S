@@ -431,6 +431,56 @@ def test_standard_hud_chat_keeps_standard_generation_lane(monkeypatch):
     assert result["backend_metadata"]["requested_mode"] == "standard"
 
 
+def test_standard_legion_chat_keeps_standard_generation_lane(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(BaseChatBackend):
+        def generate(self, messages, **options):
+            captured["options_mode"] = str(options.get("mode") or "")
+            return ChatBackendResult(
+                text="Standard lane reply",
+                provider="ollama",
+                model="llama3.2:3b",
+                metadata={"used_mode": str(options.get("mode") or "")},
+            )
+
+    def fake_build(agent_name: str, response_mode: str):
+        captured["response_mode"] = response_mode
+        return RecordingBackend()
+
+    monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", fake_build)
+    monkeypatch.setattr(
+        jarvis_agent_module,
+        "backend_options_for_context",
+        lambda context, agent_name="jarvis": {"mode": context.get("analysis_mode")},
+    )
+
+    agent = JARVISAgent(fallback_backend=StubFallbackBackend())
+    result = agent.process(
+        "Keep the Legion lane grounded.",
+        context={
+            "session_id": "test-session",
+            "analysis_mode": "standard",
+            "transport": "legion",
+            "detected_intent": {
+                "casual": True,
+                "coding": False,
+                "deep_reasoning": False,
+                "file_ops": False,
+                "diagnostics": False,
+                "tinyprogrammer": False,
+            },
+            "memory_context": {},
+        },
+    )
+
+    assert captured["response_mode"] == "standard"
+    assert captured["options_mode"] == "standard"
+    assert result["provider"] == "ollama"
+    assert result["backend_metadata"]["generation_mode"] == "standard"
+    assert result["backend_metadata"]["requested_mode"] == "standard"
+
+
 def test_jarvis_uses_preemptive_fallback_when_backend_is_unavailable():
     agent = JARVISAgent(
         chat_backend=ExplodingBackend(),
