@@ -385,6 +385,61 @@ def test_standard_chain_timeout_is_split_across_models():
     assert capped == 22.5
 
 
+def test_transport_backend_health_recovers_after_newer_global_ollama_success(tmp_path):
+    service = build_memory_service(tmp_path)
+    session_id = service.create_session_id()
+    correlation_id = service.create_correlation_id()
+
+    failed_request_id = "telegram-timeout-1"
+    recovered_request_id = "hud-success-1"
+
+    service.persist_workflow_event(
+        source="daise",
+        event_type="latency_observation",
+        payload={
+            "schema_version": "1.0",
+            "transport": "telegram",
+            "provider": "heuristic",
+            "model": "fallback-heuristic",
+            "execution_time_ms": 18000,
+            "backend_error": "Ollama request timed out after 18s for model llama3.2:3b",
+            "fallback_reason": "Ollama request timed out after 18s for model llama3.2:3b",
+            "fallback_used": True,
+        },
+        confidence=0.2,
+        session_id=session_id,
+        correlation_id=correlation_id,
+        request_id=failed_request_id,
+    )
+    import time
+    time.sleep(0.02)
+    service.persist_workflow_event(
+        source="daise",
+        event_type="latency_observation",
+        payload={
+            "schema_version": "1.0",
+            "transport": "hud",
+            "provider": "ollama",
+            "model": "llama3.2:1b",
+            "execution_time_ms": 2400,
+            "backend_error": "",
+            "fallback_reason": "",
+            "fallback_used": False,
+        },
+        confidence=0.9,
+        session_id=session_id,
+        correlation_id=correlation_id,
+        request_id=recovered_request_id,
+    )
+
+    health = service.recent_backend_health(transport="telegram")
+
+    assert health["state"] == "healthy"
+    assert health["provider"] == "ollama"
+    assert health["configured_model"] == "llama3.2:1b"
+    assert health["recent_timeout_count"] == 1
+
+
 def test_standard_casual_chat_uses_fast_generation_lane(monkeypatch):
     captured: dict[str, str] = {}
 

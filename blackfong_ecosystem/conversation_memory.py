@@ -1676,6 +1676,10 @@ class ConversationMemoryService:
         last_observed_at = 0.0
         recent_timeout_count = 0
         recent_fallback_count = 0
+        latest_failure_at = 0.0
+        latest_transport_success_at = 0.0
+        latest_global_ollama_success_at = 0.0
+        latest_global_ollama_model = ""
 
         latency_events = self.event_store.list_events_by_type("latency_observation", limit=limit)
         for event in latency_events:
@@ -1683,12 +1687,21 @@ class ConversationMemoryService:
                 continue
             payload = event.payload or {}
             event_transport = str(payload.get("transport") or "").strip().lower()
-            if normalized_transport and event_transport and event_transport != normalized_transport:
-                continue
             execution_time_ms = float(payload.get("execution_time_ms") or 0.0)
             fallback_used = bool(payload.get("fallback_used"))
             backend_error = str(payload.get("backend_error") or "").strip()
             fallback_reason = str(payload.get("fallback_reason") or payload.get("timeout_reason") or "").strip()
+            provider_name = str(payload.get("provider") or "").strip().lower()
+
+            if execution_time_ms > 0 and not fallback_used and not backend_error and provider_name == "ollama":
+                observed_at = event.timestamp / 1000.0
+                latest_global_ollama_success_at = max(latest_global_ollama_success_at, observed_at)
+                if latest_global_ollama_success_at == observed_at:
+                    latest_global_ollama_model = str(payload.get("model") or latest_global_ollama_model or "")
+
+            if normalized_transport and event_transport and event_transport != normalized_transport:
+                continue
+
             if fallback_used or backend_error:
                 recent_fallback_count += 1
                 if "timed out" in backend_error.lower() or "timed out" in fallback_reason.lower():
@@ -1697,13 +1710,18 @@ class ConversationMemoryService:
                 provider = str(payload.get("provider") or provider or "")
                 configured_model = str(payload.get("model") or configured_model or "")
                 last_backend_error = backend_error or fallback_reason or last_backend_error
-                last_observed_at = max(last_observed_at, event.timestamp / 1000.0)
+                observed_at = event.timestamp / 1000.0
+                last_observed_at = max(last_observed_at, observed_at)
+                latest_failure_at = max(latest_failure_at, observed_at)
             elif execution_time_ms > 0 and last_observed_at <= 0:
                 provider = str(payload.get("provider") or provider or "")
                 configured_model = str(payload.get("model") or configured_model or "")
                 last_observed_at = max(last_observed_at, event.timestamp / 1000.0)
                 if state == "unknown":
                     state = "healthy"
+            if execution_time_ms > 0 and not fallback_used and not backend_error and provider_name == "ollama":
+                observed_at = event.timestamp / 1000.0
+                latest_transport_success_at = max(latest_transport_success_at, observed_at)
 
         health_events = self.event_store.list_events_by_type("backend_health_observation", limit=max(limit, 8))
         for event in health_events:
@@ -1728,6 +1746,14 @@ class ConversationMemoryService:
                 last_backend_error = error or last_backend_error
             elif observed_status == "available" and state == "unknown":
                 state = "healthy"
+
+        recovery_at = max(latest_transport_success_at, latest_global_ollama_success_at)
+        if state == "degraded" and recovery_at > latest_failure_at > 0:
+            state = "healthy"
+            provider = "ollama"
+            configured_model = latest_global_ollama_model or configured_model
+            last_backend_error = ""
+            last_observed_at = max(last_observed_at, recovery_at)
 
         if state == "unknown" and recent_timeout_count > 0:
             state = "degraded"

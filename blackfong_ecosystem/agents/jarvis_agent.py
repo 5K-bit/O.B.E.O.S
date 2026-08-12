@@ -245,8 +245,8 @@ class JARVISAgent(Agent):
                 messages,
                 backend_error=str(exc),
                 fallback_reason=str(exc),
-                provider=getattr(self.chat_backend, "provider_name", "ollama"),
-                model=getattr(self.chat_backend, "model", None),
+                provider=getattr(chat_backend, "provider_name", "ollama"),
+                model=getattr(chat_backend, "model", None),
                 backend_health=backend_health,
                 primary_backend_metadata=getattr(exc, "metadata", {}),
             )
