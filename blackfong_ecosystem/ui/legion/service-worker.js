@@ -1,8 +1,8 @@
-const CACHE_NAME = "blackfong-legion-v6";
+const CACHE_NAME = "blackfong-legion-v7";
 const CORE_ASSETS = [
   "/legion",
-  "/legion-static/app.css?v=20260812-legion-v6",
-  "/legion-static/app.js?v=20260812-legion-v6",
+  "/legion-static/app.css?v=20260812-legion-v7",
+  "/legion-static/app.js?v=20260812-legion-v7",
   "/legion/manifest.webmanifest",
 ];
 

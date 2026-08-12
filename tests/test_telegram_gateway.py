@@ -427,6 +427,59 @@ def test_telegram_gateway_normalizes_legacy_fast_threads_on_startup(tmp_path: Pa
     assert stored_mode == "standard"
 
 
+def test_telegram_gateway_normalizes_legacy_explicit_fast_threads_without_command_source(tmp_path: Path) -> None:
+    memory = build_memory(tmp_path)
+    with memory.event_store.engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO telegram_thread_state (
+                    thread_key,
+                    telegram_chat_id,
+                    telegram_user_id,
+                    session_id,
+                    mode,
+                    created_at,
+                    last_seen_at,
+                    last_message_id,
+                    last_update_id,
+                    metadata_json
+                ) VALUES (
+                    'telegram:100:200',
+                    '100',
+                    '200',
+                    'legacy-session',
+                    'fast',
+                    :now,
+                    :now,
+                    1,
+                    1,
+                    '{"mode_explicit": true}'
+                )
+                """
+            ),
+            {"now": time.time()},
+        )
+
+    TelegramGatewayService(
+        settings=build_settings(allowlist=(("100", "200"),)),
+        memory_service=memory,
+        operator_chat=StubOperatorChat(),
+        http_client=FakeTelegramClient(),
+        lock_path=tmp_path / "telegram.lock",
+    )
+
+    with memory.event_store.engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT mode, metadata_json FROM telegram_thread_state WHERE thread_key = 'telegram:100:200'")
+        ).mappings().one()
+
+    assert row["mode"] == "standard"
+    metadata = json.loads(row["metadata_json"])
+    assert metadata["mode_explicit"] is False
+    assert metadata["mode_source"] == "normalized_default"
+
+
 def test_telegram_gateway_denies_non_private_or_unapproved_identities(tmp_path: Path) -> None:
     memory = build_memory(tmp_path)
     client = FakeTelegramClient()

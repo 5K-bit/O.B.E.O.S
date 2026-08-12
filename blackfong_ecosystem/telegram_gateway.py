@@ -1023,7 +1023,7 @@ class TelegramGatewayService:
                     "last_seen_at": now,
                     "last_message_id": message_id,
                     "last_update_id": update_id,
-                    "metadata_json": json.dumps({"mode_explicit": False}),
+                    "metadata_json": json.dumps({"mode_explicit": False, "mode_source": "default"}),
                 },
             )
             row = conn.execute(
@@ -1039,6 +1039,7 @@ class TelegramGatewayService:
             normalized = dict(row or {})
             metadata = self._decode_thread_metadata(normalized.get("metadata_json"))
             if not bool(metadata.get("mode_explicit")) and str(normalized.get("mode") or "") != DEFAULT_MODE:
+                metadata["mode_source"] = "default"
                 normalized["mode"] = DEFAULT_MODE
                 normalized["metadata_json"] = json.dumps(metadata)
                 conn.execute(
@@ -1075,8 +1076,14 @@ class TelegramGatewayService:
             for row in rows:
                 metadata = self._decode_thread_metadata(row.get("metadata_json"))
                 current_mode = str(row.get("mode") or "")
-                if bool(metadata.get("mode_explicit")) or current_mode == DEFAULT_MODE:
+                mode_source = str(metadata.get("mode_source") or "").strip().lower()
+                legacy_fast_default = current_mode == "fast" and mode_source != "command"
+                if current_mode == DEFAULT_MODE:
                     continue
+                if bool(metadata.get("mode_explicit")) and not legacy_fast_default:
+                    continue
+                metadata["mode_explicit"] = False
+                metadata["mode_source"] = "normalized_default"
                 conn.execute(
                     text(
                         """
@@ -1111,6 +1118,7 @@ class TelegramGatewayService:
             ).scalar_one_or_none()
             metadata = self._decode_thread_metadata(metadata_json)
             metadata["mode_explicit"] = True
+            metadata["mode_source"] = "command"
             conn.execute(
                 text(
                     """
@@ -1141,6 +1149,7 @@ class TelegramGatewayService:
         if not isinstance(decoded, dict):
             decoded = {}
         decoded.setdefault("mode_explicit", False)
+        decoded.setdefault("mode_source", "default")
         return decoded
 
     def _get_inbox_row(self, update_id: int) -> Optional[Dict[str, Any]]:

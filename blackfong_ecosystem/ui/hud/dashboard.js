@@ -2455,6 +2455,7 @@
     }
 
     beginLocalUserMessage(text);
+    state.requestId = null;
     state.streamingReply = { text: "", timestamp: Date.now() / 1000, complete: false };
     renderMessages({ messages: state.lastRenderedMessages || [] });
     try {
@@ -2464,7 +2465,6 @@
         body: JSON.stringify({
           message: text,
           session_id: state.sessionId,
-          request_id: state.requestId || undefined,
           agent: el.agentSelect.value || undefined,
           analysis_mode: el.analysisSelect.value || "standard",
           transport: "hud",

@@ -10,6 +10,7 @@ import threading
 import time
 import webbrowser
 import base64
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -611,6 +612,20 @@ class WebDashboard:
             link_surface(surface)
             return session_id, transport, surface
         return get_shared_session_id(surface=surface), transport, surface
+
+    def _allocate_chat_request_id(self, requested_request_id: Optional[str]) -> str:
+        requested = str(requested_request_id or "").strip()
+        if not requested:
+            return self.memory_service.create_correlation_id()[:8]
+
+        if requested in self.request_states:
+            return self.memory_service.create_correlation_id()[:8]
+
+        with contextlib.suppress(Exception):
+            if self.event_store.list_events_for_request(requested, limit=1):
+                return self.memory_service.create_correlation_id()[:8]
+
+        return requested
 
     def _authorize_device_report(self) -> bool:
         token = request.headers.get("X-Sentinel-Agent-Token") or request.headers.get("X-Blackfong-Agent-Token")
@@ -1972,7 +1987,7 @@ class WebDashboard:
             if not message:
                 return jsonify({"error": "Message is required"}), 400
             session_id, transport, _surface = self._resolve_chat_session(payload)
-            request_id = str(payload.get("request_id") or self.memory_service.create_correlation_id()[:8])
+            request_id = self._allocate_chat_request_id(payload.get("request_id"))
             agent_override = payload.get("agent") or payload.get("agent_override")
             from .model_routing import normalize_response_mode
 

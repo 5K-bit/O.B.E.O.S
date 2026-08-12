@@ -554,6 +554,7 @@
     persistUiState();
     el.chatInput.value = "";
     beginLocalUserMessage(message);
+    state.requestId = null;
     state.streamingReply = { text: "", timestamp: Date.now() / 1000, complete: false };
     renderMessages({ messages: state.messages });
     updateChatStatus("Accepted by D.A.I.S.E.", "accepted");
@@ -565,7 +566,6 @@
           background: true,
           analysis_mode: state.analysisMode,
           session_id: state.sessionId,
-          request_id: state.requestId || undefined,
           transport: "legion",
           input_origin: "legion",
         }),

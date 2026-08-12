@@ -587,11 +587,12 @@ class MemoryLifecycleManager:
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """Get comprehensive memory lifecycle statistics."""
-        total_size = sum(item.size_bytes for item in self.memory_store.values())
+        memory_items = list(self.memory_store.values())
+        total_size = sum(item.size_bytes for item in memory_items)
         tier_sizes = {}
 
         for tier_name, items in self.tier_storage.items():
-            tier_sizes[tier_name] = sum(item.size_bytes for item in items.values())
+            tier_sizes[tier_name] = sum(item.size_bytes for item in list(items.values()))
 
         return {
             "total_items": self.stats["total_items"],
@@ -603,8 +604,8 @@ class MemoryLifecycleManager:
             "expired_items": self.stats["expired_items"],
             "tier_transitions": self.stats["tier_transitions"],
             "average_relevance": (
-                sum(item.relevance_score for item in self.memory_store.values()) /
-                len(self.memory_store) if self.memory_store else 0
+                sum(item.relevance_score for item in memory_items) /
+                len(memory_items) if memory_items else 0
             ),
         }
 

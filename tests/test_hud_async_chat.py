@@ -272,3 +272,36 @@ def test_completed_background_chat_refreshes_session_messages(tmp_path: Path):
     assert messages["messages"][0]["role"] == "user"
     assert messages["messages"][1]["role"] == "assistant"
     assert messages["messages"][1]["text"] == "Echo: show me session replay"
+
+
+def test_background_chat_replaces_stale_request_id_with_fresh_turn_id(tmp_path: Path):
+    dashboard = build_dashboard(tmp_path)
+    client = dashboard.app.test_client()
+
+    first = client.post(
+        "/api/chat",
+        json={
+            "message": "first turn",
+            "background": True,
+            "request_id": "hud-repeat-1",
+        },
+    ).get_json()
+    assert first["request_id"] == "hud-repeat-1"
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        trace = client.get("/api/request/hud-repeat-1/trace").get_json()
+        if trace["status"] == "complete":
+            break
+        time.sleep(0.05)
+
+    second = client.post(
+        "/api/chat",
+        json={
+            "message": "second turn",
+            "background": True,
+            "request_id": "hud-repeat-1",
+        },
+    ).get_json()
+
+    assert second["request_id"] != "hud-repeat-1"

@@ -305,7 +305,14 @@ class EventStore:
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.db_path = db_path or paths.events_db
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{self.db_path}", connect_args={"timeout": 30.0}, future=True)
+        self.engine = create_engine(
+            f"sqlite:///{self.db_path}",
+            connect_args={"timeout": 30.0, "check_same_thread": False},
+            pool_size=24,
+            max_overflow=48,
+            pool_timeout=30.0,
+            future=True,
+        )
 
         @sqlalchemy_event.listens_for(self.engine, "connect")
         def _set_sqlite_busy_timeout(dbapi_connection, _connection_record) -> None:
