@@ -273,6 +273,8 @@ class OllamaChatBackend(BaseChatBackend):
         effective_num_predict = int(options.get("num_predict") or self.num_predict)
         invocation_mode = str(options.get("mode") or "stream")
         messages_list = list(messages)
+        prompt_chars = sum(len(str(message.get("content", ""))) for message in messages_list)
+        approx_prompt_tokens = max(1, prompt_chars // 4) if prompt_chars else 0
         payload = {
             "model": options.get("model") or self.model,
             "messages": messages_list,
@@ -287,28 +289,76 @@ class OllamaChatBackend(BaseChatBackend):
         wall_started = time.perf_counter()
         parts: list[str] = []
         model_name = str(payload["model"])
-        with httpx.Client(timeout=timeout) as client:
-            with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
-                if response.status_code == 404:
-                    raise ChatBackendError(
-                        f"Ollama model not found: {model_name}",
-                        metadata={"error_type": "model_not_found", "model": model_name},
-                    )
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except ValueError:
-                        continue
-                    token = str((data.get("message") or {}).get("content") or "")
-                    if token:
-                        parts.append(token)
-                        if on_token is not None:
-                            on_token(token)
-                    if data.get("done"):
-                        model_name = str(data.get("model") or model_name)
+        def failure_metadata(error_type: str, *, timeout_reason: str | None = None) -> Dict[str, Any]:
+            return {
+                "provider": self.provider_name,
+                "model": model_name,
+                "mode": invocation_mode,
+                "wall_time_ms": round((time.perf_counter() - wall_started) * 1000, 2),
+                "timeout_s": effective_timeout,
+                "timeout_reason": timeout_reason,
+                "error_type": error_type,
+                "prompt_message_count": len(messages_list),
+                "prompt_chars": prompt_chars,
+                "approx_prompt_tokens": approx_prompt_tokens,
+                "keep_alive": effective_keep_alive,
+                "num_ctx": effective_num_ctx,
+                "num_predict": effective_num_predict,
+                "partial_stream_chars": len("".join(parts)),
+            }
+
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
+                    if response.status_code == 404:
+                        raise ChatBackendError(
+                            f"Ollama model not found: {model_name}",
+                            metadata=failure_metadata("model_not_found"),
+                        )
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                        except ValueError:
+                            continue
+                        token = str((data.get("message") or {}).get("content") or "")
+                        if token:
+                            parts.append(token)
+                            if on_token is not None:
+                                on_token(token)
+                        if data.get("done"):
+                            model_name = str(data.get("model") or model_name)
+        except httpx.ReadTimeout as exc:  # pragma: no cover - network failure path
+            raise ChatBackendError(
+                f"Ollama request timed out after {effective_timeout:.0f}s for model {model_name}",
+                metadata=failure_metadata("read_timeout", timeout_reason=f"read_timeout_after_{effective_timeout:.0f}s"),
+            ) from exc
+        except httpx.HTTPStatusError as exc:  # pragma: no cover - network failure path
+            detail = exc.response.text.strip()
+            status_code = exc.response.status_code
+            if status_code == 404:
+                raise ChatBackendError(
+                    f"Ollama model not found: {model_name}",
+                    metadata=failure_metadata("model_not_found"),
+                ) from exc
+            raise ChatBackendError(
+                f"Ollama backend returned HTTP {status_code} for model {model_name}: {detail[:240]}",
+                metadata=failure_metadata(f"http_{status_code}"),
+            ) from exc
+        except httpx.HTTPError as exc:  # pragma: no cover - network failure path
+            raise ChatBackendError(
+                f"Ollama backend unavailable: {exc}",
+                metadata=failure_metadata("http_error"),
+            ) from exc
+        except ChatBackendError:
+            raise
+        except Exception as exc:  # pragma: no cover - network failure path
+            raise ChatBackendError(
+                f"Ollama backend unavailable: {exc}",
+                metadata=failure_metadata("unexpected_error"),
+            ) from exc
         content = "".join(parts).strip()
         if not content:
             # Some local Ollama builds accept the stream route but return no deltas.
@@ -356,14 +406,46 @@ class HeuristicChatBackend(BaseChatBackend):
             if role in {"system", "assistant", "user"}:
                 context_blob.append(content)
 
-        response = self._generate_reply(latest_user, "\n".join(context_blob))
+        response = self._generate_reply(
+            latest_user,
+            "\n".join(context_blob),
+            backend_error=options.get("backend_error"),
+            fallback_reason=options.get("fallback_reason"),
+            provider=options.get("provider"),
+            model=options.get("model"),
+            backend_health=options.get("backend_health"),
+            primary_backend_metadata=options.get("primary_backend_metadata"),
+        )
+        metadata = dict(options.get("metadata") or {})
+        metadata.update(
+            {
+                "backend_error": options.get("backend_error"),
+                "fallback_reason": options.get("fallback_reason"),
+                "provider": options.get("provider"),
+                "model": options.get("model"),
+                "backend_health": options.get("backend_health"),
+                "primary_backend_metadata": options.get("primary_backend_metadata"),
+            }
+        )
         return ChatBackendResult(
             text=response,
             provider=self.provider_name,
             model=self.model,
+            metadata=metadata,
         )
 
-    def _generate_reply(self, user_input: str, context_text: str) -> str:
+    def _generate_reply(
+        self,
+        user_input: str,
+        context_text: str,
+        *,
+        backend_error: str | None = None,
+        fallback_reason: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        backend_health: Any | None = None,
+        primary_backend_metadata: Any | None = None,
+    ) -> str:
         lowered = user_input.lower().strip()
 
         favorite_color_match = re.search(
@@ -398,6 +480,14 @@ class HeuristicChatBackend(BaseChatBackend):
             return (
                 "Hello. D.A.I.S.E. is here with local O.B.E.O.S. memory, recent session context, "
                 "and stored knowledge still available."
+            )
+
+        if fallback_reason:
+            fallback_source = "live model" if provider == "ollama" else provider or "the unavailable backend"
+            return (
+                f"The live model lane is unavailable right now. "
+                f"Falling back to local O.B.E.O.S. memory because: {fallback_reason}. "
+                "I’m answering from stored context while the primary backend recovers."
             )
 
         if self._contains_any_phrase(lowered, "system status") or self._contains_any_word(lowered, "status", "health"):

@@ -290,11 +290,16 @@ class OllamaRoutingChatBackend(OllamaChatBackend):
         except (TypeError, ValueError):
             return None
         mode = normalize_response_mode(options.get("mode"))
+        normalized_chain_length = max(1, int(chain_length or 1))
         if mode == "fast":
-            return min(timeout_value, FAST_CHAIN_TIMEOUT_CAP_S)
-        if mode == "standard":
-            return min(timeout_value, STANDARD_CHAIN_TIMEOUT_CAP_S)
-        return min(timeout_value, DEEP_CHAIN_TIMEOUT_CAP_S)
+            cap = FAST_CHAIN_TIMEOUT_CAP_S
+        elif mode == "standard":
+            cap = STANDARD_CHAIN_TIMEOUT_CAP_S
+        else:
+            cap = DEEP_CHAIN_TIMEOUT_CAP_S
+        if normalized_chain_length > 1:
+            cap = max(cap / normalized_chain_length, 8.0)
+        return min(timeout_value, cap)
 
     def generate(self, messages: Sequence[Dict[str, str]], **options: Any) -> Any:
         last_error: Exception | None = None

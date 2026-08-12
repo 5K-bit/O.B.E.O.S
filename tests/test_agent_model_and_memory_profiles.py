@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import httpx
+
+import blackfong_ecosystem.chat_backends as chat_backends_module
 import blackfong_ecosystem.agents.jarvis_agent as jarvis_agent_module
 from blackfong_ecosystem.agents.jarvis_agent import JARVISAgent
-from blackfong_ecosystem.chat_backends import BaseChatBackend, ChatBackendError, ChatBackendResult
+from blackfong_ecosystem.chat_backends import (
+    BaseChatBackend,
+    ChatBackendError,
+    ChatBackendResult,
+    HeuristicChatBackend,
+    OllamaChatBackend,
+)
 from blackfong_ecosystem.config import ChatSettings
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
+from blackfong_ecosystem.model_routing import OllamaRoutingChatBackend
 from blackfong_ecosystem.storage import EventStore, NullVectorStore
 
 
@@ -75,6 +85,17 @@ def test_chat_settings_from_env_supports_per_agent_overrides(monkeypatch):
     assert settings.num_ctx_for_agent("jarvis") == 4096
     assert settings.num_predict_for_agent("jarvis") == 192
     assert settings.model_for_agent("coding") == "deepseek-coder:6.7b"
+
+
+def test_standard_model_chain_defaults_to_fast_model_fallback(monkeypatch):
+    monkeypatch.setenv("BLACKFONG_FAST_MODEL", "llama3.2:1b")
+    monkeypatch.setenv("BLACKFONG_JARVIS_MODEL", "llama3.2:3b")
+    monkeypatch.delenv("BLACKFONG_STANDARD_MODEL", raising=False)
+    monkeypatch.delenv("BLACKFONG_STANDARD_MODEL_FALLBACKS", raising=False)
+
+    settings = ChatSettings.from_env()
+
+    assert settings.standard_model_chain() == ("llama3.2:3b", "llama3.2:1b")
 
 
 def test_shared_memory_is_filtered_by_agent_role(tmp_path):
@@ -280,6 +301,88 @@ def test_jarvis_fallback_records_backend_error():
     assert result["backend_error"] == "simulated timeout"
     assert result["backend_metadata"]["path"] == "fallback"
     assert result["backend_metadata"]["fallback_reason"] == "simulated timeout"
+
+
+def test_heuristic_fallback_includes_diagnostic_reason():
+    class OllamaFailingBackend(BaseChatBackend):
+        provider_name = "ollama"
+        model = "ollama-mini"
+
+        def generate(self, messages, **options):
+            raise ChatBackendError("Ollama is down", metadata={"timeout_reason": "connection refused"})
+
+    agent = JARVISAgent(
+        chat_backend=OllamaFailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "Tell me a joke",
+        context={"session_id": "test-session", "memory_context": {}},
+    )
+
+    assert result["provider"] == "heuristic"
+    assert "Ollama is down" in result["response"]
+    assert "Falling back to local O.B.E.O.S. memory" in result["response"]
+    assert result["backend_error"] == "Ollama is down"
+    assert result["backend_metadata"]["fallback_reason"] == "Ollama is down"
+    assert result["backend_metadata"]["provider"] == "ollama"
+    assert result["backend_metadata"]["model"] == "ollama-mini"
+
+
+def test_streaming_timeout_falls_back_cleanly(monkeypatch):
+    class TimeoutStream:
+        status_code = 200
+
+        def __enter__(self):
+            raise httpx.ReadTimeout("timed out")
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class TimeoutClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return TimeoutStream()
+
+    monkeypatch.setattr(chat_backends_module.httpx, "Client", TimeoutClient)
+
+    agent = JARVISAgent(
+        chat_backend=OllamaChatBackend(model="llama3.2:3b", timeout=1.0),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "Tell me about Spawn",
+        context={
+            "session_id": "test-session",
+            "memory_context": {},
+            "stream_callback": lambda token: None,
+        },
+    )
+
+    assert result["provider"] == "heuristic"
+    assert "Falling back to local O.B.E.O.S. memory" in result["response"]
+    assert "timed out" in str(result["backend_error"] or "").lower()
+    assert result["backend_metadata"]["provider"] == "ollama"
+    assert result["backend_metadata"]["model"] == "llama3.2:3b"
+
+
+def test_standard_chain_timeout_is_split_across_models():
+    capped = OllamaRoutingChatBackend._capped_timeout(
+        {"mode": "standard", "timeout": 90.0},
+        chain_length=2,
+    )
+
+    assert capped == 22.5
 
 
 def test_standard_casual_chat_uses_fast_generation_lane(monkeypatch):

@@ -108,7 +108,7 @@ class ChatSettings:
     fast_model: str = "llama3.2:3b"
     fast_model_fallbacks: tuple[str, ...] = ("llama3.2:3b",)
     standard_model: str = "llama3.2:3b"
-    standard_model_fallbacks: tuple[str, ...] = ("llama3.2:3b",)
+    standard_model_fallbacks: tuple[str, ...] = ("llama3.2:1b",)
     deep_model: str = "deepseek-r1:8b"
     deep_model_fallbacks: tuple[str, ...] = ("llama3.2:3b",)
     fast_timeout: float = 60.0
@@ -278,7 +278,7 @@ class ChatSettings:
             "BLACKFONG_STANDARD_MODEL",
             "BLACKFONG_STANDARD_MODEL_FALLBACKS",
             default_chat_model,
-            default_chat_model,
+            fast_chain[0],
         )
         deep_chain = ChatSettings._env_model_chain(
             "BLACKFONG_DEEP_MODEL",

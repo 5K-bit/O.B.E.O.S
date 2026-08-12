@@ -199,7 +199,14 @@ class JARVISAgent(Agent):
         backend_health = self._resolve_backend_health(context)
         backend_options = self._apply_backend_health_overrides(backend_options, backend_health)
         if self._should_force_fallback(backend_health):
-            backend_result = self.fallback_backend.generate(messages)
+            backend_result = self.fallback_backend.generate(
+                messages,
+                backend_error=self._backend_health_reason(backend_health),
+                fallback_reason=self._backend_health_reason(backend_health),
+                provider=getattr(chat_backend, "provider_name", "ollama"),
+                model=getattr(chat_backend, "model", None),
+                backend_health=backend_health,
+            )
             metadata = dict(backend_result.metadata or {})
             metadata.update(
                 {
@@ -234,7 +241,15 @@ class JARVISAgent(Agent):
             backend_error = None
             metadata = dict(backend_result.metadata or {})
         except ChatBackendError as exc:
-            backend_result = self.fallback_backend.generate(messages)
+            backend_result = self.fallback_backend.generate(
+                messages,
+                backend_error=str(exc),
+                fallback_reason=str(exc),
+                provider=getattr(self.chat_backend, "provider_name", "ollama"),
+                model=getattr(self.chat_backend, "model", None),
+                backend_health=backend_health,
+                primary_backend_metadata=getattr(exc, "metadata", {}),
+            )
             backend_error = str(exc)
             metadata = dict(backend_result.metadata or {})
             metadata.update(
