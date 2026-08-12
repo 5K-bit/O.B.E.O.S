@@ -214,9 +214,9 @@ class OperatorActionService:
         session_id: Optional[str] = None,
         statuses: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
-        self.expire_stale_intents()
+        now = time.time()
         grouped = self._group_events(limit=max(limit * 6, 250))
-        items = [self._compose_action(intent_id, events) for intent_id, events in grouped.items()]
+        items = [self._compose_action(intent_id, events, now=now) for intent_id, events in grouped.items()]
         if session_id is not None:
             items = [item for item in items if item.get("session_id") == session_id]
         if statuses is not None:
@@ -233,20 +233,18 @@ class OperatorActionService:
         }
 
     def get_action(self, intent_id: str, *, expire_stale: bool = True) -> Optional[Dict[str, Any]]:
-        if expire_stale:
-            self.expire_stale_intents()
         grouped = self._group_events(limit=1500)
         events = grouped.get(str(intent_id))
         if not events:
             return None
-        return self._compose_action(str(intent_id), events)
+        return self._compose_action(str(intent_id), events, now=time.time() if expire_stale else None)
 
     def expire_stale_intents(self) -> int:
         grouped = self._group_events(limit=1500)
         expired = 0
         now = time.time()
         for intent_id, events in grouped.items():
-            action = self._compose_action(intent_id, events)
+            action = self._compose_action(intent_id, events, now=now)
             expires_at = float(action.get("expires_at") or 0.0)
             if expires_at and expires_at < now and action.get("status") in ACTIVE_INTENT_STATUSES:
                 self.transition(
@@ -329,7 +327,7 @@ class OperatorActionService:
             grouped.setdefault(intent_id, []).append(event)
         return grouped
 
-    def _compose_action(self, intent_id: str, events: List[Any]) -> Dict[str, Any]:
+    def _compose_action(self, intent_id: str, events: List[Any], *, now: Optional[float] = None) -> Dict[str, Any]:
         created = events[0]
         payload = dict(created.payload or {})
         action = {
@@ -385,7 +383,20 @@ class OperatorActionService:
                 action["owned_by"] = event_payload.get("owned_by", action["owned_by"])
                 action["governed_by"] = event_payload.get("governed_by", action["governed_by"])
                 action["proposed_by"] = event_payload.get("proposed_by", action["proposed_by"])
-        return action
+        return self._materialize_expired_state(action, now=now)
+
+    def _materialize_expired_state(self, action: Dict[str, Any], *, now: Optional[float] = None) -> Dict[str, Any]:
+        current_status = str(action.get("status") or "")
+        expires_at = float(action.get("expires_at") or 0.0)
+        observed_at = now or time.time()
+        if not expires_at or expires_at >= observed_at or current_status not in ACTIVE_INTENT_STATUSES:
+            return action
+        materialized = dict(action)
+        materialized["status"] = "expired"
+        materialized["reason_code"] = "stale_action"
+        materialized["human_reason"] = f"{materialized.get('action', 'Action')} expired before it finished."
+        materialized["updated_at"] = max(float(materialized.get("updated_at") or 0.0), expires_at)
+        return materialized
 
     def _last_summary_timestamp(self, *, session_id: Optional[str]) -> Optional[float]:
         summaries = self.event_store.list_events_by_type("state_change_summary", limit=50)

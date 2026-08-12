@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy import JSON, Column, Float, Integer, String, create_engine, event as sqlalchemy_event, func, text
+from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from .config import paths
@@ -14,6 +16,8 @@ from .events import Event, validate_event_type
 
 Base = declarative_base()
 logging.getLogger("chromadb.telemetry.product.posthog").disabled = True
+LOGGER = logging.getLogger(__name__)
+SQLITE_LOCK_RETRY_DELAYS_S = (0.05, 0.1, 0.2, 0.4)
 
 MEMORY_CHAMBER_TABLE_SQL = (
     """
@@ -425,22 +429,38 @@ class EventStore:
         # Enforce canonical event type at ingestion time.
         validate_event_type(event.type)
         metadata = event.metadata or {}
-        with self.session() as s:
-            model = EventModel(
-                id=event.id,
-                timestamp=event.timestamp,
-                source=event.source,
-                type=event.type,
-                payload=event.payload,
-                confidence=event.confidence,
-                event_metadata=metadata,
-                session_id=metadata.get("session_id"),
-                request_id=metadata.get("request_id"),
-                correlation_id=metadata.get("correlation_id"),
-                hash=event.hash,
-            )
-            s.add(model)
-            s.commit()
+        retry_count = len(SQLITE_LOCK_RETRY_DELAYS_S)
+        for attempt in range(retry_count + 1):
+            try:
+                with self.session() as s:
+                    model = EventModel(
+                        id=event.id,
+                        timestamp=event.timestamp,
+                        source=event.source,
+                        type=event.type,
+                        payload=event.payload,
+                        confidence=event.confidence,
+                        event_metadata=metadata,
+                        session_id=metadata.get("session_id"),
+                        request_id=metadata.get("request_id"),
+                        correlation_id=metadata.get("correlation_id"),
+                        hash=event.hash,
+                    )
+                    s.add(model)
+                    s.commit()
+                    return
+            except SQLAlchemyOperationalError as exc:
+                if not self._is_sqlite_lock_error(exc) or attempt >= retry_count:
+                    raise
+                delay = SQLITE_LOCK_RETRY_DELAYS_S[attempt]
+                LOGGER.warning(
+                    "sqlite_event_store_locked_retry event_type=%s attempt=%s/%s delay_s=%.2f",
+                    event.type,
+                    attempt + 1,
+                    retry_count + 1,
+                    delay,
+                )
+                time.sleep(delay)
 
     def list_events(
         self,
@@ -585,6 +605,11 @@ class EventStore:
                 q = q.filter(EventModel.type.in_(allowed_types))
             rows = q.limit(limit).all()
             return [self._row_to_event(row) for row in rows]
+
+    @staticmethod
+    def _is_sqlite_lock_error(exc: SQLAlchemyOperationalError) -> bool:
+        text_value = str(exc).lower()
+        return "database is locked" in text_value or "database table is locked" in text_value
 
     def get_event_by_id(self, event_id: str) -> Event | None:
         with self.session() as s:

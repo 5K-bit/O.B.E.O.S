@@ -1,9 +1,11 @@
 from __future__ import annotations
-
 from pathlib import Path
+
+from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
 from blackfong_ecosystem.daise import DAISE
+from blackfong_ecosystem.events import Event
 from blackfong_ecosystem.operational_interfaces import WebDashboard
 from blackfong_ecosystem.storage import EventStore, NullVectorStore
 from blackfong_ecosystem.tinyprogrammer_companion import TinyProgrammerCompanion
@@ -126,6 +128,65 @@ def test_operator_actions_route_degrades_when_event_store_is_busy(tmp_path: Path
     assert payload["status"] == "degraded"
     assert payload["pending_actions"] == 0
     assert payload["reason_code"] == "event_store_temporarily_unavailable"
+
+
+def test_operator_summary_materializes_expired_actions_without_persisting_new_events(tmp_path: Path):
+    memory = build_memory(tmp_path)
+    dashboard = WebDashboard(host="127.0.0.1", port=8099, memory_service=memory, orchestrator_instance=None)
+    client = dashboard.app.test_client()
+    session_id = memory.create_session_id()
+
+    expired = dashboard.operator_actions.create_intent(
+        action="tiny_log",
+        session_id=session_id,
+        request_id="expired-summary-1",
+        human_reason="This should expire quickly.",
+        ttl_seconds=-1.0,
+    )
+
+    expired_events_before = len(memory.event_store.list_events_by_type("operator_intent_expired", limit=20))
+    payload = client.get(f"/api/operator/summary?session_id={session_id}").get_json()
+    expired_events_after = len(memory.event_store.list_events_by_type("operator_intent_expired", limit=20))
+
+    assert expired_events_after == expired_events_before
+    assert any(
+        item["intent_id"] == expired["intent_id"] and item["status"] == "expired"
+        for item in payload["actions"]["items"]
+    )
+
+
+def test_event_store_retries_locked_event_insert(tmp_path: Path, monkeypatch):
+    store = EventStore(tmp_path / "events.db")
+    store.init_db()
+    attempts = {"count": 0}
+
+    class FlakySession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def add(self, model):
+            self.model = model
+
+        def commit(self):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise SQLAlchemyOperationalError("INSERT INTO events", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(store, "session", lambda: FlakySession())
+
+    store.add_event(
+        Event.new(
+            source="blackfong",
+            type="operator_intent_state",
+            payload={"status": "testing"},
+            request_id="retry-1",
+        )
+    )
+
+    assert attempts["count"] == 2
 
 
 def test_whatchanged_reports_recent_tiny_and_file_transitions(tmp_path: Path):
