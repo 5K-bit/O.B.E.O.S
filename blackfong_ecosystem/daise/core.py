@@ -3448,9 +3448,11 @@ class DAISE:
         )
         if self._matches_any(normalized, status_phrases):
             return True
-        status_anchor = bool(tokens.intersection({"status", "online", "awake", "alive", "running", "up"}))
+        status_anchor = bool(
+            tokens.intersection({"status", "online", "awake", "alive", "running", "up", "runtime", "backend"})
+        )
         system_anchor = bool(tokens.intersection({"you", "system", "backend", "runtime", "daise"}))
-        question_shape = bool(tokens.intersection({"are", "is", "what", "hows", "how's"}))
+        question_shape = bool(tokens.intersection({"are", "is", "what", "hows", "how's", "looking"}))
         return status_anchor and system_anchor and question_shape
 
     def _matches_tinyprogrammer_truth(self, normalized_compact: str) -> bool:
