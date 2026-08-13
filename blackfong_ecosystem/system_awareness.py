@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from .capability_registry import capability_snapshot
 from .config import chat_settings, paths
+from .model_routing import model_chain_for_agent
 from .perception_semantics import PerceptionGate
 from .policy_engine import PHASE_57_EVENT_TYPES, PolicyEngine
 
@@ -289,6 +290,31 @@ class SystemAwarenessService:
                 error = str(exc)
 
         bootstrap = dict(backend_bootstrap or {})
+        runtime_health = (
+            self.memory_service.recent_backend_health()
+            if self.memory_service is not None
+            else {}
+        )
+        response_profiles = {
+            "fast": {
+                "model_chain": model_chain_for_agent("jarvis", "fast"),
+                "timeout_s": chat_settings.fast_timeout,
+                "num_ctx": chat_settings.fast_num_ctx,
+                "num_predict": chat_settings.fast_num_predict,
+            },
+            "standard": {
+                "model_chain": model_chain_for_agent("jarvis", "standard"),
+                "timeout_s": chat_settings.standard_timeout,
+                "num_ctx": chat_settings.standard_num_ctx,
+                "num_predict": chat_settings.standard_num_predict,
+            },
+            "deep": {
+                "model_chain": model_chain_for_agent("jarvis", "deep"),
+                "timeout_s": chat_settings.deep_timeout,
+                "num_ctx": chat_settings.deep_num_ctx,
+                "num_predict": chat_settings.deep_num_predict,
+            },
+        }
         return {
             "schema_version": SCHEMA_VERSION,
             "provider": provider,
@@ -303,7 +329,16 @@ class SystemAwarenessService:
             },
             "model_available": model_available,
             "installed_models": installed_models[:20],
+            "installed_model_count": len(installed_models),
             "base_url": chat_settings.ollama_url,
+            "response_profiles": response_profiles,
+            "recent_timeout_count": runtime_health.get("recent_timeout_count"),
+            "recent_fallback_count": runtime_health.get("recent_fallback_count"),
+            "degraded_reason": runtime_health.get("degraded_reason"),
+            "recovery_reason": runtime_health.get("recovery_reason"),
+            "timeout_window_seconds": runtime_health.get("timeout_window_seconds"),
+            "allow_recovery_probe": runtime_health.get("allow_recovery_probe"),
+            "repeated_recent_failures": runtime_health.get("repeated_recent_failures"),
             "probe_ms": round((time.time() - probe_started) * 1000, 2),
             "bootstrap": bootstrap,
             "error": error,
@@ -834,10 +869,30 @@ class SystemAwarenessService:
         phases = trace.get("phases", [])
         slow_phases = [phase for phase in phases if phase.get("ms") and phase["ms"] > 5000]
         backend_error = trace.get("backend_error") or (trace.get("result") or {}).get("backend_error")
+        latency = trace.get("latency_observation") or {}
+        outcome = trace.get("request_outcome") or {}
+        fallback_trigger = latency.get("fallback_trigger") or outcome.get("fallback_trigger")
         return {
             "slow_phases": slow_phases,
             "backend_error": backend_error,
-            "recommendation": "Check backend availability and queue pressure." if backend_error else "Trace is progressing normally.",
+            "response_path": latency.get("response_path") or outcome.get("response_path"),
+            "model_chain": latency.get("model_chain") or outcome.get("model_chain") or [],
+            "fallback_trigger": fallback_trigger,
+            "effective_timeout_s": latency.get("effective_timeout_s") or outcome.get("effective_timeout_s"),
+            "health_forced_fallback": bool(latency.get("health_forced_fallback") or outcome.get("health_forced_fallback")),
+            "backend_health_state_at_request": latency.get("backend_health_state_at_request") or outcome.get("backend_health_state_at_request"),
+            "recovery_probe_attempted": bool(latency.get("recovery_probe_attempted") or outcome.get("recovery_probe_attempted")),
+            "recovery_probe_succeeded": bool(latency.get("recovery_probe_succeeded") or outcome.get("recovery_probe_succeeded")),
+            "degraded_reason": latency.get("degraded_reason") or outcome.get("degraded_reason"),
+            "recovery_reason": latency.get("recovery_reason") or outcome.get("recovery_reason"),
+            "timeout_window_seconds": latency.get("timeout_window_seconds") or outcome.get("timeout_window_seconds"),
+            "live_lane_attempted": bool(latency.get("live_lane_attempted") or outcome.get("live_lane_attempted")),
+            "fallback_mode": latency.get("fallback_mode") or outcome.get("fallback_mode") or "none",
+            "recommendation": (
+                "Inspect backend availability, timeout budgets, degraded reasons, and whether a recovery probe was attempted before fallback."
+                if backend_error or fallback_trigger
+                else "Trace is progressing normally."
+            ),
         }
 
     def emit_snapshot_events(self, snapshot: Dict[str, Any]) -> None:

@@ -959,7 +959,7 @@ class WebDashboard:
                 message=message,
                 session_id=context.get("session_id"),
                 request_id=context.get("request_id"),
-                analysis_mode=str(payload.get("analysis_mode") or context.get("analysis_mode") or "fast"),
+                analysis_mode=str(payload.get("analysis_mode") or context.get("analysis_mode") or "standard"),
                 agent_override=payload.get("agent_override") or context.get("agent_override"),
                 include_memory=bool(payload.get("include_memory", False)),
                 modality=str(payload.get("modality") or context.get("input_modality") or "text"),
@@ -2636,7 +2636,7 @@ class WebDashboard:
             session_id=session_id,
             query=message,
             agent_name=selected_agent,
-            analysis_mode=str(result.get("analysis_mode") or "quick"),
+            analysis_mode=str(result.get("analysis_mode") or "standard"),
             request_id=request_id,
             transport=transport,
         )

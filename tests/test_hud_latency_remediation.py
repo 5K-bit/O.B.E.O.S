@@ -155,6 +155,11 @@ class FakeJarvisAgent:
                 "load_duration_ms": 10,
                 "prompt_eval_count": 640,
                 "eval_count": 32,
+                "response_path": "live_model",
+                "selected_model": "llama3.2:3b",
+                "model_chain": ["llama3.2:3b"],
+                "effective_timeout_s": 25.0,
+                "streamed": False,
                 "prompt_metrics": {"approx_prompt_tokens": 700, "prompt_mode": "quick_compact"},
             },
             "agent": "jarvis",
@@ -170,7 +175,7 @@ def test_daise_persists_latency_observation_for_trace(tmp_path: Path):
     )
 
     result = daise.process_request(
-        user_input="hello there",
+        user_input="Summarize the current pipeline status.",
         agents={"jarvis": FakeJarvisAgent()},
         context={"request_id": "latency-trace-1", "analysis_mode": "quick"},
     )
@@ -180,6 +185,13 @@ def test_daise_persists_latency_observation_for_trace(tmp_path: Path):
     assert any(event["event_type"] == "latency_observation" for event in trace["events"])
     assert trace["latency_observation"]["prompt_eval_count"] == 640
     assert trace["latency_observation"]["ollama_attempts"] == 1
+    assert trace["latency_observation"]["response_path"] == "live_model"
+    assert trace["latency_observation"]["selected_model"] == "llama3.2:3b"
+    assert trace["latency_observation"]["live_lane_attempted"] is False
+    assert trace["latency_observation"]["fallback_mode"] == "none"
+    assert trace["request_outcome"]["response_path"] == "live_model"
+    assert trace["request_outcome"]["live_lane_attempted"] is False
+    assert trace["request_outcome"]["fallback_mode"] == "none"
 
 
 def test_why_slow_uses_latency_provenance(tmp_path: Path):

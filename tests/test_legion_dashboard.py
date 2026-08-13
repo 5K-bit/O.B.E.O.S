@@ -384,6 +384,7 @@ def test_frame_chat_route_uses_operator_chat_with_frame_context(tmp_path: Path):
 
     assert response.status_code == 200
     assert response.get_json()["result"]["response"] == "Frame response"
+    assert stub.kwargs["analysis_mode"] == "standard"
     assert stub.kwargs["modality"] == "vision"
     assert stub.kwargs["context"]["input_origin"] == "frame"
     assert stub.kwargs["context"]["device_id"] == "frame"

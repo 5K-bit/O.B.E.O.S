@@ -343,7 +343,7 @@ class UnifiedOrchestrator:
             "confidence": result.get("confidence", 0.0),
             "execution_time_ms": result.get("execution_time_ms", 0),
             "clarification_required": result.get("clarification_required", False),
-            "analysis_mode": result.get("analysis_mode", "quick"),
+            "analysis_mode": result.get("analysis_mode", "standard"),
             "selected_agent": result.get("selected_agent"),
             "consulted_agents": result.get("consulted_agents", []),
             "synthesized": result.get("synthesized", False),

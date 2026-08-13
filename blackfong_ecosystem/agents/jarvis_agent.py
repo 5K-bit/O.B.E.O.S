@@ -7,6 +7,7 @@ Enables JARVIS to participate in the Blackfong multi-agent system.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -15,14 +16,17 @@ from blackfong_ecosystem.agent import Agent, AgentType, ReasoningStep, Reasoning
 from blackfong_ecosystem.chat_backends import (
     BaseChatBackend,
     ChatBackendError,
+    ChatBackendResult,
     HeuristicChatBackend,
     build_agent_chat_backend,
 )
 from blackfong_ecosystem.config import chat_settings
+from blackfong_ecosystem.conversation_memory import conversation_memory_service
 from blackfong_ecosystem.model_routing import (
     backend_options_for_context,
     build_routed_chat_backend,
     detect_intent,
+    model_chain_for_agent,
     normalize_response_mode,
 )
 from blackfong_ecosystem.event_client import EventClient
@@ -182,6 +186,16 @@ class JARVISAgent(Agent):
             metadata.setdefault("prompt_message_count", 0)
             metadata.setdefault("prompt_chars", 0)
             metadata.setdefault("approx_prompt_tokens", 0)
+            metadata.setdefault("streamed", False)
+            metadata.setdefault("health_forced_fallback", False)
+            metadata.setdefault("backend_health_state_at_request", (context.get("backend_health") or {}).get("state"))
+            metadata.setdefault("recovery_probe_attempted", False)
+            metadata.setdefault("recovery_probe_succeeded", False)
+            metadata.setdefault("degraded_reason", None)
+            metadata.setdefault("recovery_reason", None)
+            metadata.setdefault("timeout_window_seconds", None)
+            metadata.setdefault("live_lane_attempted", False)
+            metadata.setdefault("fallback_mode", "none")
             return grounded["answer"], {
                 "provider": grounded["provider"],
                 "model": grounded["model"],
@@ -197,9 +211,30 @@ class JARVISAgent(Agent):
         requested_mode = normalize_response_mode(context.get("analysis_mode") or context.get("response_mode"))
         chat_backend = self.chat_backend if self._chat_backend_explicit else build_routed_chat_backend("jarvis", generation_mode)
         backend_health = self._resolve_backend_health(context)
+        recovery_probe_attempted = self._allow_conversational_recovery_probe(
+            backend_health,
+            user_input=user_input,
+            context=context,
+            prompt_metrics=prompt_metrics,
+            generation_mode=generation_mode,
+        ) or (
+            str(backend_health.get("state") or "").strip().lower() == "degraded"
+            and bool(backend_health.get("allow_recovery_probe"))
+        )
         backend_options = self._apply_backend_health_overrides(backend_options, backend_health)
-        if self._should_force_fallback(backend_health):
-            backend_result = self.fallback_backend.generate(
+        backend_chain = self._backend_chain_preview(chat_backend, generation_mode, backend_options)
+        if self._should_force_fallback(
+            backend_health,
+            user_input=user_input,
+            context=context,
+            prompt_metrics=prompt_metrics,
+            generation_mode=generation_mode,
+        ):
+            backend_result = self._bounded_context_fallback_response(
+                user_input=user_input,
+                context=context,
+                backend_error=self._backend_health_reason(backend_health),
+            ) or self.fallback_backend.generate(
                 messages,
                 backend_error=self._backend_health_reason(backend_health),
                 fallback_reason=self._backend_health_reason(backend_health),
@@ -214,6 +249,21 @@ class JARVISAgent(Agent):
                     "backend_health": backend_health,
                     "preemptive_fallback": True,
                     "mode": backend_options.get("mode"),
+                    "response_path": metadata.get("response_path") or "preemptive_fallback",
+                    "health_forced_fallback": True,
+                    "fallback_trigger": "backend_health",
+                    "model_chain": backend_chain,
+                    "selected_model": backend_chain[0] if backend_chain else getattr(chat_backend, "model", None),
+                    "effective_timeout_s": backend_options.get("timeout"),
+                    "streamed": False,
+                    "backend_health_state_at_request": backend_health.get("state"),
+                    "recovery_probe_attempted": recovery_probe_attempted,
+                    "recovery_probe_succeeded": False,
+                    "degraded_reason": backend_health.get("degraded_reason"),
+                    "recovery_reason": backend_health.get("recovery_reason"),
+                    "timeout_window_seconds": backend_health.get("timeout_window_seconds"),
+                    "live_lane_attempted": False,
+                    "fallback_mode": "preemptive",
                 }
             )
             metadata["prompt_metrics"] = prompt_metrics
@@ -240,8 +290,24 @@ class JARVISAgent(Agent):
                 backend_result = chat_backend.generate(messages, **backend_options)
             backend_error = None
             metadata = dict(backend_result.metadata or {})
+            metadata.setdefault("response_path", "live_model")
+            metadata.setdefault("health_forced_fallback", False)
+            metadata.setdefault("fallback_trigger", None)
+            metadata.setdefault("streamed", bool(stream_callback is not None and metadata.get("streamed") is True))
+            metadata.setdefault("backend_health_state_at_request", backend_health.get("state"))
+            metadata.setdefault("recovery_probe_attempted", recovery_probe_attempted)
+            metadata.setdefault("recovery_probe_succeeded", recovery_probe_attempted)
+            metadata.setdefault("degraded_reason", backend_health.get("degraded_reason"))
+            metadata.setdefault("recovery_reason", "live_model_response" if recovery_probe_attempted else backend_health.get("recovery_reason"))
+            metadata.setdefault("timeout_window_seconds", backend_health.get("timeout_window_seconds"))
+            metadata.setdefault("live_lane_attempted", True)
+            metadata.setdefault("fallback_mode", "none")
         except ChatBackendError as exc:
-            backend_result = self.fallback_backend.generate(
+            backend_result = self._bounded_context_fallback_response(
+                user_input=user_input,
+                context=context,
+                backend_error=str(exc),
+            ) or self.fallback_backend.generate(
                 messages,
                 backend_error=str(exc),
                 fallback_reason=str(exc),
@@ -261,6 +327,28 @@ class JARVISAgent(Agent):
                     "attempt_log": getattr(exc, "metadata", {}).get("attempt_log", []),
                     "mode": backend_options.get("mode"),
                     "backend_health": backend_health,
+                    "response_path": metadata.get("response_path") or "fallback_after_backend_error",
+                    "health_forced_fallback": False,
+                    "fallback_trigger": (
+                        getattr(exc, "metadata", {}).get("timeout_reason")
+                        or getattr(exc, "metadata", {}).get("error_type")
+                        or "backend_error"
+                    ),
+                    "model_chain": getattr(exc, "metadata", {}).get("model_chain") or backend_chain,
+                    "selected_model": getattr(exc, "metadata", {}).get("selected_model") or getattr(exc, "metadata", {}).get("model"),
+                    "effective_timeout_s": getattr(exc, "metadata", {}).get("effective_timeout_s") or getattr(exc, "metadata", {}).get("timeout_s") or backend_options.get("timeout"),
+                    "streamed": bool(stream_callback is not None),
+                    "backend_health_state_at_request": backend_health.get("state"),
+                    "recovery_probe_attempted": (
+                        str(backend_health.get("state") or "").strip().lower() == "degraded"
+                        and bool(backend_health.get("allow_recovery_probe"))
+                    ),
+                    "recovery_probe_succeeded": False,
+                    "degraded_reason": backend_health.get("degraded_reason"),
+                    "recovery_reason": backend_health.get("recovery_reason"),
+                    "timeout_window_seconds": backend_health.get("timeout_window_seconds"),
+                    "live_lane_attempted": True,
+                    "fallback_mode": "reactive",
                 }
             )
 
@@ -272,6 +360,17 @@ class JARVISAgent(Agent):
         metadata["generation_mode"] = generation_mode
         if backend_health:
             metadata.setdefault("backend_health", backend_health)
+        metadata.setdefault("model_chain", backend_chain)
+        metadata.setdefault("selected_model", getattr(backend_result, "model", None))
+        metadata.setdefault("effective_timeout_s", backend_options.get("timeout"))
+        metadata.setdefault("backend_health_state_at_request", backend_health.get("state"))
+        metadata.setdefault("recovery_probe_attempted", False)
+        metadata.setdefault("recovery_probe_succeeded", False)
+        metadata.setdefault("degraded_reason", backend_health.get("degraded_reason"))
+        metadata.setdefault("recovery_reason", backend_health.get("recovery_reason"))
+        metadata.setdefault("timeout_window_seconds", backend_health.get("timeout_window_seconds"))
+        metadata.setdefault("live_lane_attempted", False)
+        metadata.setdefault("fallback_mode", "none")
 
         return backend_result.text, {
             "provider": backend_result.provider,
@@ -286,7 +385,29 @@ class JARVISAgent(Agent):
         if requested_mode != "standard":
             return requested_mode
         transport = str(context.get("transport") or context.get("input_origin") or "").strip().lower()
-        if transport in {"telegram", "hud", "desktop", "legion"}:
+        if transport in {"telegram", "hud", "desktop", "legion", "tui", "operator_chat", "frame"}:
+            return requested_mode
+        memory_context = context.get("memory_context") or {}
+        grounded_conversation = memory_context.get("grounded_conversation_answer") or {}
+        if isinstance(grounded_conversation, dict) and str(grounded_conversation.get("answer") or "").strip():
+            return requested_mode
+        prompt_metrics = memory_context.get("prompt_metrics") or {}
+        if isinstance(prompt_metrics, dict):
+            prompt_tokens = int(prompt_metrics.get("prompt_context_tokens_estimate") or 0)
+            if (
+                prompt_tokens >= 700
+                or int(prompt_metrics.get("semantic_hits") or 0) > 0
+                or int(prompt_metrics.get("global_memories") or 0) > 0
+                or int(prompt_metrics.get("recent_events") or 0) > 0
+                or int(prompt_metrics.get("session_summaries") or 0) > 0
+                or bool(prompt_metrics.get("operator_profile"))
+                or bool(prompt_metrics.get("grounded_answer"))
+                or bool(prompt_metrics.get("grounded_memory"))
+                or bool(prompt_metrics.get("grounded_conversation"))
+                or bool(prompt_metrics.get("followup_continuity_guidance"))
+            ):
+                return requested_mode
+        if str(memory_context.get("prompt_mode") or "").strip().lower() in {"standard", "deep"}:
             return requested_mode
         detected = context.get("detected_intent")
         if isinstance(detected, dict):
@@ -331,8 +452,8 @@ class JARVISAgent(Agent):
             return adjusted
         degraded_timeout_caps = {
             "fast": 8.0,
-            "standard": 18.0,
-            "deep": 45.0,
+            "standard": 30.0,
+            "deep": 60.0,
         }
         try:
             current_timeout = float(adjusted.get("timeout") or 0.0)
@@ -341,6 +462,7 @@ class JARVISAgent(Agent):
         adjusted["timeout"] = min(current_timeout, degraded_timeout_caps.get(mode, 18.0)) if current_timeout > 0 else degraded_timeout_caps.get(mode, 18.0)
         adjusted["max_attempts"] = 1
         adjusted["retry_read_timeout"] = False
+        adjusted["disable_chain_fallbacks"] = True
         return adjusted
 
     @staticmethod
@@ -353,13 +475,75 @@ class JARVISAgent(Agent):
             return error or "The local model backend is currently degraded."
         return error or "The local model backend reported a degraded state."
 
-    def _should_force_fallback(self, backend_health: Dict[str, Any]) -> bool:
+    def _should_force_fallback(
+        self,
+        backend_health: Dict[str, Any],
+        *,
+        user_input: str = "",
+        context: Optional[Dict[str, Any]] = None,
+        prompt_metrics: Optional[Dict[str, Any]] = None,
+        generation_mode: Optional[str] = None,
+    ) -> bool:
         state = str(backend_health.get("state") or "").strip().lower()
         if state == "unavailable":
             return True
         if state != "degraded":
             return False
-        return int(backend_health.get("recent_timeout_count") or 0) >= 2
+        if self._allow_conversational_recovery_probe(
+            backend_health,
+            user_input=user_input,
+            context=context,
+            prompt_metrics=prompt_metrics,
+            generation_mode=generation_mode,
+        ):
+            return False
+        if backend_health.get("repeated_recent_failures"):
+            return True
+        return not bool(backend_health.get("allow_recovery_probe"))
+
+    @staticmethod
+    def _allow_conversational_recovery_probe(
+        backend_health: Dict[str, Any],
+        *,
+        user_input: str = "",
+        context: Optional[Dict[str, Any]] = None,
+        prompt_metrics: Optional[Dict[str, Any]] = None,
+        generation_mode: Optional[str] = None,
+    ) -> bool:
+        if str(backend_health.get("state") or "").strip().lower() != "degraded":
+            return False
+        if bool(backend_health.get("allow_recovery_probe")):
+            return True
+        if not bool(backend_health.get("repeated_recent_failures")):
+            return False
+        metrics = dict(prompt_metrics or {})
+        memory_context = dict(((context or {}).get("memory_context") or {}))
+        if str(generation_mode or "").strip().lower() not in {"standard", "fast"}:
+            return False
+        grounded_conversation = bool(metrics.get("grounded_conversation")) or bool(
+            str((memory_context.get("grounded_conversation_answer") or {}).get("answer") or "").strip()
+        )
+        if not grounded_conversation:
+            return False
+        followup_continuity = bool(metrics.get("followup_continuity_guidance"))
+        if not followup_continuity:
+            lowered = str(user_input or "").strip().lower()
+            continuity_flags = conversation_memory_service._conversational_followup_flags(lowered)
+            followup_continuity = bool(
+                continuity_flags.get("ultra_short_followup")
+                or continuity_flags.get("short_scope_followup")
+                or continuity_flags.get("environment_followup")
+                or continuity_flags.get("referential_followup")
+            )
+        if not followup_continuity:
+            return False
+        approx_prompt_tokens = int(metrics.get("approx_prompt_tokens") or 0)
+        if approx_prompt_tokens and approx_prompt_tokens > 1800:
+            return False
+        semantic_hits = int(metrics.get("semantic_hits") or 0)
+        if semantic_hits > 6:
+            return False
+        return True
 
     def _grounded_memory_response(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         memory_context = context.get("memory_context") or {}
@@ -380,6 +564,10 @@ class JARVISAgent(Agent):
                 "timing_ms": grounded.get("timing_ms", {}),
                 "evidence_counts": grounded.get("evidence_counts", {}),
                 "provenance": list(grounded.get("provenance") or []),
+                "response_path": "grounded_memory",
+                "model_chain": ["deterministic-memory-grounded"],
+                "selected_model": "deterministic-memory-grounded",
+                "effective_timeout_s": 0.0,
             },
         }
 
@@ -403,8 +591,214 @@ class JARVISAgent(Agent):
                 "retrieved_count": grounded.get("retrieved_count"),
                 "timing_ms": grounded.get("timing_ms", {}),
                 "provenance": list(grounded.get("provenance") or []),
+                "response_path": "grounded_knowledge",
+                "model_chain": ["deterministic-collection-grounded"],
+                "selected_model": "deterministic-collection-grounded",
+                "effective_timeout_s": 0.0,
             },
         }
+
+    def _bounded_context_fallback_response(
+        self,
+        *,
+        user_input: str,
+        context: Dict[str, Any],
+        backend_error: str,
+    ) -> Optional[ChatBackendResult]:
+        memory_context = context.get("memory_context") or {}
+        operator_profile = dict(memory_context.get("operator_profile") or {})
+        active_work = [
+            str(item).strip()
+            for item in list(operator_profile.get("active_work") or [])
+            if str(item).strip()
+        ]
+        grounded_knowledge = memory_context.get("grounded_knowledge_answer") or {}
+        grounded_conversation = memory_context.get("grounded_conversation_answer") or {}
+        knowledge_context = str(memory_context.get("knowledge_context") or "").strip()
+        citations = list(memory_context.get("citations") or [])
+        lowered = str(user_input or "").strip().lower()
+
+        answer = ""
+        if active_work and any(
+            phrase in lowered
+            for phrase in (
+                "improve obeos",
+                "improve your system",
+                "improve the ecosystem",
+                "improve response time",
+                "response time",
+                "faster replies",
+                "faster responses",
+                "latency",
+                "what should we work on",
+                "what should we improve",
+            )
+        ):
+            answer = self._compose_active_work_fallback(active_work)
+        elif active_work and any(
+            phrase in lowered
+            for phrase in (
+                "everything going on",
+                "what is happening with us right now",
+                "what should i know about the project",
+                "overall situation right now",
+                "what should i be thinking about right now",
+                "what should i be thinking about",
+            )
+        ):
+            answer = self._compose_state_summary_fallback(active_work, operator_profile)
+        elif active_work and any(
+            phrase in lowered
+            for phrase in (
+                "our work",
+                "all this",
+                "everything we are doing",
+                "everything we're doing",
+                "what do you think this is becoming",
+                "what this is becoming",
+                "about us and this project",
+                "where do you think all of this is headed",
+                "where is this headed",
+                "sum up everything",
+            )
+        ):
+            answer = self._compose_project_direction_fallback(active_work, operator_profile)
+        elif grounded_knowledge and str(grounded_knowledge.get("answer") or "").strip():
+            answer = str(grounded_knowledge.get("answer") or "").strip()
+        elif grounded_conversation and str(grounded_conversation.get("answer") or "").strip():
+            answer = str(grounded_conversation.get("answer") or "").strip()
+        elif knowledge_context:
+            answer = self._compose_knowledge_context_fallback(
+                user_input=user_input,
+                knowledge_context=knowledge_context,
+                citations=citations,
+            )
+        elif active_work and any(
+            phrase in lowered
+            for phrase in (
+                "recent updates",
+                "what changed",
+                "where did we leave off",
+                "what are we working on",
+                "what have we been working on",
+            )
+        ):
+            answer = (
+                "From the local O.B.E.O.S. context I still have in focus, "
+                f"we have been working on {self._join_items(active_work[:3])}."
+            )
+
+        if not answer:
+            return None
+
+        if "live model lane" not in answer.lower():
+            answer = (
+                f"{answer.rstrip()} The live model lane missed this turn, "
+                "so I am answering from bounded local O.B.E.O.S. memory and knowledge instead."
+            )
+        return ChatBackendResult(
+            text=answer,
+            provider="heuristic",
+            model="bounded-context-grounded",
+            metadata={
+                "fallback_reason": backend_error,
+                "bounded_context_fallback": True,
+                "response_path": "bounded_context_fallback",
+            },
+        )
+
+    def _compose_active_work_fallback(self, active_work: List[str]) -> str:
+        focused = active_work[:3]
+        if not focused:
+            return ""
+        return (
+            "Based on the strongest current O.B.E.O.S. work tracks I still have in memory, "
+            f"the highest-value improvements right now are {self._join_items(focused)}."
+        )
+
+    def _compose_project_direction_fallback(
+        self,
+        active_work: List[str],
+        operator_profile: Dict[str, Any],
+    ) -> str:
+        focused = active_work[:3]
+        preferred_name = str(operator_profile.get("preferred_name") or "").strip()
+        opening = "From the strongest grounded O.B.E.O.S. context I still have"
+        if preferred_name:
+            opening = f"{preferred_name}, from the strongest grounded O.B.E.O.S. context I still have"
+        return (
+            f"{opening}, this work is becoming a more coherent living system instead of a fragile chat shell. "
+            f"The clearest current threads are {self._join_items(focused)}, and they all point toward something more grounded, observable, and dependable."
+        )
+
+    def _compose_state_summary_fallback(
+        self,
+        active_work: List[str],
+        operator_profile: Dict[str, Any],
+    ) -> str:
+        focused = active_work[:3]
+        preferred_name = str(operator_profile.get("preferred_name") or "").strip()
+        opening = "From the strongest grounded O.B.E.O.S. state I still have"
+        if preferred_name:
+            opening = f"{preferred_name}, from the strongest grounded O.B.E.O.S. state I still have"
+        return (
+            f"{opening}, the overall situation right now centers on {self._join_items(focused)}. "
+            "Those are the tracks most likely to improve whether O.B.E.O.S. feels grounded, coherent, and dependable across its surfaces."
+        )
+
+    def _compose_knowledge_context_fallback(
+        self,
+        *,
+        user_input: str,
+        knowledge_context: str,
+        citations: List[Dict[str, Any]],
+    ) -> str:
+        cleaned = re.sub(r"\s+", " ", knowledge_context).strip()
+        if not cleaned:
+            return ""
+        cleaned = re.sub(r"^Bounded retrieval context:\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.replace("[truncated for standard chat latency]", "").strip()
+        cleaned = cleaned[:320].rstrip(" ,.;:-")
+        citation = citations[0] if citations else {}
+        collection = str(citation.get("collection") or "").strip()
+        title = str(citation.get("title") or citation.get("source_file") or "").strip()
+        lowered = str(user_input or "").strip().lower()
+        if any(token in lowered for token in ("how", "what", "explain", "resources", "architecture", "routing")):
+            prefix = "From bounded local O.B.E.O.S. knowledge"
+            if collection:
+                prefix += f" in {collection}"
+            if title:
+                prefix += f" ({title})"
+            return f"{prefix}, {cleaned}."
+        return cleaned + "."
+
+    @staticmethod
+    def _join_items(items: List[str]) -> str:
+        cleaned = [str(item).strip() for item in items if str(item).strip()]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} and {cleaned[1]}"
+        return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
+
+    @staticmethod
+    def _backend_chain_preview(chat_backend: BaseChatBackend, response_mode: str, options: Dict[str, Any]) -> List[str]:
+        override = options.get("model")
+        if override:
+            return [str(override)]
+        primary = str(getattr(chat_backend, "model", "") or "").strip()
+        fallback_models = [
+            str(item).strip()
+            for item in getattr(chat_backend, "fallback_models", [])
+            if str(item).strip()
+        ]
+        if options.get("disable_chain_fallbacks"):
+            return [primary] if primary else []
+        if primary:
+            return [primary, *[item for item in fallback_models if item != primary]]
+        return model_chain_for_agent("jarvis", response_mode)
 
     def _backend_options(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Choose bounded backend behavior for fast/standard/deep response modes."""
@@ -415,19 +809,25 @@ class JARVISAgent(Agent):
         memory_context = context.get("memory_context", {})
         session_messages = list(memory_context.get("session_messages", []))
         prompt_context = memory_context.get("prompt_context", "")
+        grounded_conversation = memory_context.get("grounded_conversation_answer") or {}
         prompt_mode = str(memory_context.get("prompt_mode") or memory_context.get("memory_profile", {}).get("prompt_mode") or "standard")
         agent_override = context.get("agent_override")
+        transcript_limit = 0 if prompt_mode.startswith("quick") else min(
+            len(session_messages),
+            6 if prompt_mode == "standard" else chat_settings.transcript_window,
+        )
+        transcript_messages = self._sanitize_session_messages(
+            session_messages[-transcript_limit:] if transcript_limit else [],
+            current_input=user_input,
+        )
 
         system_prompt = (
-            "You are D.A.I.S.E inside O.B.E.O.S, a local offline-first ecosystem assistant. "
-            "Your visible operator-facing name is D.A.I.S.E. "
-            "Jarvis is an internal compatibility alias only and should not be volunteered unless the operator explicitly asks about naming compatibility. "
-            "If the operator asks what D.A.I.S.E stands for, the expansion is Direct Artificial Intelligence System Environment. "
-            "Blackfong adjudicates truth and governance; you communicate truthful, grounded answers to the operator. "
-            "Use the supplied session transcript and global memory when it is relevant. "
-            "When bounded ecosystem context includes knowledge citations or memory evidence, treat that supplied context as authoritative for this turn instead of substituting unrelated prior model knowledge. "
-            "Answer naturally, prefer concise responses by default, and be explicit when you are unsure. "
-            "If the user asks about system abilities or commands, mention the HUD, TUI, slash commands, admitted agents, or routing when helpful."
+            "You are D.A.I.S.E. inside O.B.E.O.S. "
+            "Answer as D.A.I.S.E., be truthful and concise, and use supplied memory context when it is relevant. "
+            "Do not volunteer the Jarvis compatibility alias unless the operator asks about naming. "
+            "If asked what D.A.I.S.E. stands for, answer Direct Artificial Intelligence System Environment. "
+            "Treat bounded memory evidence and citations in this prompt as authoritative for the current turn. "
+            "For broad reflective or project-level prompts, respond naturally in first-person as D.A.I.S.E. and do not talk like an internal trace, retrieval summary, or prompt scaffold."
         )
         if agent_override:
             visible_name = "D.A.I.S.E" if str(agent_override).strip().lower() in {"daise", "jarvis"} else str(agent_override)
@@ -441,9 +841,69 @@ class JARVISAgent(Agent):
                     "content": f"Conversation memory and ecosystem context:\n{prompt_context}",
                 }
             )
+        if isinstance(grounded_conversation, dict):
+            guidance_text = str(grounded_conversation.get("answer") or "").strip()
+            guidance_kind = str(grounded_conversation.get("kind") or "").strip()
+            if guidance_text:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "Broad conversational grounding for this turn:\n"
+                            f"{guidance_text}\n"
+                            "Use this as a memory-backed backbone for the reply, but answer naturally instead of copying it verbatim."
+                            " Do not mention grounding, bounded context, retrieval, or prompt scaffolding unless the operator explicitly asks."
+                            + (f" Frame={guidance_kind}." if guidance_kind else "")
+                        ),
+                    }
+                )
+            if self._should_add_followup_continuity_guidance(
+                user_input=user_input,
+                prompt_context=prompt_context,
+                guidance_kind=guidance_kind,
+            ):
+                continuity_match = re.search(
+                    r"Conversation continuity:\n(?P<body>.+?)(?:\n\n|\Z)",
+                    prompt_context,
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+                continuity_body = " ".join(str((continuity_match.group("body") if continuity_match else "") or "").split()).strip()
+                if continuity_body:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Follow-up continuity for this turn:\n"
+                                f"{continuity_body}\n"
+                                "This user message is a continuation of the current thread. Carry the prior meaning forward,"
+                                " answer the follow-up directly, and avoid restarting from a generic high-level summary."
+                                " Prefer the concrete topics explicitly named in the continuity and grounding context."
+                                " Do not introduce adjacent older topics unless the user asks for them or they are necessary to answer faithfully."
+                                " For terse follow-ups like 'same there?' or 'what about telegram?', start by resolving what 'same' or 'there' refers to in the current thread."
+                                " Do not turn the reply into a generic motivational check-in, status poll, or broad recap unless the user explicitly asks for one."
+                            ),
+                        }
+                    )
+                specialist_match = re.search(
+                    r"Specialist continuity:\n(?P<body>.+?)(?:\n\n|\Z)",
+                    prompt_context,
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+                specialist_body = " ".join(str((specialist_match.group("body") if specialist_match else "") or "").split()).strip()
+                if specialist_body:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Active specialist lane for this turn:\n"
+                                f"{specialist_body}\n"
+                                "Keep continuity with that working lane when answering this follow-up unless the user clearly changes direction."
+                            ),
+                        }
+                    )
 
         if not str(prompt_mode).startswith("quick"):
-            for message in session_messages[-chat_settings.transcript_window :]:
+            for message in transcript_messages:
                 role = message.get("role", "user")
                 content = str(message.get("text", "")).strip()
                 if not content:
@@ -465,12 +925,85 @@ class JARVISAgent(Agent):
             "approx_prompt_tokens": max(1, prompt_chars // 4) if prompt_chars else 0,
             "system_prompt_chars": len(system_prompt),
             "memory_prompt_chars": len(prompt_context),
-            "raw_session_messages_included": 0 if prompt_mode.startswith("quick") else min(
-                len(session_messages),
-                chat_settings.transcript_window,
+            "grounded_conversation_guidance": bool(str((grounded_conversation or {}).get("answer") or "").strip()),
+            "followup_continuity_guidance": bool(
+                self._should_add_followup_continuity_guidance(
+                    user_input=user_input,
+                    prompt_context=prompt_context,
+                    guidance_kind=str((grounded_conversation or {}).get("kind") or "").strip(),
+                )
+                and "Conversation continuity:" in str(prompt_context or "")
             ),
+            "specialist_continuity_guidance": bool(
+                self._should_add_followup_continuity_guidance(
+                    user_input=user_input,
+                    prompt_context=prompt_context,
+                    guidance_kind=str((grounded_conversation or {}).get("kind") or "").strip(),
+                )
+                and "Specialist continuity:" in str(prompt_context or "")
+            ),
+            "raw_session_messages_included": len(transcript_messages),
         }
         return messages, prompt_metrics
+
+    def _should_add_followup_continuity_guidance(
+        self,
+        *,
+        user_input: str,
+        prompt_context: str,
+        guidance_kind: str,
+    ) -> bool:
+        if not prompt_context:
+            return False
+        if str(guidance_kind or "").strip().lower() == "followup":
+            return True
+        continuity_flags = conversation_memory_service._conversational_followup_flags(str(user_input or ""))
+        compact_tokens = set(continuity_flags.get("tokens") or set())
+        if not compact_tokens:
+            return False
+        return bool(
+            (
+                continuity_flags.get("short_scope_followup")
+                or continuity_flags.get("environment_followup")
+                or continuity_flags.get("ultra_short_followup")
+            )
+            and (
+                "Conversation continuity:" in prompt_context
+                or "Specialist continuity:" in prompt_context
+            )
+        )
+
+    def _sanitize_session_messages(self, messages: List[Dict[str, Any]], *, current_input: str) -> List[Dict[str, Any]]:
+        sanitized: List[Dict[str, Any]] = []
+        lowered_current = str(current_input or "").strip().lower()
+        skip_user_texts: set[str] = set()
+        for message in messages:
+            role = str(message.get("role") or "user").strip().lower()
+            text = str(message.get("text") or "").strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if role == "assistant":
+                harmful_patterns = (
+                    "error processing request:",
+                    "primary ollama response did not complete",
+                    "using the local fallback path",
+                    "local o.b.e.o.s. memory and stored knowledge while the live model lane recovers",
+                    "digital assistant for intelligent systems and expertise",
+                    "legacy alias",
+                    "compatibility reasons",
+                )
+                if any(pattern in lowered for pattern in harmful_patterns):
+                    if sanitized and str(sanitized[-1].get("role") or "").strip().lower() == "user":
+                        previous_user = str(sanitized[-1].get("text") or "").strip().lower()
+                        if previous_user != lowered_current:
+                            skip_user_texts.add(previous_user)
+                            sanitized.pop()
+                    continue
+            if role == "user" and lowered in skip_user_texts and lowered != lowered_current:
+                continue
+            sanitized.append(message)
+        return sanitized
     
     def invoke_tool_explicit(
         self,

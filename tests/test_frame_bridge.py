@@ -197,4 +197,93 @@ def test_operator_chat_accepts_frame_origin_modality_and_context(tmp_path: Path)
     assert text == "frame voice command"
     assert getattr(modality, "value", modality) == "voice"
     assert context["input_origin"] == "frame"
+    assert context["transport"] == "frame"
     assert context["device_id"] == "frame"
+    assert context["analysis_mode"] == "standard"
+    assert result["analysis_mode"] == "standard"
+
+
+def test_operator_chat_keeps_grounded_followup_continuity_for_shared_session(tmp_path: Path):
+    event_store = EventStore(tmp_path / "events.db")
+    event_store.init_db()
+    memory = ConversationMemoryService(event_store=event_store, vector_store=NullVectorStore())
+
+    class RecallOrchestrator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Dict[str, Any]]] = []
+
+        def process_input(self, text, modality, context=None):
+            context = dict(context or {})
+            self.calls.append((text, context))
+            session_id = str(context.get("session_id") or memory.create_session_id())
+            correlation_id = str(context.get("correlation_id") or memory.create_correlation_id())
+            request_id = str(context.get("request_id") or memory.create_correlation_id()[:8])
+            analysis_mode = str(context.get("analysis_mode") or "standard")
+
+            query_event = memory.persist_user_turn(
+                session_id=session_id,
+                correlation_id=correlation_id,
+                text=text,
+                modality="text",
+                routed_agent="daise",
+                analysis_mode=analysis_mode,
+                request_id=request_id,
+            )
+            memory_context = memory.build_context(
+                session_id=session_id,
+                query=text,
+                agent_name="daise",
+                analysis_mode=analysis_mode,
+                request_id=request_id,
+                transport=str(context.get("transport") or "operator_chat"),
+            )
+            grounded = (
+                memory_context.get("grounded_memory_answer")
+                or memory_context.get("grounded_conversation_answer")
+                or {}
+            )
+            response_text = str(grounded.get("answer") or "").strip() or f"stored:{text}"
+            memory.persist_agent_response(
+                session_id=session_id,
+                correlation_id=correlation_id,
+                agent_name="daise",
+                response_text=response_text,
+                confidence=0.9,
+                modality="text",
+                parent_event_id=query_event.id,
+                provider="conversation_memory" if grounded else "heuristic",
+                model="deterministic-memory-grounded" if grounded else "operator-chat-test-model",
+                success=True,
+                request_id=request_id,
+            )
+            return {
+                "response": response_text,
+                "confidence": 0.9,
+                "agent": "daise",
+                "selected_agent": "daise",
+                "provider": "conversation_memory" if grounded else "heuristic",
+                "model": "deterministic-memory-grounded" if grounded else "operator-chat-test-model",
+                "analysis_mode": analysis_mode,
+                "request_id": request_id,
+                "session_id": session_id,
+            }
+
+    orchestrator = RecallOrchestrator()
+    service = OperatorChatService(memory_service=memory, orchestrator=orchestrator)
+
+    first = service.send_message(
+        message="We have been working on response latency, Telegram grounding, and HUD improvements.",
+        session_id="shared-followup-session",
+        context={"input_origin": "hud", "transport": "hud"},
+    )
+    second = service.send_message(
+        message="and telegram?",
+        session_id="shared-followup-session",
+        context={"input_origin": "hud", "transport": "hud"},
+    )
+
+    assert first["status"] == "complete"
+    assert second["status"] == "complete"
+    assert second["analysis_mode"] == "standard"
+    assert "response latency" in second["result"]["response"] or "Telegram grounding" in second["result"]["response"]
+    assert orchestrator.calls[1][1]["transport"] == "hud"

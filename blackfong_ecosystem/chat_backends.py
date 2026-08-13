@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Generator, Optional, Sequence
 import httpx
 
 from .config import chat_settings
+from .conversation_memory import conversation_memory_service
 from .ollama_models import filter_model_chain
 
 
@@ -514,6 +515,239 @@ class HeuristicChatBackend(BaseChatBackend):
     def _grounded_context_fallback(self, lowered: str, context_text: str) -> str:
         if not context_text:
             return ""
+        conversational_match = re.search(
+            r"Broad conversational grounding for this turn:\n(?P<body>.+?)(?:\nUse this as a memory-backed backbone|\Z)",
+            context_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if conversational_match:
+            excerpt = " ".join(str(conversational_match.group("body") or "").split()).strip(" ,.;:-")
+            if excerpt:
+                return excerpt.rstrip(".") + "."
+        continuity_match = re.search(
+            r"Conversation continuity:\n(?P<body>.+?)(?:\n\n|\Z)",
+            context_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        specialist_match = re.search(
+            r"Specialist continuity:\n(?P<body>.+?)(?:\n\n|\Z)",
+            context_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        specialist_body = str(specialist_match.group("body") or "") if specialist_match else ""
+        specialist_name_match = re.search(
+            r"Last selected specialist:\s*(?P<agent>.+?)(?:\.|\n|$)",
+            specialist_body,
+            flags=re.IGNORECASE,
+        )
+        specialist_name = " ".join(str((specialist_name_match.group("agent") if specialist_name_match else "") or "").split()).strip(" ,.;:-")
+        task_focus_match = re.search(
+            r"Last task focus:\s*(?P<focus>.+?)(?:\.|\n|$)",
+            specialist_body,
+            flags=re.IGNORECASE,
+        )
+        task_focus = " ".join(str((task_focus_match.group("focus") if task_focus_match else "") or "").split()).strip(" ,.;:-")
+        if continuity_match:
+            continuity_body = str(continuity_match.group("body") or "")
+            thread_match = re.search(r"Ongoing thread:\s*(?P<thread>.+?)(?:\.|\n|$)", continuity_body, flags=re.IGNORECASE)
+            thread = " ".join(str((thread_match.group("thread") if thread_match else "") or "").split()).strip(" ,.;:-")
+            last_context_match = re.search(
+                r"Last stable assistant context:\s*(?P<context>.+?)(?:\.|\n|$)",
+                continuity_body,
+                flags=re.IGNORECASE,
+            )
+            last_context = " ".join(str((last_context_match.group("context") if last_context_match else "") or "").split()).strip(" ,.;:-")
+            if last_context.lower().startswith("more specifically, i mean "):
+                last_context = last_context[len("more specifically, i mean ") :].strip(" ,.;:-")
+            continuity_flags = conversation_memory_service._conversational_followup_flags(lowered)
+            if thread and any(
+                token in lowered
+                for token in (
+                    "keep talking",
+                    "talk more",
+                    "for a minute",
+                    "still with me",
+                    "continue",
+                    "keep going",
+                    "about the system",
+                    "about obeos",
+                    "about the project",
+                    "what's going on",
+                )
+            ):
+                return (
+                    f"We are still in the middle of {thread}. "
+                    "That is the thread I would keep carrying forward as we continue."
+                )
+            if any(
+                token in lowered
+                for token in (
+                    "tell me more",
+                    "say more",
+                    "go on",
+                    "keep going",
+                    "what do you mean",
+                    "what makes you say that",
+                    "how so",
+                    "why is that",
+                    "why though",
+                    "expand on that",
+                    "elaborate",
+                    "continue that",
+                    "what else",
+                    "and then",
+                    "stay with that thought",
+                    "stay with that",
+                    "stay with this thought",
+                    "stay with this",
+                    "same for",
+                    "same with",
+                    "same here",
+                    "for the python one",
+                    "for the code one",
+                    "for that one",
+                    "on the hud too",
+                    "on telegram",
+                    "does that work there too",
+                    "what about that case",
+                    "same thing there",
+                    "would that still be true there",
+                    "does that line up with the hud",
+                    "over there too",
+                    "same on that side",
+                    "locally too",
+                    "same in browser",
+                    "same in the cloud",
+                    "on desktop too",
+                    "same on this machine",
+                    "what about in the browser hud",
+                    "does that also work locally",
+                    "same thing in telegram",
+                    "does it still work over there",
+                    "what about in that path",
+                    "does that also fit there",
+                    "is that still how it works there",
+                    "same for that route",
+                    "what about that flow",
+                    "does that still hold here",
+                    "does this still hold here",
+                    "does that carry over",
+                    "does this carry over",
+                    "so that still applies",
+                    "so this still applies",
+                    "does that apply here too",
+                    "does this apply here too",
+                    "keep talking about that",
+                    "keep talking about this",
+                    "that feels important",
+                    "this feels important",
+                    "that seems important",
+                    "this seems important",
+                    "is that what worries you",
+                    "is this what worries you",
+                    "does that still worry you",
+                    "does this still worry you",
+                    "is that what you mean",
+                    "is this what you mean",
+                    "is that still the problem",
+                    "is this still the problem",
+                    "is that still the main thing",
+                    "is this still the main thing",
+                    "what about the other part",
+                    "what about that part",
+                    "what about this side of it",
+                    "what about that side of it",
+                    "what part matters most",
+                    "which part matters most",
+                    "what part is still fragile",
+                    "which part is still fragile",
+                )
+            ) or (
+                continuity_flags.get("ultra_short_followup")
+                and bool(last_context or thread)
+            ) or (
+                continuity_flags.get("referential_followup")
+            ) or (
+                continuity_flags.get("short_scope_followup")
+            ) or (
+                continuity_flags.get("environment_followup")
+            ):
+                if last_context:
+                    if any(token in lowered for token in ("why", "how so", "what makes you say")):
+                        return (
+                            f"Because {last_context[:1].lower() + last_context[1:] if last_context else last_context}. "
+                            + (f"That still connects back to {thread}." if thread else "That is the thread I am still carrying forward.")
+                        )
+                    if any(token in lowered for token in ("what else", "and then")):
+                        return (
+                            f"Another part of it is {last_context[:1].lower() + last_context[1:] if last_context else last_context}. "
+                            + (
+                                f"That still connects back to {thread}."
+                                if thread
+                                else "That is the thread I am still carrying forward."
+                            )
+                            + (
+                                f" I am still treating this as part of the {specialist_name} lane."
+                                if specialist_name
+                                else ""
+                            )
+                        )
+                    return (
+                        f"More specifically, I mean {last_context}. "
+                        + (
+                            f"That still connects back to {thread}."
+                            if thread
+                            else "That is the thread I am still carrying forward."
+                        )
+                        + (
+                            f" I am still treating this as part of the {specialist_name} lane"
+                            f"{' focused on ' + task_focus if task_focus else ''}."
+                            if specialist_name
+                            else ""
+                        )
+                    )
+                if thread:
+                    return (
+                        f"More specifically, I am still talking about {thread}. "
+                        "That is the thread I would keep carrying forward from here."
+                        + (
+                            f" I am still treating it as part of the {specialist_name} lane"
+                            f"{' focused on ' + task_focus if task_focus else ''}."
+                            if specialist_name
+                            else ""
+                        )
+                    )
+        stance_match = re.search(
+            r"Conversational stance:\n(?P<body>.+?)(?:\n\n|\Z)",
+            context_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if stance_match:
+            stance_body = str(stance_match.group("body") or "")
+            focus_match = re.search(r"Current shared focus:\s*(?P<focus>.+?)(?:\.|\n|$)", stance_body, flags=re.IGNORECASE)
+            focus = " ".join(str((focus_match.group("focus") if focus_match else "") or "").split()).strip(" ,.;:-")
+            if focus and any(
+                token in lowered
+                for token in (
+                    "project",
+                    "system",
+                    "work",
+                    "us",
+                    "going",
+                    "heading",
+                    "direction",
+                    "risk",
+                    "fragile",
+                    "think",
+                    "feel",
+                    "progress",
+                    "overall",
+                )
+            ):
+                return (
+                    f"What stands out most to me right now is {focus}. "
+                    "That is the work most directly shaping whether O.B.E.O.S. feels grounded, coherent, and dependable."
+                )
         source_match = re.search(
             r"\[Source\s+\d+\][^\n]*\n(?P<body>.+?)(?:\n---\n|\Z)",
             context_text,

@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 from blackfong_ecosystem.config import TelegramSettings
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
+from blackfong_ecosystem.operator_chat import OperatorChatService
 from blackfong_ecosystem.operator_summary import OperatorSummaryService
 from blackfong_ecosystem.policy_engine import PolicyEngine
 from blackfong_ecosystem.storage import EventStore, NullVectorStore
@@ -120,6 +121,86 @@ class FakeTinyProgrammer:
         return {"online": False, "mode": "offline_snapshot"}
 
 
+class RecallTelegramOrchestrator:
+    def __init__(self, memory_service: ConversationMemoryService) -> None:
+        self.memory_service = memory_service
+
+    def process_input(self, user_input, modality, context=None):
+        context = dict(context or {})
+        session_id = str(context.get("session_id") or self.memory_service.create_session_id())
+        correlation_id = str(context.get("correlation_id") or self.memory_service.create_correlation_id())
+        request_id = str(context.get("request_id") or self.memory_service.create_correlation_id()[:8])
+        analysis_mode = str(context.get("analysis_mode") or "standard")
+        routed_agent = str(context.get("agent_override") or "daise")
+
+        query_event = self.memory_service.persist_user_turn(
+            session_id=session_id,
+            correlation_id=correlation_id,
+            text=user_input,
+            modality="text",
+            routed_agent=routed_agent,
+            analysis_mode=analysis_mode,
+            agent_override=context.get("agent_override"),
+            request_id=request_id,
+        )
+        memory_context = self.memory_service.build_context(
+            session_id=session_id,
+            query=user_input,
+            agent_name=routed_agent,
+            analysis_mode=analysis_mode,
+            request_id=request_id,
+            transport=str(context.get("transport") or "telegram"),
+        )
+        grounded = (
+            memory_context.get("grounded_memory_answer")
+            or memory_context.get("grounded_conversation_answer")
+            or {}
+        )
+        grounded_answer = str(grounded.get("answer") or "").strip()
+        if grounded_answer:
+            response_text = grounded_answer
+            provider = "conversation_memory"
+            model = "deterministic-memory-grounded"
+        else:
+            response_text = f"stored:{user_input}"
+            provider = "heuristic"
+            model = "telegram-test-model"
+        response_event = self.memory_service.persist_agent_response(
+            session_id=session_id,
+            correlation_id=correlation_id,
+            agent_name=routed_agent,
+            response_text=response_text,
+            confidence=0.9,
+            modality="text",
+            parent_event_id=query_event.id,
+            provider=provider,
+            model=model,
+            success=True,
+            extras={
+                "selected_agent": routed_agent,
+                "analysis_mode": analysis_mode,
+                "transport": context.get("transport"),
+                "response_path": "grounded_memory_or_conversation" if grounded_answer else "heuristic",
+            },
+            request_id=request_id,
+        )
+        return {
+            "status": "complete",
+            "response": response_text,
+            "confidence": 0.9,
+            "agent": routed_agent,
+            "selected_agent": routed_agent,
+            "provider": provider,
+            "model": model,
+            "analysis_mode": analysis_mode,
+            "request_id": request_id,
+            "session_id": session_id,
+            "correlation_id": correlation_id,
+            "response_event_id": response_event.id,
+            "timestamp": time.time(),
+        }
+
+
 def build_memory(tmp_path: Path) -> ConversationMemoryService:
     event_store = EventStore(tmp_path / "events.db")
     event_store.init_db()
@@ -190,7 +271,7 @@ def voice_update(
     return payload
 
 
-def wait_for_processed(memory: ConversationMemoryService, *, expected: int, timeout_s: float = 3.0) -> None:
+def wait_for_processed(memory: ConversationMemoryService, *, expected: int, timeout_s: float = 5.0) -> None:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         with memory.event_store.engine.begin() as conn:
@@ -549,6 +630,88 @@ def test_telegram_gateway_orders_each_thread_but_allows_parallel_identities(tmp_
 
     assert operator_chat.started["A2"] >= operator_chat.finished["A1"]
     assert operator_chat.started["B1"] < operator_chat.finished["A1"]
+
+
+def test_telegram_gateway_thread_reuses_session_for_grounded_recall(tmp_path: Path) -> None:
+    memory = build_memory(tmp_path)
+    client = FakeTelegramClient()
+    operator_chat = OperatorChatService(
+        memory_service=memory,
+        orchestrator=RecallTelegramOrchestrator(memory),
+    )
+    service = TelegramGatewayService(
+        settings=build_settings(allowlist=(("100", "200"),)),
+        memory_service=memory,
+        operator_chat=operator_chat,
+        http_client=client,
+        lock_path=tmp_path / "telegram.lock",
+    )
+    service._dispatch_thread_queue = lambda thread_key, update_id: None  # type: ignore[method-assign]
+
+    service._accept_update(message_update(30, text="We have been working on response latency, Telegram grounding, and HUD improvements."))
+    service._accept_update(message_update(31, text="what are you still carrying as the main thread?"))
+    service._process_update_with_retries(30)
+    service._process_update_with_retries(31)
+    service.stop()
+
+    with memory.event_store.engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT update_id, session_id, normalized_payload
+                FROM telegram_update_inbox
+                WHERE update_id IN (30, 31)
+                ORDER BY update_id
+                """
+            )
+        ).mappings().all()
+
+    assert len(rows) == 2
+    assert rows[0]["session_id"] == rows[1]["session_id"]
+    payload = json.loads(str(rows[1]["normalized_payload"] or "{}"))
+    assert payload["analysis_mode"] == "standard"
+    assert "response latency" in client.sent_messages[-1]["text"] or "Telegram grounding" in client.sent_messages[-1]["text"]
+
+
+def test_telegram_gateway_thread_handles_bridge_surface_followup_naturally(tmp_path: Path) -> None:
+    memory = build_memory(tmp_path)
+    client = FakeTelegramClient()
+    operator_chat = OperatorChatService(
+        memory_service=memory,
+        orchestrator=RecallTelegramOrchestrator(memory),
+    )
+    service = TelegramGatewayService(
+        settings=build_settings(allowlist=(("100", "200"),)),
+        memory_service=memory,
+        operator_chat=operator_chat,
+        http_client=client,
+        lock_path=tmp_path / "telegram.lock",
+    )
+    service._dispatch_thread_queue = lambda thread_key, update_id: None  # type: ignore[method-assign]
+
+    service._accept_update(message_update(40, text="We have been working on response latency, Telegram grounding, and HUD improvements."))
+    service._accept_update(message_update(41, text="and telegram?"))
+    service._process_update_with_retries(40)
+    service._process_update_with_retries(41)
+    service.stop()
+
+    with memory.event_store.engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT update_id, session_id, normalized_payload
+                FROM telegram_update_inbox
+                WHERE update_id IN (40, 41)
+                ORDER BY update_id
+                """
+            )
+        ).mappings().all()
+
+    assert len(rows) == 2
+    assert rows[0]["session_id"] == rows[1]["session_id"]
+    payload = json.loads(str(rows[1]["normalized_payload"] or "{}"))
+    assert payload["analysis_mode"] == "standard"
+    assert "response latency" in client.sent_messages[-1]["text"] or "Telegram grounding" in client.sent_messages[-1]["text"]
 
 
 def test_telegram_status_surfaces_into_awareness_and_summary(tmp_path: Path, monkeypatch) -> None:

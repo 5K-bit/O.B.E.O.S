@@ -154,7 +154,7 @@ class BlackcomputerTUIApp(App):
     system_state = reactive("ONLINE")
     voice_state = reactive("IDLE")
     active_agent = reactive("D.A.I.S.E")
-    analysis_mode = reactive("fast")
+    analysis_mode = reactive("standard")
     last_error = reactive("")
     heartbeat_state = reactive("·")
 

@@ -285,6 +285,37 @@ def test_operator_profile_filters_low_value_work_fragments(tmp_path):
     assert "Telegram grounding" in active_work
 
 
+def test_operator_profile_prefers_recent_user_work_over_older_stored_work(tmp_path):
+    service = build_memory_service(tmp_path)
+    session_id = service.create_session_id()
+    correlation_id = service.create_correlation_id()
+
+    service.persist_workflow_event(
+        source="daise",
+        event_type="knowledge_ingested",
+        payload={
+            "memory_kind": "active_work_item",
+            "text": "The operator has been working on OBEOS file visibility and older dashboard cleanup.",
+        },
+        session_id=session_id,
+        correlation_id=correlation_id,
+    )
+    service.persist_user_turn(
+        session_id=session_id,
+        correlation_id=correlation_id,
+        text='Call me "Five". I am working on response latency, TinyProgrammer startup, and Telegram grounding.',
+    )
+
+    profile = service.operator_profile_snapshot(session_id=session_id)
+    active_work = profile["active_work"]
+
+    assert "OBEOS file visibility" not in active_work[:3]
+    assert "older dashboard cleanup" not in [item.lower() for item in active_work[:3]]
+    assert "response latency" in active_work[:3]
+    assert "TinyProgrammer startup" in active_work
+    assert "Telegram grounding" in active_work
+
+
 def test_jarvis_fallback_records_backend_error():
     agent = JARVISAgent(
         chat_backend=FailingBackend(),
@@ -328,6 +359,114 @@ def test_heuristic_fallback_includes_diagnostic_reason():
     assert result["backend_metadata"]["fallback_reason"] == "Ollama is down"
     assert result["backend_metadata"]["provider"] == "ollama"
     assert result["backend_metadata"]["model"] == "ollama-mini"
+
+
+def test_timeout_fallback_synthesizes_from_active_work_context():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "what can i do to improve obeos?",
+        context={
+            "session_id": "test-session",
+            "memory_context": {
+                "operator_profile": {
+                    "active_work": ["response latency", "HUD layout improvements", "Telegram grounding"],
+                }
+            },
+        },
+    )
+
+    assert result["provider"] == "heuristic"
+    assert result["model"] == "bounded-context-grounded"
+    assert "response latency" in result["response"]
+    assert "HUD layout improvements" in result["response"] or "Telegram grounding" in result["response"]
+    assert result["backend_metadata"]["bounded_context_fallback"] is True
+    assert result["backend_metadata"]["response_path"] == "bounded_context_fallback"
+
+
+def test_timeout_fallback_synthesizes_from_knowledge_context():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "how does OBEOS architecture routing work?",
+        context={
+            "session_id": "test-session",
+            "memory_context": {
+                "knowledge_context": (
+                    "O.B.E.O.S routes memory through D.A.I.S.E., Thoughtglass, and the Memory Chamber graph. "
+                    "Routing contracts, queue handling, and semantic memory all belong to the same OBEOS cognition stack."
+                ),
+                "citations": [{"collection": "obeos", "title": "O.B.E.O.S. User Guide"}],
+            },
+        },
+    )
+
+    assert result["provider"] == "heuristic"
+    assert result["model"] == "bounded-context-grounded"
+    assert "D.A.I.S.E." in result["response"] or "Memory Chamber" in result["response"]
+    assert "bounded local O.B.E.O.S. knowledge" in result["response"]
+    assert result["backend_metadata"]["bounded_context_fallback"] is True
+
+
+def test_timeout_fallback_synthesizes_generic_project_direction_from_active_work():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "talk to me about our work",
+        context={
+            "session_id": "test-session",
+            "memory_context": {
+                "operator_profile": {
+                    "preferred_name": "Five",
+                    "active_work": ["response latency", "Telegram grounding", "TinyProgrammer startup"],
+                }
+            },
+        },
+    )
+
+    assert result["provider"] == "heuristic"
+    assert result["model"] == "bounded-context-grounded"
+    assert "coherent living system" in result["response"]
+    assert "response latency" in result["response"] or "Telegram grounding" in result["response"]
+    assert result["backend_metadata"]["bounded_context_fallback"] is True
+
+
+def test_timeout_fallback_synthesizes_state_summary_from_active_work():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "what should i know about the project at this point",
+        context={
+            "session_id": "test-session",
+            "memory_context": {
+                "operator_profile": {
+                    "preferred_name": "Five",
+                    "active_work": ["response latency", "OBEOS improvements", "TinyProgrammer updates"],
+                },
+                "knowledge_context": "This should not override the active work summary for broad project-state prompts.",
+                "citations": [{"collection": "spawn", "title": "Irrelevant fallback source"}],
+            },
+        },
+    )
+
+    assert result["provider"] == "heuristic"
+    assert result["model"] == "bounded-context-grounded"
+    assert "overall situation right now centers on" in result["response"]
+    assert "response latency" in result["response"] or "OBEOS improvements" in result["response"]
+    assert "Irrelevant fallback source" not in result["response"]
+    assert result["backend_metadata"]["bounded_context_fallback"] is True
 
 
 def test_streaming_timeout_falls_back_cleanly(monkeypatch):
@@ -438,6 +577,78 @@ def test_transport_backend_health_recovers_after_newer_global_ollama_success(tmp
     assert health["provider"] == "ollama"
     assert health["configured_model"] == "llama3.2:1b"
     assert health["recent_timeout_count"] == 1
+    assert health["recovery_reason"] == "global_ollama_success"
+
+
+def test_transport_backend_health_expires_stale_timeout_window(tmp_path, monkeypatch):
+    service = build_memory_service(tmp_path)
+    session_id = service.create_session_id()
+    correlation_id = service.create_correlation_id()
+
+    service.persist_workflow_event(
+        source="daise",
+        event_type="latency_observation",
+        payload={
+            "transport": "telegram",
+            "provider": "heuristic",
+            "model": "fallback-heuristic",
+            "execution_time_ms": 18000,
+            "backend_error": "Ollama request timed out after 18s for model llama3.2:3b",
+            "fallback_reason": "Ollama request timed out after 18s for model llama3.2:3b",
+            "fallback_used": True,
+            "backend_metadata": {
+                "provider": "ollama",
+                "model": "llama3.2:3b",
+                "selected_model": "llama3.2:3b",
+            },
+        },
+        confidence=0.2,
+        session_id=session_id,
+        correlation_id=correlation_id,
+        request_id="stale-timeout-1",
+    )
+
+    import time
+    future_time = time.time() + 400
+    monkeypatch.setattr("blackfong_ecosystem.conversation_memory.time.time", lambda: future_time)
+
+    health = service.recent_backend_health(transport="telegram")
+
+    assert health["state"] == "healthy"
+    assert health["recent_timeout_count"] == 0
+    assert health["allow_recovery_probe"] is False
+    assert health["recovery_reason"] == "stale_timeout_window_expired"
+
+
+def test_transport_backend_health_does_not_degrade_on_non_timeout_fallback_only(tmp_path):
+    service = build_memory_service(tmp_path)
+    session_id = service.create_session_id()
+    correlation_id = service.create_correlation_id()
+
+    service.persist_workflow_event(
+        source="daise",
+        event_type="latency_observation",
+        payload={
+            "transport": "telegram",
+            "provider": "heuristic",
+            "model": "fallback-heuristic",
+            "execution_time_ms": 3200,
+            "backend_error": "",
+            "fallback_reason": "bounded_context_fallback",
+            "fallback_used": True,
+        },
+        confidence=0.4,
+        session_id=session_id,
+        correlation_id=correlation_id,
+        request_id="non-timeout-fallback-1",
+    )
+
+    health = service.recent_backend_health(transport="telegram")
+
+    assert health["state"] != "degraded"
+    assert health["recent_timeout_count"] == 0
+    assert health["recent_fallback_count"] == 1
+    assert health["allow_recovery_probe"] is False
 
 
 def test_standard_casual_chat_uses_fast_generation_lane(monkeypatch):
@@ -539,6 +750,122 @@ def test_standard_telegram_chat_keeps_standard_generation_lane(monkeypatch):
     assert result["backend_metadata"]["requested_mode"] == "standard"
 
 
+def test_standard_memory_rich_chat_keeps_standard_generation_lane_without_transport(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(BaseChatBackend):
+        def generate(self, messages, **options):
+            captured["options_mode"] = str(options.get("mode") or "")
+            return ChatBackendResult(
+                text="Standard lane reply",
+                provider="ollama",
+                model="llama3.2:3b",
+                metadata={"used_mode": str(options.get("mode") or "")},
+            )
+
+    def fake_build(agent_name: str, response_mode: str):
+        captured["response_mode"] = response_mode
+        return RecordingBackend()
+
+    monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", fake_build)
+    monkeypatch.setattr(
+        jarvis_agent_module,
+        "backend_options_for_context",
+        lambda context, agent_name="jarvis": {"mode": context.get("analysis_mode")},
+    )
+
+    agent = JARVISAgent(fallback_backend=StubFallbackBackend())
+    result = agent.process(
+        "Are you aware of recent updates?",
+        context={
+            "session_id": "test-session",
+            "analysis_mode": "standard",
+            "detected_intent": {
+                "casual": True,
+                "coding": False,
+                "deep_reasoning": False,
+                "file_ops": False,
+                "diagnostics": False,
+                "tinyprogrammer": False,
+            },
+            "memory_context": {
+                "prompt_mode": "standard",
+                "prompt_metrics": {
+                    "prompt_context_tokens_estimate": 1178,
+                    "semantic_hits": 4,
+                    "global_memories": 4,
+                    "recent_events": 4,
+                    "session_summaries": 3,
+                    "operator_profile": True,
+                },
+            },
+        },
+    )
+
+    assert captured["response_mode"] == "standard"
+    assert captured["options_mode"] == "standard"
+    assert result["provider"] == "ollama"
+    assert result["backend_metadata"]["generation_mode"] == "standard"
+    assert result["backend_metadata"]["requested_mode"] == "standard"
+
+
+def test_standard_grounded_conversation_chat_keeps_standard_generation_lane_without_transport(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class RecordingBackend(BaseChatBackend):
+        def generate(self, messages, **options):
+            captured["options_mode"] = str(options.get("mode") or "")
+            return ChatBackendResult(
+                text="Standard grounded-conversation reply",
+                provider="ollama",
+                model="llama3.2:3b",
+                metadata={"used_mode": str(options.get("mode") or "")},
+            )
+
+    def fake_build(agent_name: str, response_mode: str):
+        captured["response_mode"] = response_mode
+        return RecordingBackend()
+
+    monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", fake_build)
+    monkeypatch.setattr(
+        jarvis_agent_module,
+        "backend_options_for_context",
+        lambda context, agent_name="jarvis": {"mode": context.get("analysis_mode")},
+    )
+
+    agent = JARVISAgent(fallback_backend=StubFallbackBackend())
+    result = agent.process(
+        "How do you think OBEOS is coming together?",
+        context={
+            "session_id": "test-session",
+            "analysis_mode": "standard",
+            "detected_intent": {
+                "casual": True,
+                "coding": False,
+                "deep_reasoning": False,
+                "file_ops": False,
+                "diagnostics": False,
+                "tinyprogrammer": False,
+            },
+            "memory_context": {
+                "grounded_conversation_answer": {
+                    "answer": "O.B.E.O.S. is becoming more coherent around shared memory grounding, response latency, and operator surface cohesion.",
+                    "kind": "broad",
+                },
+                "prompt_metrics": {
+                    "grounded_conversation": True,
+                },
+            },
+        },
+    )
+
+    assert captured["response_mode"] == "standard"
+    assert captured["options_mode"] == "standard"
+    assert result["provider"] == "ollama"
+    assert result["backend_metadata"]["generation_mode"] == "standard"
+    assert result["backend_metadata"]["requested_mode"] == "standard"
+
+
 def test_standard_hud_chat_keeps_standard_generation_lane(monkeypatch):
     captured: dict[str, str] = {}
 
@@ -587,6 +914,43 @@ def test_standard_hud_chat_keeps_standard_generation_lane(monkeypatch):
     assert result["provider"] == "ollama"
     assert result["backend_metadata"]["generation_mode"] == "standard"
     assert result["backend_metadata"]["requested_mode"] == "standard"
+
+
+def test_standard_chat_sanitizes_harmful_transcript_artifacts() -> None:
+    agent = JARVISAgent(chat_backend=HeuristicChatBackend(), fallback_backend=StubFallbackBackend())
+    messages, metrics = agent._build_chat_messages(
+        "what resources within OBEOS do we have?",
+        {
+            "memory_context": {
+                "prompt_mode": "standard",
+                "prompt_context": "Operator profile: Preferred operator name: Five",
+                "session_messages": [
+                    {"role": "user", "text": "what is your name?"},
+                    {
+                        "role": "assistant",
+                        "text": 'My name is D.A.I.S.E (Digital Assistant for Intelligent Systems and Expertise), and I am under a legacy alias for compatibility reasons.',
+                    },
+                    {"role": "user", "text": "tell me about spawn"},
+                    {
+                        "role": "assistant",
+                        "text": "The primary Ollama response did not complete, so D.A.I.S.E. is using the local fallback path. I can still help from local O.B.E.O.S. memory and stored knowledge while the live model lane recovers.",
+                    },
+                    {"role": "user", "text": "we have been working on telegram grounding"},
+                    {"role": "assistant", "text": "I still have Telegram grounding in focus."},
+                ],
+                "prompt_metrics": {},
+            }
+        },
+    )
+
+    combined = "\n".join(str(item.get("content") or "") for item in messages)
+
+    assert "Digital Assistant for Intelligent Systems and Expertise" not in combined
+    assert "live model lane recovers" not in combined
+    assert "what is your name?" not in combined
+    assert "tell me about spawn" not in combined
+    assert "Telegram grounding in focus" in combined
+    assert metrics["raw_session_messages_included"] == 2
 
 
 def test_standard_legion_chat_keeps_standard_generation_lane(monkeypatch):
@@ -663,6 +1027,11 @@ def test_jarvis_uses_preemptive_fallback_when_backend_is_unavailable():
     assert result["backend_error"] == "Ollama connection refused"
     assert result["backend_metadata"]["preemptive_fallback"] is True
     assert result["backend_metadata"]["fallback_reason"] == "Ollama connection refused"
+    assert result["backend_metadata"]["response_path"] == "preemptive_fallback"
+    assert result["backend_metadata"]["health_forced_fallback"] is True
+    assert result["backend_metadata"]["recovery_probe_attempted"] is False
+    assert result["backend_metadata"]["live_lane_attempted"] is False
+    assert result["backend_metadata"]["fallback_mode"] == "preemptive"
 
 
 def test_degraded_backend_caps_standard_timeout(monkeypatch):
@@ -672,6 +1041,7 @@ def test_degraded_backend_caps_standard_timeout(monkeypatch):
         def generate(self, messages, **options):
             captured["timeout"] = float(options.get("timeout") or 0.0)
             captured["max_attempts"] = float(options.get("max_attempts") or 0.0)
+            captured["disable_chain_fallbacks"] = bool(options.get("disable_chain_fallbacks"))
             return ChatBackendResult(
                 text="Standard lane reply",
                 provider="ollama",
@@ -693,13 +1063,117 @@ def test_degraded_backend_caps_standard_timeout(monkeypatch):
                 "backend_health": {
                     "state": "degraded",
                     "recent_timeout_count": 1,
+                    "recent_fallback_count": 1,
+                    "allow_recovery_probe": True,
+                    "degraded_reason": "recent_transient_timeout",
                     "last_backend_error": "Ollama request timed out after 45s",
+                    "timeout_window_seconds": 180.0,
                 }
             },
         },
     )
 
-    assert captured["timeout"] == 18.0
+    assert captured["timeout"] == 30.0
     assert captured["max_attempts"] == 1.0
+    assert captured["disable_chain_fallbacks"] is True
     assert result["provider"] == "ollama"
     assert result["backend_metadata"]["backend_health"]["state"] == "degraded"
+    assert result["backend_metadata"]["response_path"] == "live_model"
+    assert result["backend_metadata"]["recovery_probe_attempted"] is True
+    assert result["backend_metadata"]["recovery_probe_succeeded"] is True
+    assert result["backend_metadata"]["live_lane_attempted"] is True
+    assert result["backend_metadata"]["fallback_mode"] == "none"
+
+
+def test_repeated_recent_failures_force_preemptive_fallback():
+    agent = JARVISAgent(
+        chat_backend=ExplodingBackend(),
+        fallback_backend=StubFallbackBackend(),
+    )
+
+    result = agent.process(
+        "tell me about Spawn",
+        context={
+            "session_id": "test-session",
+            "analysis_mode": "standard",
+            "memory_context": {
+                "backend_health": {
+                    "state": "degraded",
+                    "recent_timeout_count": 2,
+                    "recent_fallback_count": 2,
+                    "repeated_recent_failures": True,
+                    "allow_recovery_probe": False,
+                    "degraded_reason": "recent_repeated_timeouts",
+                    "last_backend_error": "Ollama request timed out after 30s for model llama3.2:3b",
+                    "timeout_window_seconds": 180.0,
+                }
+            },
+        },
+    )
+
+    assert result["provider"] == "heuristic"
+    assert result["backend_metadata"]["preemptive_fallback"] is True
+    assert result["backend_metadata"]["health_forced_fallback"] is True
+    assert result["backend_metadata"]["recovery_probe_attempted"] is False
+    assert result["backend_metadata"]["degraded_reason"] == "recent_repeated_timeouts"
+    assert result["backend_metadata"]["live_lane_attempted"] is False
+    assert result["backend_metadata"]["fallback_mode"] == "preemptive"
+
+
+def test_conversational_followup_can_retry_live_lane_despite_repeated_recent_failures():
+    captured: dict[str, Any] = {}
+
+    class RecordingBackend(BaseChatBackend):
+        def generate(self, messages, **options):
+            captured["timeout"] = float(options.get("timeout") or 0.0)
+            captured["max_attempts"] = float(options.get("max_attempts") or 0.0)
+            return ChatBackendResult(
+                text="Recovered live conversational reply",
+                provider="ollama",
+                model="llama3.2:3b",
+                metadata={"response_path": "live_model"},
+            )
+
+    agent = JARVISAgent(
+        chat_backend=RecordingBackend(),
+        fallback_backend=StubFallbackBackend(),
+    )
+
+    result = agent.process(
+        "same there?",
+        context={
+            "session_id": "test-session",
+            "analysis_mode": "standard",
+            "transport": "hud",
+            "memory_context": {
+                "grounded_conversation_answer": {
+                    "answer": "We are still in the middle of response latency, Telegram grounding, and HUD improvements.",
+                    "kind": "followup",
+                },
+                "prompt_metrics": {
+                    "grounded_conversation": True,
+                    "approx_prompt_tokens": 1200,
+                    "semantic_hits": 4,
+                },
+                "backend_health": {
+                    "state": "degraded",
+                    "recent_timeout_count": 3,
+                    "recent_fallback_count": 3,
+                    "repeated_recent_failures": True,
+                    "allow_recovery_probe": False,
+                    "degraded_reason": "recent_repeated_timeouts",
+                    "last_backend_error": "Ollama request timed out after 30s for model llama3.2:3b",
+                    "timeout_window_seconds": 180.0,
+                },
+            },
+        },
+    )
+
+    assert captured["timeout"] == 30.0
+    assert captured["max_attempts"] == 1.0
+    assert result["provider"] == "ollama"
+    assert result["backend_metadata"]["response_path"] == "live_model"
+    assert result["backend_metadata"]["recovery_probe_attempted"] is True
+    assert result["backend_metadata"]["recovery_probe_succeeded"] is True
+    assert result["backend_metadata"]["live_lane_attempted"] is True
+    assert result["backend_metadata"]["fallback_mode"] == "none"

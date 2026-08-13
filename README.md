@@ -63,6 +63,27 @@ If you want the browser cockpit too:
 python -m blackfong_ecosystem.cli hud
 ```
 
+## Release And Deploy Record
+
+O.B.E.O.S keeps two complementary history tracks:
+
+- repo-tracked product history in [OBEOS Release Log](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\obeos-release-log.md)
+- runtime deploy history on cloud hosts in `data/deploy-history.log`
+
+Working rule:
+
+- local edits happen here first
+- meaningful commit messages describe the improvement made
+- GitHub keeps the canonical source history
+- cloud pulls stay fast-forward-only and append a deployment entry after rollout
+
+When you push or pull, leave notes that answer:
+
+- what changed
+- why it changed
+- what operator or runtime behavior it should improve
+- which revision is now live
+
 ## Core Commands
 
 ### System and surfaces
@@ -161,6 +182,7 @@ See:
 - [Release Surface Hierarchy](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\release-surface-hierarchy.md)
 - [Release Artifacts](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\release-artifacts.md)
 - [Cloud Release Flow](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\cloud-release-flow.md)
+- [OBEOS Release Log](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\obeos-release-log.md)
 - [Operator Environment Variables](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\operator-env.md)
 
 ## Architecture Summary

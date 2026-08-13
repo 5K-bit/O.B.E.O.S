@@ -192,7 +192,7 @@ class ConversationMemoryService:
         text: str,
         modality: str = "text",
         routed_agent: str = "daise",
-        analysis_mode: str = "quick",
+        analysis_mode: str = "standard",
         agent_override: Optional[str] = None,
         request_id: Optional[str] = None,
     ) -> Event:
@@ -667,12 +667,32 @@ class ConversationMemoryService:
             recent_events=recent_events,
             operator_profile=operator_profile,
         )
+        grounded_conversation_answer = None
+        if grounded_memory_answer is None and grounded_knowledge_answer is None:
+            grounded_conversation_answer = self.grounded_conversational_answer(
+                session_id=session_id,
+                query=query,
+                agent_name=profile["agent"],
+                retrieval_profile=resolved_retrieval_profile,
+                analysis_mode=analysis_mode,
+                session_messages=session_messages,
+                session_summaries=session_summaries,
+                global_memories=global_memories,
+                recent_events=recent_events,
+                operator_profile=operator_profile,
+                knowledge_hits=semantic_bundle["hits"],
+                citations=semantic_bundle["citations"],
+            )
         semantic_bundle["timing_ms"]["grounded_answer"] = round(
             float(((grounded_knowledge_answer or {}).get("timing_ms") or {}).get("librarian") or 0.0),
             2,
         )
         semantic_bundle["timing_ms"]["grounded_memory"] = round(
             float(((grounded_memory_answer or {}).get("timing_ms") or {}).get("memory_grounding") or 0.0),
+            2,
+        )
+        semantic_bundle["timing_ms"]["grounded_conversation"] = round(
+            float(((grounded_conversation_answer or {}).get("timing_ms") or {}).get("conversation_grounding") or 0.0),
             2,
         )
         focus_tokens = self._salient_query_tokens(query)
@@ -706,13 +726,16 @@ class ConversationMemoryService:
                 ]
 
         prompt_context = self._format_prompt_context(
+            session_id=session_id,
             agent_name=profile["agent"],
+            query=query,
             session_messages=session_messages[-transcript_limit:],
             session_summaries=session_summaries,
             global_memories=global_memories,
             recent_events=recent_events,
             knowledge_context=semantic_bundle["context"],
             operator_profile=operator_profile,
+            grounded_conversation_answer=grounded_conversation_answer,
             transcript_window=transcript_limit,
             prompt_budget_tokens=prompt_budget_tokens,
             prompt_mode=prompt_mode,
@@ -730,6 +753,7 @@ class ConversationMemoryService:
             "semantic_hits": len(semantic_bundle["hits"]),
             "grounded_answer": bool(grounded_knowledge_answer),
             "grounded_memory": bool(grounded_memory_answer),
+            "grounded_conversation": bool(grounded_conversation_answer),
             "operator_profile": bool(operator_profile.get("fact_statements") or operator_profile.get("active_work")),
             "truncated": (max(1, len(prompt_context) // 4) if prompt_context else 0) >= int(prompt_budget_tokens or 0),
         }
@@ -762,6 +786,7 @@ class ConversationMemoryService:
             "citations": semantic_bundle["citations"],
             "grounded_knowledge_answer": grounded_knowledge_answer,
             "grounded_memory_answer": grounded_memory_answer,
+            "grounded_conversation_answer": grounded_conversation_answer,
             "operator_profile": operator_profile,
             "backend_health": backend_health,
             "retrieval_profile": resolved_retrieval_profile,
@@ -909,6 +934,87 @@ class ConversationMemoryService:
                 "recent_events": len(events),
                 "global_summaries": len(recent_global_summaries),
                 "operator_facts": len(operator_facts),
+            },
+        }
+
+    def grounded_conversational_answer(
+        self,
+        *,
+        session_id: str,
+        query: str,
+        agent_name: Optional[str] = None,
+        retrieval_profile: Optional[str] = None,
+        analysis_mode: Optional[str] = None,
+        session_messages: Optional[List[Dict[str, Any]]] = None,
+        session_summaries: Optional[List[Dict[str, Any]]] = None,
+        global_memories: Optional[List[Dict[str, Any]]] = None,
+        recent_events: Optional[List[Dict[str, Any]]] = None,
+        operator_profile: Optional[Dict[str, Any]] = None,
+        knowledge_hits: Optional[List[Dict[str, Any]]] = None,
+        citations: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        messages = list(session_messages or self.get_session_messages(session_id, limit=24))
+        frame = self._detect_conversational_recall_frame(query)
+        if frame is None:
+            frame = self._detect_implicit_conversational_frame(query, messages)
+        if frame is None:
+            return None
+
+        started = time.perf_counter()
+        resolved_retrieval_profile = normalize_retrieval_profile(retrieval_profile, analysis_mode)
+        summaries = list(session_summaries or self._get_session_summaries(session_id, limit=3))
+        if global_memories is None:
+            memories = self.list_global_memories(
+                query="",
+                limit=6 if resolved_retrieval_profile != "fast" else 4,
+                agent_name=agent_name,
+                session_id=session_id,
+            )
+        else:
+            memories = list(global_memories)
+        events = list(
+            recent_events
+            or self._get_recent_events_for_agent(
+                query=query,
+                agent_name=agent_name,
+                session_id=session_id,
+                limit=4,
+            )
+        )
+        resolved_operator_profile = operator_profile or self.operator_profile_snapshot(
+            session_id=session_id,
+            global_memories=memories,
+            session_messages=messages,
+        )
+        answer, provenance = self._compose_grounded_conversational_answer(
+            session_id=session_id,
+            frame=frame,
+            query=query,
+            session_messages=messages,
+            session_summaries=summaries,
+            global_memories=memories,
+            recent_events=events,
+            operator_profile=resolved_operator_profile,
+            knowledge_hits=list(knowledge_hits or []),
+            citations=list(citations or []),
+        )
+        if not answer:
+            return None
+
+        timing_ms = round((time.perf_counter() - started) * 1000, 2)
+        return {
+            "kind": frame,
+            "answer": answer,
+            "retrieval_profile": resolved_retrieval_profile,
+            "timing_ms": {"conversation_grounding": timing_ms},
+            "provenance": provenance,
+            "operator_profile": resolved_operator_profile,
+            "evidence_counts": {
+                "session_messages": len(messages),
+                "session_summaries": len(summaries),
+                "global_memories": len(memories),
+                "recent_events": len(events),
+                "knowledge_hits": len(list(knowledge_hits or [])),
             },
         }
 
@@ -1667,8 +1773,11 @@ class ConversationMemoryService:
         lookback_seconds: float = 900.0,
         limit: int = 24,
     ) -> Dict[str, Any]:
+        now = time.time()
         normalized_transport = str(transport or "").strip().lower()
-        cutoff_ms = (time.time() - max(30.0, float(lookback_seconds))) * 1000.0
+        normalized_lookback = max(30.0, float(lookback_seconds))
+        cutoff_ms = (now - normalized_lookback) * 1000.0
+        timeout_window_seconds = min(180.0, normalized_lookback)
         state = "unknown"
         provider = ""
         configured_model = ""
@@ -1680,47 +1789,66 @@ class ConversationMemoryService:
         latest_transport_success_at = 0.0
         latest_global_ollama_success_at = 0.0
         latest_global_ollama_model = ""
+        degraded_reason = ""
+        recovery_reason = ""
+        repeated_recent_failures = False
+        allow_recovery_probe = False
+        latest_degraded_observation_at = 0.0
+        latest_unavailable_observation_at = 0.0
 
         latency_events = self.event_store.list_events_by_type("latency_observation", limit=limit)
         for event in latency_events:
             if event.timestamp < cutoff_ms:
                 continue
             payload = event.payload or {}
+            backend_metadata = payload.get("backend_metadata") or {}
+            primary_provider = str(
+                (backend_metadata.get("provider") or payload.get("provider") or "")
+            ).strip()
+            primary_model = str(
+                (
+                    backend_metadata.get("selected_model")
+                    or backend_metadata.get("model")
+                    or payload.get("selected_model")
+                    or payload.get("model")
+                    or ""
+                )
+            ).strip()
             event_transport = str(payload.get("transport") or "").strip().lower()
             execution_time_ms = float(payload.get("execution_time_ms") or 0.0)
             fallback_used = bool(payload.get("fallback_used"))
             backend_error = str(payload.get("backend_error") or "").strip()
             fallback_reason = str(payload.get("fallback_reason") or payload.get("timeout_reason") or "").strip()
-            provider_name = str(payload.get("provider") or "").strip().lower()
+            provider_name = primary_provider.lower()
+            observed_at = event.timestamp / 1000.0
+            age_seconds = max(0.0, now - observed_at)
+            within_timeout_window = age_seconds <= timeout_window_seconds
 
             if execution_time_ms > 0 and not fallback_used and not backend_error and provider_name == "ollama":
-                observed_at = event.timestamp / 1000.0
                 latest_global_ollama_success_at = max(latest_global_ollama_success_at, observed_at)
                 if latest_global_ollama_success_at == observed_at:
-                    latest_global_ollama_model = str(payload.get("model") or latest_global_ollama_model or "")
+                    latest_global_ollama_model = primary_model or latest_global_ollama_model or ""
 
             if normalized_transport and event_transport and event_transport != normalized_transport:
                 continue
 
             if fallback_used or backend_error:
-                recent_fallback_count += 1
-                if "timed out" in backend_error.lower() or "timed out" in fallback_reason.lower():
+                if within_timeout_window:
+                    recent_fallback_count += 1
+                if within_timeout_window and ("timed out" in backend_error.lower() or "timed out" in fallback_reason.lower()):
                     recent_timeout_count += 1
-                state = "degraded"
-                provider = str(payload.get("provider") or provider or "")
-                configured_model = str(payload.get("model") or configured_model or "")
+                provider = primary_provider or provider or ""
+                configured_model = primary_model or configured_model or ""
                 last_backend_error = backend_error or fallback_reason or last_backend_error
-                observed_at = event.timestamp / 1000.0
                 last_observed_at = max(last_observed_at, observed_at)
                 latest_failure_at = max(latest_failure_at, observed_at)
             elif execution_time_ms > 0 and last_observed_at <= 0:
-                provider = str(payload.get("provider") or provider or "")
-                configured_model = str(payload.get("model") or configured_model or "")
-                last_observed_at = max(last_observed_at, event.timestamp / 1000.0)
+                provider = primary_provider or provider or ""
+                configured_model = primary_model or configured_model or ""
+                last_observed_at = max(last_observed_at, observed_at)
                 if state == "unknown":
                     state = "healthy"
             if execution_time_ms > 0 and not fallback_used and not backend_error and provider_name == "ollama":
-                observed_at = event.timestamp / 1000.0
                 latest_transport_success_at = max(latest_transport_success_at, observed_at)
 
         health_events = self.event_store.list_events_by_type("backend_health_observation", limit=max(limit, 8))
@@ -1736,27 +1864,69 @@ class ConversationMemoryService:
             provider = str(payload.get("provider") or provider or "")
             configured_model = str(payload.get("configured_model") or configured_model or "")
             error = str(payload.get("error") or "").strip()
-            last_observed_at = max(last_observed_at, event.timestamp / 1000.0)
+            observed_at = event.timestamp / 1000.0
+            age_seconds = max(0.0, now - observed_at)
+            within_timeout_window = age_seconds <= timeout_window_seconds
+            last_observed_at = max(last_observed_at, observed_at)
             if observed_status in {"unavailable", "offline"}:
-                state = "unavailable"
+                latest_unavailable_observation_at = max(latest_unavailable_observation_at, observed_at)
                 last_backend_error = error or last_backend_error
-                break
-            if observed_status == "degraded" and state != "unavailable":
-                state = "degraded"
+                if within_timeout_window:
+                    state = "unavailable"
+                    degraded_reason = "backend_unavailable"
+                    break
+            if observed_status == "degraded":
+                latest_degraded_observation_at = max(latest_degraded_observation_at, observed_at)
                 last_backend_error = error or last_backend_error
+                if within_timeout_window and state != "unavailable":
+                    state = "degraded"
+                    degraded_reason = degraded_reason or "health_observation_degraded"
             elif observed_status == "available" and state == "unknown":
                 state = "healthy"
 
-        recovery_at = max(latest_transport_success_at, latest_global_ollama_success_at)
-        if state == "degraded" and recovery_at > latest_failure_at > 0:
+        same_transport_recovered = latest_transport_success_at > latest_failure_at > 0
+        global_recovered = latest_global_ollama_success_at > latest_failure_at > 0
+        repeated_recent_failures = recent_timeout_count >= 2
+
+        if latest_unavailable_observation_at > 0 and (now - latest_unavailable_observation_at) <= timeout_window_seconds:
+            state = "unavailable"
+            degraded_reason = degraded_reason or "backend_unavailable"
+        elif same_transport_recovered:
+            state = "healthy"
+            provider = "ollama"
+            configured_model = configured_model or latest_global_ollama_model
+            last_backend_error = ""
+            last_observed_at = max(last_observed_at, latest_transport_success_at)
+            recovery_reason = "same_transport_success"
+        elif global_recovered:
             state = "healthy"
             provider = "ollama"
             configured_model = latest_global_ollama_model or configured_model
             last_backend_error = ""
-            last_observed_at = max(last_observed_at, recovery_at)
-
-        if state == "unknown" and recent_timeout_count > 0:
+            last_observed_at = max(last_observed_at, latest_global_ollama_success_at)
+            recovery_reason = "global_ollama_success"
+        elif repeated_recent_failures:
             state = "degraded"
+            degraded_reason = degraded_reason or "recent_repeated_timeouts"
+        elif recent_timeout_count > 0:
+            state = "degraded"
+            degraded_reason = degraded_reason or "recent_transient_timeout"
+            allow_recovery_probe = True
+        elif latest_failure_at > 0 and (now - latest_failure_at) > timeout_window_seconds:
+            state = "healthy"
+            provider = provider or "ollama"
+            recovery_reason = "stale_timeout_window_expired"
+            last_backend_error = ""
+        elif latest_degraded_observation_at > 0 and (now - latest_degraded_observation_at) <= timeout_window_seconds:
+            state = "degraded"
+            degraded_reason = degraded_reason or "health_observation_degraded"
+            allow_recovery_probe = True
+
+        if state == "degraded" and repeated_recent_failures:
+            allow_recovery_probe = False
+        elif state == "degraded" and latest_unavailable_observation_at > 0:
+            allow_recovery_probe = False
+
         return {
             "state": state,
             "transport": normalized_transport or None,
@@ -1766,7 +1936,15 @@ class ConversationMemoryService:
             "recent_fallback_count": recent_fallback_count,
             "last_backend_error": last_backend_error,
             "last_observed_at": last_observed_at or None,
-            "lookback_seconds": max(30.0, float(lookback_seconds)),
+            "lookback_seconds": normalized_lookback,
+            "timeout_window_seconds": timeout_window_seconds,
+            "latest_failure_at": latest_failure_at or None,
+            "latest_transport_success_at": latest_transport_success_at or None,
+            "latest_global_ollama_success_at": latest_global_ollama_success_at or None,
+            "degraded_reason": degraded_reason or None,
+            "recovery_reason": recovery_reason or None,
+            "repeated_recent_failures": repeated_recent_failures,
+            "allow_recovery_probe": allow_recovery_probe,
         }
 
     def _summarize_conversation_session(
@@ -2086,14 +2264,36 @@ class ConversationMemoryService:
         query_haystack = f" {normalized_query} "
         source_registry, collection_registry = self._knowledge_registries()
         hints: List[str] = []
+        generic_aliases = {
+            "main",
+            "tooling",
+            "runtime",
+            "transfer",
+            "companion",
+            "future hook",
+            "architecture",
+            "programming",
+            "cybersecurity",
+            "comics",
+        }
 
         def register_hint(collection: str, *aliases: str) -> None:
             normalized_collection = re.sub(r"[^a-z0-9]+", "_", str(collection or "").lower()).strip("_")
             if not normalized_collection:
                 return
+            collection_aliases = {
+                re.sub(r"[^a-z0-9]+", " ", normalized_collection).strip(),
+                re.sub(r"[^a-z0-9]+", " ", str(collection or "").lower()).strip(),
+            }
             for alias in aliases:
                 alias_text = re.sub(r"[^a-z0-9]+", " ", str(alias or "").lower()).strip()
                 if not alias_text:
+                    continue
+                alias_tokens = alias_text.split()
+                if (
+                    alias_text not in collection_aliases
+                    and (alias_text in generic_aliases or (len(alias_tokens) == 1 and len(alias_text) < 8))
+                ):
                     continue
                 if f" {alias_text} " in query_haystack and normalized_collection not in hints:
                     hints.append(normalized_collection)
@@ -2124,6 +2324,9 @@ class ConversationMemoryService:
         normalized = " ".join(str(query or "").strip().lower().split())
         if not normalized or not hinted_collections:
             return False
+        compact = re.sub(r"[^a-z0-9'\s]+", " ", normalized)
+        compact = " ".join(compact.split())
+        tokens = set(self._tokenize(compact))
         overview_phrases = (
             "tell me about",
             "what is",
@@ -2136,6 +2339,17 @@ class ConversationMemoryService:
             "overview of",
             "recap",
             "remind me about",
+            "what resources",
+            "what tools",
+            "what do we have",
+            "what do i have",
+            "what exists in",
+            "what is in",
+            "what do we know about",
+            "what have we got on",
+            "what do you know about",
+            "do you know anything about",
+            "do you still know anything about",
         )
         if any(phrase in normalized for phrase in overview_phrases):
             return True
@@ -2148,6 +2362,14 @@ class ConversationMemoryService:
         if normalized_focus in focus_terms:
             return True
         token_count = len(self._tokenize(normalized_focus))
+        knowledge_intent_tokens = {"know", "got", "have", "anything", "resources", "tools", "exists"}
+        actor_tokens = {"we", "i", "you", "still", "do"}
+        if (
+            bool(tokens.intersection(knowledge_intent_tokens))
+            and bool(tokens.intersection(actor_tokens))
+            and any(term in normalized_focus for term in focus_terms)
+        ):
+            return True
         return token_count <= 4 and any(term in normalized_focus for term in focus_terms)
 
     def _detect_grounded_memory_query(self, query: str) -> Optional[str]:
@@ -2156,25 +2378,24 @@ class ConversationMemoryService:
             return None
         if normalized.startswith("remember to ") or " and remember to " in normalized:
             return None
-
-        hinted_collections = self._detect_collection_hints(query)
-        memory_specific = (
-            "about me",
-            "about us",
-            "our work",
-            "our conversation",
-            "we leave off",
-            "we left off",
-            "working on",
-            "recall about me",
-        )
-        if hinted_collections and not any(token in normalized for token in memory_specific):
-            return None
+        compact = re.sub(r"[^a-z0-9'\s]+", " ", normalized)
+        compact = " ".join(compact.split())
+        tokens = set(self._tokenize(compact))
 
         operator_phrases = (
             "what do you remember about me",
             "what do you know about me",
             "what can you recall about me",
+            "what do you still know about me",
+            "what are you still remembering about me",
+            "what do you still carry about who i am",
+            "what do you still have on me",
+            "what do you still know about who i am",
+            "what are you still holding onto about me",
+            "what still seems true about me",
+            "what do you still remember about my role",
+            "what am i to you in obeos",
+            "what am i to you again",
             "who am i to you",
             "who am i",
             "what is my name",
@@ -2183,14 +2404,68 @@ class ConversationMemoryService:
             "do you know my name",
             "remember about me",
         )
+        hinted_collections = self._detect_collection_hints(query)
+        memory_specific = (
+            "about me",
+            "about us",
+            "our side",
+            "our place",
+            "our work",
+            "in your memory",
+            "our conversation",
+            "we leave off",
+            "we left off",
+            "working on",
+            "recall about me",
+            "who i am",
+            "my role",
+            "am i to you",
+            "on me",
+            "true about me",
+        )
+        if hinted_collections and not any(token in normalized for token in memory_specific):
+            return None
         session_phrases = (
             "where did we leave off",
             "where we left off",
+            "where we were",
             "what are we working on",
             "what are we working on now",
             "what were we working on",
             "what have we been working on",
+            "what have we been up to",
+            "what have we done lately",
+            "what have we changed lately",
+            "what changed recently",
+            "what have the recent updates been",
+            "what are the recent updates",
+            "are you aware of recent updates",
+            "are you aware of the recent updates",
+            "are you aware of our recent updates",
+            "do you know the recent updates",
+            "do you remember the recent updates",
+            "give me a recap",
+            "give me a quick recap",
+            "give me an update",
+            "give me a quick update",
+            "catch me up",
+            "bring me up to speed",
             "what were we doing",
+            "what do you still know about where we were",
+            "what are you still carrying forward from all this",
+            "what was the thing we were tightening again",
+            "what were we circling around before",
+            "what do you still have in mind from our recent work",
+            "what were you just anchoring to a second ago",
+            "what thread are you still holding onto here",
+            "what are you still centered on",
+            "what are you still orbiting around",
+            "what part of the recent work are you still remembering most clearly",
+            "what still seems live from our side of this",
+            "what do you still have on us from all this",
+            "what still seems true about our side of this",
+            "what do you still remember about our place in this system",
+            "what were we trying to stabilize again",
             "what changed",
             "what were the last changes",
         )
@@ -2207,7 +2482,734 @@ class ConversationMemoryService:
             return "session"
         if any(phrase in normalized for phrase in general_phrases):
             return "general"
+        if (
+            ({"name", "give"} <= tokens or {"name", "gave"} <= tokens)
+            and bool(tokens.intersection({"i", "you", "me", "my"}))
+        ):
+            return "operator"
+        if (
+            bool(tokens.intersection({"know", "remember", "recall"}))
+            and bool(tokens.intersection({"me", "my"}))
+        ):
+            return "operator"
+        if (
+            bool(tokens.intersection({"carry", "carrying", "holding", "onto", "have", "true"}))
+            and bool(tokens.intersection({"me", "my", "role"}))
+        ):
+            return "operator"
+        if (
+            bool(tokens.intersection({"who", "role"}))
+            and bool(tokens.intersection({"i", "am", "me", "my", "project", "system", "obeos"}))
+        ):
+            return "operator"
+        if (
+            bool(tokens.intersection({"anchor", "reanchor", "re", "recap", "update"}))
+            and bool(tokens.intersection({"recent", "work", "session", "conversation", "us", "our"}))
+        ):
+            return "session"
+        if (
+            bool(tokens.intersection({"track", "tracking", "tracked", "focus", "focused", "keeping", "straight", "oriented", "grounded", "retained", "retain", "keyed", "anchored", "centered", "orbiting"}))
+            and bool(tokens.intersection({"recent", "work", "session", "before", "last", "thread", "stretch", "here", "this", "our", "still", "around", "on"}))
+        ):
+            return "session"
+        if (
+            bool(tokens.intersection({"carrying", "carry", "forward", "holding", "onto", "anchoring", "anchored", "tightening", "circling", "stabilize", "stabilizing", "live"}))
+            and bool(tokens.intersection({"we", "our", "recent", "work", "again", "before", "still", "thread", "side", "main", "here"}))
+        ):
+            return "session"
+        if (
+            bool(tokens.intersection({"carrying", "carry", "holding"}))
+            and {"main", "thread"} <= tokens
+            and "still" in tokens
+        ):
+            return "session"
+        if (
+            bool(tokens.intersection({"have", "holding", "onto", "remember", "know", "true", "live"}))
+            and bool(tokens.intersection({"us", "our"}))
+            and bool(tokens.intersection({"side", "place", "system", "project", "this", "here", "all"}))
+        ):
+            return "session"
+        if (
+            bool(tokens.intersection({"memory", "remember", "remembering", "recall", "know"}))
+            and bool(tokens.intersection({"our", "we"}))
+            and bool(tokens.intersection({"work", "session", "conversation", "recent", "before", "this"}))
+        ):
+            return "session"
+        if (
+            bool(tokens.intersection({"remember", "remembering", "know", "recall"}))
+            and bool(tokens.intersection({"our", "us"}))
+            and bool(tokens.intersection({"place", "system", "project", "here", "this"}))
+        ):
+            return "session"
+        if (
+            bool(tokens.intersection({"know", "remember", "remembering", "recall", "mind"}))
+            and bool(tokens.intersection({"where", "were", "work", "recent", "still", "clearly", "again", "before"}))
+        ):
+            return "session"
+        if (
+            bool(tokens.intersection({"leave", "left"}))
+            and bool(tokens.intersection({"off", "that", "there", "where", "we"}))
+        ):
+            return "session"
+        if (
+            bool(tokens.intersection({"doing", "working", "updates", "changed"}))
+            and bool(tokens.intersection({"we", "our", "recent", "lately", "again", "there"}))
+        ):
+            return "session"
         return None
+
+    def _detect_conversational_recall_frame(self, query: str) -> Optional[str]:
+        normalized = " ".join(str(query or "").strip().lower().split())
+        compact = re.sub(r"[^a-z0-9'\s]+", " ", normalized)
+        compact = " ".join(compact.split())
+        if not compact:
+            return None
+        if len(compact) > 260:
+            return None
+        compact_tokens = set(compact.split())
+        followup_phrases = (
+            "tell me more",
+            "say more",
+            "go on",
+            "what do you mean",
+            "what did you mean",
+            "why do you say that",
+            "why do you think that",
+            "what makes you say that",
+            "how so",
+            "why is that",
+            "why though",
+            "expand on that",
+            "elaborate",
+            "continue that",
+            "what else",
+            "and then",
+        )
+        if any(phrase in compact for phrase in followup_phrases):
+            return "followup"
+        if self._looks_like_structural_explanatory_followup(compact, compact_tokens):
+            return "followup"
+        if len(compact_tokens) <= 3 and (
+            {"why", "though"} <= compact_tokens
+            or {"what", "else"} <= compact_tokens
+            or {"and", "then"} <= compact_tokens
+            or {"go", "on"} <= compact_tokens
+        ):
+            return "followup"
+        if len(compact_tokens) <= 8 and (
+            ({"what", "part", "that"} <= compact_tokens)
+            or ({"what", "part", "this"} <= compact_tokens)
+            or ({"which", "part", "that"} <= compact_tokens)
+            or ({"which", "part", "this"} <= compact_tokens)
+            or ({"that", "matters", "most"} <= compact_tokens)
+            or ({"this", "matters", "most"} <= compact_tokens)
+        ):
+            return "followup"
+        if len(compact.split()) < 4:
+            return None
+        if self._detect_grounded_memory_query(query) is not None:
+            return None
+        hinted_collections = self._detect_collection_hints(query)
+        if hinted_collections and self._is_collection_overview_query(query, hinted_collections):
+            return None
+        if any(token in compact for token in ("today", "time", "date", "day of the week")):
+            return None
+        if any(token in compact for token in ("def ", "class ", "import ", "traceback", "/api/", "http://", "https://")):
+            return None
+        anchor_terms = {
+            "obeos", "o b e o s", "daise", "system", "project", "memory", "work", "working",
+            "progress", "direction", "future", "next", "risk", "fragile", "creator", "mission",
+            "success", "improve", "latency", "hud", "telegram", "tinyprogrammer", "tiny",
+            "recall", "response", "operator", "surface", "thinking", "headed", "becoming",
+            "stable", "stabilize", "stabilizing", "grounded",
+            "everything", "overall", "together", "us", "our", "we", "you", "me",
+        }
+        if not any(term in compact for term in anchor_terms):
+            conversational_bridge_tokens = {
+                "this",
+                "that",
+                "real",
+                "weak",
+                "weakest",
+                "fragile",
+                "solid",
+                "direction",
+                "headed",
+                "going",
+                "next",
+                "tighten",
+                "land",
+                "landing",
+                "stable",
+                "stabilize",
+                "stabilizing",
+                "matter",
+                "matters",
+                "important",
+                "feel",
+                "feels",
+                "think",
+                "seems",
+            }
+            if not bool(set(self._tokenize(compact)).intersection(conversational_bridge_tokens)):
+                return None
+
+        state_score = self._count_phrase_matches(
+            compact,
+            (
+                "talk to me",
+                "honestly",
+                "everything",
+                "overall",
+                "what stands out",
+                "what is happening",
+                "take shape",
+                "taking shape",
+                "seeing take shape",
+                "sitting with you",
+                "locking in",
+                "stabilize",
+                "stabilizing",
+                "most grounded",
+                "situation",
+                "sum up",
+                "summarize",
+                "describe what",
+            ),
+        )
+        direction_score = self._count_phrase_matches(
+            compact,
+            (
+                "what next",
+                "do next",
+                "headed",
+                "heading",
+                "becoming",
+                "where this is going",
+                "future",
+                "strongest move",
+                "tighten next",
+                "most important next",
+                "starting to land",
+            ),
+        )
+        risk_score = self._count_phrase_matches(
+            compact,
+            (
+                "throwing this off",
+                "throws this off",
+                "fighting itself",
+                "getting in our own way",
+                "weakest",
+                "fragile",
+                "risk",
+                "risks",
+                "wobble",
+                "wobbly",
+                "worry",
+                "worries",
+                "concern",
+                "unresolved",
+                "drag on coherence",
+                "drag on",
+                "pressure point",
+                "snags",
+                "snagging",
+                "messy",
+                "shaky",
+                "breaking",
+                "failing",
+                "unstable",
+            ),
+        )
+        mission_score = self._count_phrase_matches(
+            compact,
+            (
+                "creator",
+                "mission",
+                "purpose",
+                "trying to accomplish",
+                "what this is for",
+                "what makes",
+                "different from",
+                "describe me",
+                "describe this project",
+            ),
+        )
+        values_score = self._count_phrase_matches(
+            compact,
+            (
+                "proud",
+                "admire",
+                "excites",
+                "success",
+                "matters most",
+                "important",
+                "feel about",
+                "feel like",
+                "most real",
+                "close to something real",
+                "progress we have made",
+            ),
+        )
+        tokens = set(self._tokenize(compact))
+        direction_score += self._count_token_matches(
+            tokens,
+            {
+                "heading",
+                "headed",
+                "going",
+                "direction",
+                "future",
+                "becoming",
+                "become",
+                "trajectory",
+                "evolving",
+                "evolve",
+                "next",
+                "land",
+                "landing",
+                "tighten",
+            },
+        )
+        if tokens.intersection({"becoming", "become", "turning", "growing", "evolving", "headed", "heading"}) and tokens.intersection({"what", "where", "this", "all", "us"}):
+            direction_score += 2
+        if tokens.intersection({"solid", "strong", "stable", "grounded", "coherent"}) and tokens.intersection({"what", "feels", "seems", "now", "most"}):
+            state_score += 2
+        risk_score += self._count_token_matches(
+            tokens,
+            {
+                "weak",
+                "weakest",
+                "fragile",
+                "risk",
+                "risks",
+                "wobble",
+                "wobbly",
+                "worry",
+                "worried",
+                "concern",
+                "concerns",
+                "unresolved",
+                "drag",
+                "pressure",
+                "point",
+                "snag",
+                "snags",
+                "messy",
+                "shaky",
+                "off",
+                "unstable",
+                "failing",
+                "broken",
+            },
+        )
+        if "point" in tokens and tokens.intersection({"what", "why", "for", "purpose"}):
+            risk_score = max(0, risk_score - 1)
+        mission_score += self._count_token_matches(
+            tokens,
+            {
+                "creator",
+                "mission",
+                "purpose",
+                "accomplish",
+                "difference",
+                "different",
+                "why",
+                "built",
+                "building",
+            },
+        )
+        if tokens.intersection({"purpose", "for", "point", "built", "building"}) and tokens.intersection({"what", "why", "this", "project", "system"}):
+            mission_score += 2
+        values_score += self._count_token_matches(
+            tokens,
+            {
+                "proud",
+                "admire",
+                "excited",
+                "excites",
+                "success",
+                "important",
+                "matters",
+                "real",
+                "understand",
+                "understanding",
+                "close",
+            },
+        )
+        if tokens.intersection({"important", "matter", "matters", "real", "alive"}) and tokens.intersection({"what", "feels", "seems", "most", "now"}):
+            values_score += 2
+        broad_state_cues = self._count_token_matches(
+            tokens,
+            {
+                "overall",
+                "project",
+                "system",
+                "state",
+                "situation",
+                "describe",
+                "shape",
+                "sitting",
+                "locking",
+                "stabilize",
+                "stabilizing",
+                "grounded",
+                "honestly",
+                "together",
+                "working",
+                "going",
+            },
+        )
+        state_score += broad_state_cues
+        scores = {
+            "state": state_score,
+            "direction": direction_score,
+            "risk": risk_score,
+            "mission": mission_score,
+            "values": values_score,
+        }
+        if risk_score > 0:
+            return "risk"
+        if direction_score > 0:
+            return "direction"
+        if mission_score > 0:
+            return "mission"
+        if values_score > 0:
+            return "values"
+        best_frame = max(scores, key=scores.get)
+        if scores[best_frame] > 0:
+            return best_frame
+        if any(token in compact for token in ("think", "feel", "describe", "honestly", "overall", "together")):
+            return "state"
+        return None
+
+    def _detect_implicit_conversational_frame(
+        self,
+        query: str,
+        session_messages: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        normalized = " ".join(str(query or "").strip().lower().split())
+        compact = re.sub(r"[^a-z0-9'\s]+", " ", normalized)
+        compact = " ".join(compact.split())
+        if not compact or len(compact) > 180:
+            return None
+        if self._detect_grounded_memory_query(query) is not None:
+            return None
+        if any(token in compact for token in ("today", "time", "date", "day of the week")):
+            return None
+        if any(token in compact for token in ("def ", "class ", "import ", "traceback", "/api/", "http://", "https://")):
+            return None
+        assistant_snapshot = self._recent_assistant_snapshot(session_messages, current_query=query)
+        if not assistant_snapshot:
+            return None
+        active_topics = self._recent_user_topics(session_messages, current_query=query, limit=3)
+        if not active_topics and not assistant_snapshot:
+            return None
+        compact_tokens = set(compact.split())
+        continuity_flags = self._conversational_followup_flags(compact)
+        deictic_tokens = continuity_flags["deictic_tokens"]
+        scope_tokens = continuity_flags["scope_tokens"]
+        implicit_phrases = (
+            "stay with that thought",
+            "stay with that",
+            "stay with this thought",
+            "stay with this",
+            "same for",
+            "same with",
+            "same here",
+            "for the python one",
+            "for the code one",
+            "for that one",
+            "on the hud too",
+            "on telegram",
+            "does that work there too",
+            "what about that case",
+            "same thing there",
+            "would that still be true there",
+            "does that line up with the hud",
+            "over there too",
+            "same on that side",
+            "locally too",
+            "same in browser",
+            "same in the cloud",
+            "on desktop too",
+            "same on this machine",
+            "what about in the browser hud",
+            "does that also work locally",
+            "same thing in telegram",
+            "does it still work over there",
+            "what about in that path",
+            "does that also fit there",
+            "is that still how it works there",
+            "same for that route",
+            "what about that flow",
+            "what still carries over there",
+            "does that still hold here",
+            "does this still hold here",
+            "does that carry over",
+            "does this carry over",
+            "so that still applies",
+            "so this still applies",
+            "does that apply here too",
+            "does this apply here too",
+            "keep talking about that",
+            "keep talking about this",
+            "that feels important",
+            "this feels important",
+            "that seems important",
+            "this seems important",
+            "is that what worries you most",
+            "is that what worries you",
+            "does that still worry you",
+            "does this still worry you",
+            "is that what you mean",
+            "is this what you mean",
+            "is that still the problem",
+            "is this still the problem",
+            "is that still the main thing",
+            "is this still the main thing",
+            "what about the other part",
+            "what about that part",
+            "what about this side of it",
+            "what about that side of it",
+            "what part matters most",
+            "which part matters most",
+            "what part is still fragile",
+            "which part is still fragile",
+        )
+        if any(phrase in compact for phrase in implicit_phrases):
+            return "followup"
+        if continuity_flags["ultra_short_followup"] and assistant_snapshot and active_topics:
+            return "followup"
+        if continuity_flags["short_scope_followup"]:
+            return "followup"
+        if continuity_flags["environment_followup"]:
+            return "followup"
+        if continuity_flags["referential_followup"]:
+            return "followup"
+        if len(compact_tokens) <= 8 and bool(compact_tokens.intersection({"carry", "carries", "over"})):
+            if compact_tokens.intersection({"there", "here", "across", "still"}):
+                return "followup"
+        if len(compact_tokens) <= 8 and (
+            ({"line", "up"} <= compact_tokens)
+            or ({"starting", "land"} <= compact_tokens)
+            or ({"most", "real"} <= compact_tokens)
+        ):
+            if compact_tokens.intersection(scope_tokens.union({"there", "too", "here"})):
+                return "followup"
+            if compact_tokens.intersection({"next", "tighten", "going", "headed", "land", "starting"}):
+                return "direction"
+            if compact_tokens.intersection({"real", "important", "matters"}):
+                return "values"
+            return "state"
+        if len(compact_tokens) <= 8 and (
+            ({"that", "important"} <= compact_tokens)
+            or ({"this", "important"} <= compact_tokens)
+            or ({"that", "mean"} <= compact_tokens)
+            or ({"this", "mean"} <= compact_tokens)
+            or ({"that", "worries"} <= compact_tokens)
+            or ({"this", "worries"} <= compact_tokens)
+            or ({"that", "problem"} <= compact_tokens)
+            or ({"this", "problem"} <= compact_tokens)
+            or ({"part", "matters"} <= compact_tokens)
+            or ({"part", "fragile"} <= compact_tokens)
+            or ({"stay", "that"} <= compact_tokens)
+            or ({"stay", "this"} <= compact_tokens)
+        ):
+            return "followup"
+        return None
+
+    def _looks_like_structural_explanatory_followup(
+        self,
+        compact: str,
+        compact_tokens: set[str],
+    ) -> bool:
+        if not compact_tokens or len(compact_tokens) > 8:
+            return False
+        explanation_starters = {"why", "how", "what", "can", "could", "would"}
+        explanation_targets = {"that", "this", "it", "there", "here"}
+        explanation_reason_tokens = {
+            "mean",
+            "meant",
+            "meaning",
+            "saying",
+            "say",
+            "makes",
+            "making",
+            "reason",
+            "reasons",
+        }
+        elaboration_action_tokens = {
+            "thinking",
+            "unpack",
+            "expand",
+            "elaborate",
+            "continue",
+            "deeper",
+            "further",
+            "detail",
+            "details",
+            "through",
+        }
+        elaboration_context_tokens = {
+            "more",
+            "else",
+            "thought",
+            "point",
+            "part",
+            "little",
+            "exactly",
+            "again",
+        }
+        if compact_tokens.intersection(explanation_starters) and compact_tokens.intersection(explanation_targets):
+            if compact_tokens.intersection(explanation_reason_tokens):
+                return True
+        if (
+            "how" in compact_tokens
+            and "thinking" in compact_tokens
+            and compact_tokens.intersection(explanation_targets)
+        ):
+            return True
+        if compact_tokens.intersection(elaboration_action_tokens):
+            if compact_tokens.intersection(explanation_targets.union(elaboration_context_tokens)):
+                return True
+        if compact.startswith("tell me") or compact.startswith("walk me"):
+            if compact_tokens.intersection({"more", "through", "deeper", "further", "again"}):
+                return True
+        if (
+            compact_tokens.intersection({"expand", "elaborate", "unpack"})
+            and compact_tokens.intersection({"point", "part", "thought", "bit", "little"})
+        ):
+            return True
+        if (
+            compact_tokens.intersection({"meaning", "meant"})
+            and compact_tokens.intersection(explanation_targets.union({"you"}))
+        ):
+            return True
+        return False
+
+    def _conversational_followup_flags(self, text: str) -> Dict[str, Any]:
+        compact = " ".join(str(text or "").strip().lower().split())
+        tokens = set(re.findall(r"[a-z0-9']+", compact))
+        deictic_tokens = {"that", "this", "it", "there", "here", "same", "also", "too"}
+        referential_tokens = {"that", "this", "it"}
+        scope_tokens = {
+            "browser",
+            "hud",
+            "telegram",
+            "bot",
+            "cloud",
+            "desktop",
+            "legion",
+            "local",
+            "locally",
+            "machine",
+            "remote",
+            "remotely",
+            "route",
+            "path",
+            "flow",
+            "side",
+            "lane",
+        }
+        environment_tokens = {
+            "browser",
+            "hud",
+            "telegram",
+            "bot",
+            "cloud",
+            "desktop",
+            "legion",
+            "local",
+            "locally",
+            "machine",
+            "remote",
+            "remotely",
+        }
+        continuity_signal_tokens = {
+            "important",
+            "mean",
+            "problem",
+            "apply",
+            "python",
+            "code",
+            "hold",
+            "carry",
+            "over",
+            "side",
+            "there",
+            "case",
+            "telegram",
+            "hud",
+            "work",
+            "true",
+            "route",
+            "path",
+            "flow",
+            "fit",
+            "local",
+            "locally",
+            "browser",
+            "cloud",
+            "desktop",
+            "legion",
+            "machine",
+            "risk",
+            "fragile",
+            "worry",
+            "worries",
+            "matters",
+            "matter",
+            "part",
+            "same",
+            "other",
+            "main",
+            "thing",
+            "one",
+            "too",
+            "thought",
+        }
+        environment_continuity_tokens = {"same", "too", "there", "here", "also", "work", "apply", "true"}
+        bridge_followup_tokens = {"and", "then", "what", "about", "on", "in"}
+        token_count = len(tokens)
+        return {
+            "tokens": tokens,
+            "token_count": token_count,
+            "deictic_tokens": deictic_tokens,
+            "scope_tokens": scope_tokens,
+            "referential_tokens": referential_tokens,
+            "environment_tokens": environment_tokens,
+            "ultra_short_followup": (
+                token_count <= 3 and bool(tokens.intersection({"same", "there", "here", "too", "this", "that"}))
+            ),
+            "short_scope_followup": (
+                token_count <= 5
+                and (
+                    (
+                        bool(tokens.intersection(deictic_tokens))
+                        and bool(tokens.intersection(scope_tokens))
+                    )
+                    or (
+                        bool(tokens.intersection(scope_tokens))
+                        and bool(tokens.intersection(bridge_followup_tokens))
+                    )
+                )
+            ),
+            "environment_followup": (
+                token_count <= 8
+                and bool(tokens.intersection(environment_tokens))
+                and (
+                    bool(tokens.intersection(environment_continuity_tokens))
+                    or bool(tokens.intersection(bridge_followup_tokens))
+                )
+            ),
+            "referential_followup": (
+                token_count <= 10
+                and bool(tokens.intersection(referential_tokens))
+                and bool(tokens.intersection(continuity_signal_tokens))
+            ),
+        }
 
     def _compose_grounded_memory_answer(
         self,
@@ -2261,7 +3263,7 @@ class ConversationMemoryService:
             topic_pool.extend(summary_topics)
             topic_pool.extend(global_summary_topics)
         recent_topics = self._unique_grounded_memory_items(topic_pool, limit=4)
-        assistant_snapshot = self._recent_assistant_snapshot(session_messages)
+        assistant_snapshot = self._recent_assistant_snapshot(session_messages, current_query=query)
         memory_snippets = self._unique_grounded_memory_items(
             [
                 self._trim_grounded_memory_snippet(str(item.get("text") or ""), max_chars=150)
@@ -2305,8 +3307,29 @@ class ConversationMemoryService:
             if recent_topics:
                 parts.append(f"More recently, you were working on {self._join_grounded_memory_items(recent_topics[:3])}.")
         elif recall_kind == "session":
+            normalized_query = " ".join(str(query or "").strip().lower().split())
             if recent_topics:
-                parts.append(f"Where we left off, we were working on {self._join_grounded_memory_items(recent_topics[:3])}.")
+                if any(
+                    phrase in normalized_query
+                    for phrase in (
+                        "are you aware of recent updates",
+                        "recent updates",
+                        "quick update",
+                        "quick recap",
+                        "catch me up",
+                        "bring me up to speed",
+                        "what changed",
+                        "what have we changed lately",
+                        "what have we done lately",
+                    )
+                ):
+                    parts.append(
+                        f"Yes, I am grounded in our recent O.B.E.O.S. updates. We have been working on {self._join_grounded_memory_items(recent_topics[:3])}."
+                    )
+                else:
+                    parts.append(
+                        f"Where we left off, we were working on {self._join_grounded_memory_items(recent_topics[:3])}."
+                    )
             else:
                 parts.append("I can anchor us from the stored session history.")
             if preferred_name:
@@ -2363,6 +3386,211 @@ class ConversationMemoryService:
                     "kind": str(item.get("memory_type") or "memory"),
                     "event_id": (item.get("metadata") or {}).get("event_id") or item.get("id"),
                     "session_id": (item.get("metadata") or {}).get("session_id"),
+                }
+            )
+        return answer, provenance
+
+    def _compose_grounded_conversational_answer(
+        self,
+        *,
+        session_id: str,
+        frame: str,
+        query: str,
+        session_messages: List[Dict[str, Any]],
+        session_summaries: List[Dict[str, Any]],
+        global_memories: List[Dict[str, Any]],
+        recent_events: List[Dict[str, Any]],
+        operator_profile: Optional[Dict[str, Any]],
+        knowledge_hits: List[Dict[str, Any]],
+        citations: List[Dict[str, Any]],
+    ) -> tuple[str, List[Dict[str, Any]]]:
+        del knowledge_hits
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        operator_role = str(profile.get("operator_role") or "").strip()
+        recent_topics = self._recent_user_topics(session_messages, current_query=query, limit=4)
+        active_work = [
+            str(item).strip()
+            for item in list(profile.get("active_work") or [])
+            if str(item).strip()
+        ]
+        if recent_topics:
+            combined_topics: List[str] = []
+            combined_topics.extend(recent_topics)
+            combined_topics.extend(active_work)
+            active_work = self._unique_grounded_memory_items(combined_topics, limit=4)
+        if not active_work:
+            active_work = self._stored_work_topics(global_memories, limit=4)
+        if not active_work:
+            active_work = ["shared memory grounding", "response latency", "operator surface cohesion"]
+
+        assistant_snapshot = self._recent_assistant_snapshot(session_messages, current_query=query)
+        event_snippets = self._unique_grounded_memory_items(
+            [
+                self._trim_grounded_memory_snippet(str(item.get("message") or ""), max_chars=120)
+                for item in recent_events
+                if str(item.get("message") or "").strip()
+                and not self._looks_like_low_value_event_snippet(str(item.get("message") or ""))
+            ],
+            limit=2,
+        )
+        summary_topics = self._unique_grounded_memory_items(
+            [
+                topic
+                for summary in session_summaries
+                for topic in self._extract_summary_topics(summary.get("summary"))
+            ],
+            limit=3,
+        )
+        citation_titles = self._unique_grounded_memory_items(
+            [
+                str(item.get("title") or item.get("source_file") or "").strip()
+                for item in citations[:3]
+                if str(item.get("title") or item.get("source_file") or "").strip()
+            ],
+            limit=2,
+        )
+        specialist_continuity = self._specialist_continuity_snapshot(session_id=session_id)
+        specialist_name = str(specialist_continuity.get("selected_agent") or "").strip()
+        specialist_task_focus = str(specialist_continuity.get("task_type") or "").strip()
+
+        salutation = f"{preferred_name}, " if preferred_name else ""
+        focus = self._join_grounded_memory_items(active_work[:3])
+        recent_focus = self._join_grounded_memory_items(recent_topics[:3]) if recent_topics else focus
+        followup_flags = self._conversational_followup_flags(query)
+        normalized_query = " ".join(str(query or "").strip().lower().split())
+        honest_tone = any(token in normalized_query for token in ("honestly", "honest", "real"))
+        direct_tone = any(token in normalized_query for token in ("talk to me", "what do you think", "how do you feel"))
+        opening = salutation or ""
+
+        if frame == "direction":
+            if honest_tone:
+                answer = (
+                    f"{opening}honestly, I think O.B.E.O.S. is moving toward a more coherent living system instead of a fragile chat shell. "
+                    f"The clearest tracks are {focus}, and the next best move is to keep tightening those until recall, latency, and surface behavior feel consistent together."
+                )
+            else:
+                answer = (
+                    f"{opening}I think O.B.E.O.S. is moving toward a more coherent living system instead of a fragile chat shell. "
+                    f"The clearest tracks right now are {focus}, and they point toward a system that can carry memory and intent more consistently."
+                )
+        elif frame == "risk":
+            answer = (
+                f"{opening}the weakest areas right now are wherever {focus} are not yet behaving as one system. "
+                "The real risk is not a lack of features. It is inconsistency between memory, retrieval, runtime health, and the operator surfaces."
+            )
+        elif frame == "followup":
+            if assistant_snapshot:
+                snapshot_text = assistant_snapshot.rstrip(".").strip()
+                lowered_snapshot = snapshot_text.lower()
+                if lowered_snapshot.startswith("more specifically, i mean "):
+                    snapshot_text = snapshot_text[len("more specifically, I mean ") :].strip(" ,.;:-")
+                elif lowered_snapshot.startswith("i mean "):
+                    snapshot_text = snapshot_text[len("I mean ") :].strip(" ,.;:-")
+                normalized_followup = " ".join(str(query or "").strip().lower().split())
+                if any(token in normalized_followup for token in ("why", "how so", "what makes you say")):
+                    answer = f"{opening}because {snapshot_text[:1].lower() + snapshot_text[1:] if snapshot_text else snapshot_text}."
+                elif any(token in normalized_followup for token in ("what else", "and then")):
+                    answer = f"{opening}another part of it is {snapshot_text[:1].lower() + snapshot_text[1:] if snapshot_text else snapshot_text}."
+                else:
+                    answer = f"{opening}more specifically, I mean {snapshot_text}."
+                continuity_focus = recent_focus if recent_topics else focus
+                terse_followup = any(
+                    (
+                        followup_flags.get("ultra_short_followup"),
+                        followup_flags.get("short_scope_followup"),
+                        followup_flags.get("environment_followup"),
+                        followup_flags.get("referential_followup"),
+                    )
+                )
+                if continuity_focus and terse_followup:
+                    if continuity_focus.lower() not in answer.lower():
+                        answer += f" More concretely, I am tying that to {continuity_focus}."
+                if continuity_focus and not any(
+                    (
+                        followup_flags.get("ultra_short_followup"),
+                        followup_flags.get("short_scope_followup"),
+                        followup_flags.get("environment_followup"),
+                        followup_flags.get("referential_followup"),
+                    )
+                ):
+                    answer += f" That still connects back to {continuity_focus}."
+                if specialist_name:
+                    answer += (
+                        f" I am still treating this as part of the {specialist_name} lane"
+                        f"{' focused on ' + specialist_task_focus if specialist_task_focus else ''}."
+                    )
+            else:
+                answer = (
+                    f"{opening}more specifically, I am still talking about {focus}. "
+                    "That is the thread I am carrying forward here."
+                )
+                if specialist_name:
+                    answer += (
+                        f" I am still treating it as part of the {specialist_name} lane"
+                        f"{' focused on ' + specialist_task_focus if specialist_task_focus else ''}."
+                    )
+        elif frame == "mission":
+            role_fragment = f" As I remember it, you are the {operator_role}." if operator_role else ""
+            answer = (
+                f"{opening}this project is about turning O.B.E.O.S. into a grounded operator environment instead of a disposable chatbot.{role_fragment} "
+                f"Right now that mission is showing up most clearly through {focus}."
+            )
+        elif frame == "values":
+            answer = (
+                f"{opening}what matters most right now is whether O.B.E.O.S. can carry memory and intent forward in a way that feels dependable. "
+                f"The clearest proof of progress I still have is around {focus}."
+            )
+        else:
+            if direct_tone:
+                answer = (
+                    f"{opening}what stands out most to me right now is {focus}. "
+                    "That is the work most directly shaping whether O.B.E.O.S. feels grounded, conversational, and coherent across every surface."
+                )
+            else:
+                answer = (
+                    f"{opening}the overall situation right now centers on {focus}. "
+                    "That is the work most directly shaping whether O.B.E.O.S. feels grounded, conversational, and coherent across every surface."
+                )
+
+        if recent_topics and recent_focus.lower() not in focus.lower():
+            answer += f" More recently, we were also pushing on {recent_focus}."
+        elif summary_topics and not recent_topics:
+            answer += f" The recent summaries still point through {self._join_grounded_memory_items(summary_topics[:2])}."
+        if assistant_snapshot and frame in {"state", "direction"}:
+            answer += f" The last stable assistant context I can lean on was about {assistant_snapshot.rstrip('.')}."
+        if event_snippets and frame in {"risk", "state"}:
+            answer += f" Recent runtime traces also mention {self._join_grounded_memory_items(event_snippets[:2])}."
+        if citation_titles and frame in {"mission", "direction"}:
+            answer += f" I also still have supporting knowledge nearby through {self._join_grounded_memory_items(citation_titles)}."
+
+        provenance: List[Dict[str, Any]] = []
+        for summary in session_summaries[:2]:
+            provenance.append({"kind": "session_summary", "event_id": summary.get("event_id"), "timestamp": summary.get("timestamp")})
+        for item in global_memories[:2]:
+            provenance.append(
+                {
+                    "kind": str(item.get("memory_type") or "memory"),
+                    "event_id": (item.get("metadata") or {}).get("event_id") or item.get("id"),
+                    "session_id": (item.get("metadata") or {}).get("session_id"),
+                }
+            )
+        for item in citations[:2]:
+            provenance.append(
+                {
+                    "kind": str(item.get("kind") or "knowledge"),
+                    "title": item.get("title"),
+                    "collection": item.get("collection"),
+                    "source_path": item.get("source_path"),
+                }
+            )
+        if specialist_continuity.get("event_id"):
+            provenance.append(
+                {
+                    "kind": "agent_selection",
+                    "event_id": specialist_continuity.get("event_id"),
+                    "selected_agent": specialist_name,
+                    "task_type": specialist_task_focus,
                 }
             )
         return answer, provenance
@@ -2450,11 +3678,15 @@ class ConversationMemoryService:
                     assistant_identity = "D.A.I.S.E. (Direct Artificial Intelligence System Environment)"
                     break
 
-        active_work = self._unique_grounded_memory_items(
-            self._stored_work_topics(memories, limit=4, session_id=session_id)
-            + self._recent_user_topics(messages, current_query="", limit=4),
-            limit=4,
-        )
+        recent_topics = self._recent_user_topics(messages, current_query="", limit=4)
+        stored_topics = self._stored_work_topics(memories, limit=4, session_id=session_id)
+        if len(recent_topics) >= 2:
+            active_work_seed = recent_topics
+        elif recent_topics:
+            active_work_seed = recent_topics + stored_topics
+        else:
+            active_work_seed = stored_topics
+        active_work = self._unique_grounded_memory_items(active_work_seed, limit=4)
         return {
             "session_id": session_id,
             "preferred_name": preferred_name,
@@ -2525,6 +3757,7 @@ class ConversationMemoryService:
                 continue
             text = str(message.get("text") or "")
             extracted_topics = self._extract_work_topics(text)
+            message_topics: List[str] = []
             for item in extracted_topics:
                 cleaned_item = self._trim_grounded_memory_snippet(item, max_chars=90)
                 if (
@@ -2533,9 +3766,11 @@ class ConversationMemoryService:
                     and not self._looks_like_noise_topic(cleaned_item)
                     and not self._looks_like_identity_fact(cleaned_item)
                 ):
-                    topics.append(cleaned_item)
-                    if len(topics) >= limit:
-                        return list(reversed(topics))
+                    message_topics.append(cleaned_item)
+            if message_topics:
+                topics.extend(message_topics)
+                if len(topics) >= limit:
+                    return topics[:limit]
             if extracted_topics:
                 continue
             snippet = self._trim_grounded_memory_snippet(text, max_chars=100)
@@ -2550,16 +3785,41 @@ class ConversationMemoryService:
             topics.append(snippet)
             if len(topics) >= limit:
                 break
-        return list(reversed(topics))
+        return topics[:limit]
 
-    def _recent_assistant_snapshot(self, session_messages: List[Dict[str, Any]]) -> str:
+    def _recent_assistant_snapshot(
+        self,
+        session_messages: List[Dict[str, Any]],
+        *,
+        current_query: str = "",
+    ) -> str:
+        recent_topics = self._recent_user_topics(session_messages, current_query=current_query, limit=4)
+        prioritized_topic_tokens = {
+            token
+            for topic in recent_topics
+            for token in self._tokenize(topic)
+            if len(token) >= 4
+        }
+        fallback_snapshot = ""
         for message in reversed(session_messages):
             if message.get("role") != "assistant":
                 continue
             snippet = self._trim_grounded_memory_snippet(str(message.get("text") or ""), max_chars=150)
-            if snippet and not self._looks_like_low_value_assistant_snapshot(snippet):
-                return snippet
-        return ""
+            if not snippet or self._looks_like_low_value_assistant_snapshot(snippet):
+                continue
+            if not fallback_snapshot:
+                fallback_snapshot = snippet
+            if prioritized_topic_tokens:
+                snippet_tokens = {
+                    token
+                    for token in self._tokenize(snippet)
+                    if len(token) >= 4
+                }
+                if snippet_tokens.intersection(prioritized_topic_tokens):
+                    return snippet
+            elif fallback_snapshot:
+                return fallback_snapshot
+        return fallback_snapshot
 
     def _recent_operator_facts(self, *, limit: int = 4) -> List[str]:
         facts: List[str] = []
@@ -2766,6 +4026,20 @@ class ConversationMemoryService:
                 "hint",
                 "you never responded",
                 "know about obeos",
+            )
+        ):
+            return []
+        if (
+            "spawn" in lowered
+            and any(
+                phrase in lowered
+                for phrase in (
+                    "tell me about spawn",
+                    "what do we know about spawn",
+                    "what have we got on spawn",
+                    "what is in our spawn knowledge",
+                    "do you still know anything about spawn",
+                )
             )
         ):
             return []
@@ -2984,10 +4258,36 @@ class ConversationMemoryService:
                 "conversation memory backed by events.db",
                 "d.a.i.s.e is online locally",
                 "route work through the rest of the ecosystem",
+                "the weakest areas right now are wherever",
+                "what stands out most to me right now is",
+                "the overall situation right now centers on",
+                "i think o.b.e.o.s. is moving toward a more coherent living system",
+                "honestly, i think o.b.e.o.s.",
+                "five, honestly, i think o.b.e.o.s.",
                 "hello, five. i'm here in o.b.e.o.s and ready",
                 "hello, i’m here in o.b.e.o.s and ready",
                 "welcome back, five. i'm here in o.b.e.o.s and ready",
                 "welcome back. i'm here in o.b.e.o.s and ready",
+            )
+        )
+
+    def _looks_like_low_value_event_snippet(self, text: str) -> bool:
+        lowered = self._clean_grounded_memory_text(text).lower()
+        if not lowered:
+            return True
+        return any(
+            token in lowered
+            for token in (
+                "routing chose ",
+                "active work:",
+                "memory retrieval (",
+                "request complete",
+                "phase=",
+                "decision_state",
+                "workers=",
+                "reported confidence",
+                "response_event_id",
+                "selected_agent",
             )
         )
 
@@ -3068,6 +4368,14 @@ class ConversationMemoryService:
         if len(cleaned) == 2:
             return f"{cleaned[0]} and {cleaned[1]}"
         return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
+
+    @staticmethod
+    def _count_phrase_matches(text: str, phrases: Sequence[str]) -> int:
+        return sum(1 for phrase in phrases if phrase in text)
+
+    @staticmethod
+    def _count_token_matches(tokens: set[str], candidates: set[str]) -> int:
+        return sum(1 for token in tokens if token in candidates)
 
     def _collection_summary_hit(
         self,
@@ -3294,6 +4602,7 @@ class ConversationMemoryService:
         )
         wants_overview = self._is_collection_overview_style_query(query, collection_label=collection_label)
         wants_coverage = self._collection_query_wants_coverage(query)
+        wants_resources = self._collection_query_wants_resources(query)
         architecture_summary = self._compose_architecture_collection_summary(
             collection=collection,
             collection_label=collection_label,
@@ -3306,6 +4615,10 @@ class ConversationMemoryService:
         )
         if architecture_summary and wants_overview:
             parts.append(architecture_summary.rstrip(".") + ".")
+            if wants_resources and str(collection or "").strip().lower() == "obeos":
+                parts.append(
+                    "Operator-facing resources currently include Blackfong governance, D.A.I.S.E. conversation, Thoughtglass, Memory Chamber, the browser HUD, TinyProgrammer, and the shared event-and-memory stack."
+                )
         elif support_summary:
             if cleaned_summary and not fallback_generated and support_summary.lower() in cleaned_summary.lower():
                 pass
@@ -3406,9 +4719,12 @@ class ConversationMemoryService:
         normalized = " ".join(str(query or "").strip().lower().split())
         if not normalized:
             return False
+        raw_label = str(collection_label or "").strip().lower()
         collection_forms = {
-            str(collection_label or "").strip().lower(),
-            str(collection_label or "").strip().lower().replace("_", " "),
+            raw_label,
+            raw_label.replace("_", " "),
+            re.sub(r"[^a-z0-9]+", "", raw_label),
+            " ".join(re.sub(r"[^a-z0-9]+", " ", raw_label).split()),
         }
         mentions_collection = any(form and form in normalized for form in collection_forms)
         if not mentions_collection:
@@ -3418,6 +4734,13 @@ class ConversationMemoryService:
             "who is",
             "what is",
             "what's",
+            "what resources",
+            "which resources",
+            "what tools",
+            "which tools",
+            "what do we have",
+            "what exists in",
+            "what is in",
             "give me an overview of",
             "explain",
         )
@@ -3440,6 +4763,23 @@ class ConversationMemoryService:
             "what is in the collection",
         )
         return any(marker in normalized for marker in coverage_markers)
+
+    def _collection_query_wants_resources(self, query: str) -> bool:
+        normalized = " ".join(str(query or "").strip().lower().split())
+        if not normalized:
+            return False
+        resource_markers = (
+            "what resources",
+            "which resources",
+            "what tools",
+            "which tools",
+            "what do we have",
+            "what is in obeos",
+            "what's in obeos",
+            "what exists in obeos",
+            "within obeos do we have",
+        )
+        return any(marker in normalized for marker in resource_markers)
 
     def _clean_grounded_collection_text(self, text: str) -> str:
         cleaned = " ".join(str(text or "").split())
@@ -4109,21 +5449,28 @@ class ConversationMemoryService:
     def _format_prompt_context(
         self,
         *,
+        session_id: str,
         agent_name: str,
+        query: str,
         session_messages: List[Dict[str, Any]],
         session_summaries: List[Dict[str, Any]],
         global_memories: List[Dict[str, Any]],
         recent_events: List[Dict[str, Any]],
         knowledge_context: str,
         operator_profile: Optional[Dict[str, Any]] = None,
+        grounded_conversation_answer: Optional[Dict[str, Any]] = None,
         transcript_window: int,
         prompt_budget_tokens: Optional[int] = None,
         prompt_mode: str = "standard",
         retrieval_profile: str = "fast",
     ) -> str:
+        standard_like = prompt_mode == "standard" and retrieval_profile in {"standard", "architecture"}
         sections: List[str] = [f"Retrieval profile: {agent_name} ({prompt_mode}, {retrieval_profile})"]
         if knowledge_context:
-            sections.append("Bounded retrieval context:\n" + knowledge_context)
+            context_text = knowledge_context
+            if standard_like and len(context_text) > 900:
+                context_text = context_text[:900].rstrip() + "\n[truncated for standard chat latency]"
+            sections.append("Bounded retrieval context:\n" + context_text)
         profile_lines: List[str] = []
         profile = dict(operator_profile or {})
         if profile.get("assistant_identity"):
@@ -4141,29 +5488,49 @@ class ConversationMemoryService:
                 "- Grounded facts: " + "; ".join(str(item) for item in list(profile.get("fact_statements") or [])[:2])
             )
         if profile_lines:
-            sections.append("Operator profile:\n" + "\n".join(profile_lines))
+            sections.append("Operator profile:\n" + "\n".join(profile_lines[: (3 if standard_like else len(profile_lines))]))
+        stance_text = self._build_conversational_stance(
+            query=query,
+            operator_profile=profile,
+            grounded_conversation_answer=grounded_conversation_answer,
+        )
+        if stance_text:
+            sections.append("Conversational stance:\n" + stance_text)
+        continuity_text = self._build_conversation_continuity(
+            session_messages=session_messages,
+            operator_profile=profile,
+            query=query,
+        )
+        if continuity_text:
+            sections.append("Conversation continuity:\n" + continuity_text)
+        specialist_text = self._build_specialist_continuity(session_id=session_id)
+        if specialist_text:
+            sections.append("Specialist continuity:\n" + specialist_text)
         if session_summaries:
             sections.append(
                 "Session summaries:\n" + "\n".join(
-                    f"- {summary['summary']}" for summary in session_summaries if summary["summary"]
+                    f"- {summary['summary']}"
+                    for summary in session_summaries[: (1 if standard_like else len(session_summaries))]
+                    if summary["summary"]
                 )
             )
         if global_memories:
             sections.append(
                 "Relevant global memory:\n" + "\n".join(
-                    f"- [{memory['memory_type']}] {memory['text'][:220]}"
-                    for memory in global_memories
+                    f"- [{memory['memory_type']}] {memory['text'][:(140 if standard_like else 220)]}"
+                    for memory in global_memories[: (2 if standard_like else len(global_memories))]
                     if memory["text"]
                 )
             )
-        if recent_events:
+        if recent_events and not standard_like:
             sections.append(
                 "Recent ecosystem events:\n" + "\n".join(
                     f"- {event['source']}/{event['event_type']}: {event['message']}"
                     for event in recent_events[:6]
                 )
             )
-        if session_messages:
+        # Standard chat already carries transcript turns as actual chat messages.
+        if session_messages and prompt_mode.startswith("quick"):
             sections.append(
                 "Recent transcript:\n" + "\n".join(
                     f"- {message['role']}: {message['text'][:220]}"
@@ -4171,6 +5538,108 @@ class ConversationMemoryService:
                 )
             )
         return self._apply_prompt_budget(sections, prompt_budget_tokens).strip()
+
+    def _build_specialist_continuity(self, *, session_id: str) -> str:
+        specialist = self._specialist_continuity_snapshot(session_id=session_id)
+        if specialist:
+            lines = [f"- Last selected specialist: {specialist['selected_agent']}."]
+            if specialist.get("task_type"):
+                lines.append(f"- Last task focus: {specialist['task_type']}.")
+            if specialist.get("synthesized") is not None:
+                lines.append(f"- Synthesized response: {'yes' if bool(specialist.get('synthesized')) else 'no'}.")
+            return "\n".join(lines)
+        return ""
+
+    def _specialist_continuity_snapshot(self, *, session_id: str) -> Dict[str, Any]:
+        if not session_id:
+            return {}
+        events = self.event_store.list_events_for_session(
+            session_id,
+            types=["agent_selection"],
+            ascending=False,
+            limit=3,
+        )
+        for event in events:
+            payload = event.payload or {}
+            selected_agent = str(payload.get("selected_agent") or "").strip()
+            if not selected_agent:
+                continue
+            return {
+                "event_id": event.id,
+                "selected_agent": selected_agent,
+                "task_type": str(payload.get("task_type") or "").strip(),
+                "synthesized": payload.get("synthesized"),
+            }
+        return {}
+
+    def _build_conversational_stance(
+        self,
+        *,
+        query: str,
+        operator_profile: Dict[str, Any],
+        grounded_conversation_answer: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        operator_role = str(profile.get("operator_role") or "").strip()
+        active_work = [
+            str(item).strip()
+            for item in list(profile.get("active_work") or [])
+            if str(item).strip()
+        ]
+        if not preferred_name and not operator_role and not active_work and not grounded_conversation_answer:
+            return ""
+        lines: List[str] = []
+        if preferred_name:
+            lines.append(f"- Address the operator naturally as {preferred_name} when it fits the moment.")
+        if operator_role:
+            lines.append(f"- Keep in mind the operator is the {operator_role}.")
+        if active_work:
+            lines.append(f"- Current shared focus: {self._join_grounded_memory_items(active_work[:3])}.")
+        if isinstance(grounded_conversation_answer, dict) and str(grounded_conversation_answer.get("answer") or "").strip():
+            frame = str(grounded_conversation_answer.get("kind") or "").strip() or "broad"
+            lines.append(f"- Broad conversation frame: {frame}.")
+            lines.append("- For open-ended project/system questions, stay anchored in the current shared focus and speak like D.A.I.S.E., not like a trace or retrieval dump.")
+        else:
+            compact_query = " ".join(str(query or "").strip().lower().split())
+            if any(token in compact_query for token in ("project", "system", "obeos", "work", "us", "direction", "risk", "progress", "think", "feel")):
+                lines.append("- For broad project or system questions, ground the reply in current shared focus before expanding outward.")
+        return "\n".join(lines)
+
+    def _build_conversation_continuity(
+        self,
+        *,
+        session_messages: List[Dict[str, Any]],
+        operator_profile: Dict[str, Any],
+        query: str,
+    ) -> str:
+        profile = dict(operator_profile or {})
+        followup_flags = self._conversational_followup_flags(query)
+        recent_topics = self._recent_user_topics(session_messages, current_query=query, limit=3)
+        active_work = [
+            str(item).strip()
+            for item in list(profile.get("active_work") or [])
+            if str(item).strip()
+        ]
+        if recent_topics:
+            if any(
+                (
+                    followup_flags.get("ultra_short_followup"),
+                    followup_flags.get("short_scope_followup"),
+                    followup_flags.get("environment_followup"),
+                    followup_flags.get("referential_followup"),
+                )
+            ):
+                active_work = recent_topics
+            else:
+                active_work = self._unique_grounded_memory_items(recent_topics + active_work, limit=4)
+        assistant_snapshot = self._recent_assistant_snapshot(session_messages, current_query=query)
+        lines: List[str] = []
+        if active_work:
+            lines.append(f"- Ongoing thread: {self._join_grounded_memory_items(active_work[:3])}.")
+        if assistant_snapshot:
+            lines.append(f"- Last stable assistant context: {assistant_snapshot.rstrip('.')}.")
+        return "\n".join(lines)
 
     def _resolve_prompt_mode(self, agent_name: str, analysis_mode: str) -> str:
         normalized_agent = self._normalize_agent_name(agent_name)
@@ -4571,11 +6040,17 @@ class ConversationMemoryService:
                 or "unknown"
             )
             fallback = payload.get("fallback_reason") or payload.get("timeout_reason")
+            response_path = payload.get("response_path") or "unknown"
+            selected_model = payload.get("selected_model") or payload.get("model") or "unknown"
+            model_chain = payload.get("model_chain") or []
             summary = (
                 f"Latency {float(payload.get('execution_time_ms', 0.0) or 0.0) / 1000:.1f}s "
-                f"via {payload.get('provider', 'local')}/{payload.get('model', 'unknown')}; "
+                f"via {payload.get('provider', 'local')}/{payload.get('model', 'unknown')} "
+                f"(path={response_path}, selected={selected_model}); "
                 f"prompt={prompt_tokens}, attempts={payload.get('ollama_attempts', 'unknown')}."
             )
+            if model_chain:
+                summary += f" Chain={', '.join(str(item) for item in model_chain[:4])}."
             if fallback:
                 summary += f" Fallback: {str(fallback)[:120]}."
             return summary
@@ -4614,7 +6089,8 @@ class ConversationMemoryService:
         if event.type == "backend_health_observation":
             return (
                 f"Backend {payload.get('provider', 'local')} is "
-                f"{payload.get('status', 'unknown')} with model {payload.get('configured_model', 'unknown')}."
+                f"{payload.get('status', 'unknown')} with model {payload.get('configured_model', 'unknown')}"
+                f" and {payload.get('installed_model_count', 'unknown')} installed models."
             )
         if event.type == "environment_snapshot":
             environment = payload.get("environment", payload)
@@ -4638,6 +6114,7 @@ class ConversationMemoryService:
             retrieval_profile = payload.get("retrieval_profile") or "unknown"
             transport = payload.get("transport") or "local"
             fallback = payload.get("fallback_used")
+            response_path = payload.get("response_path") or "unknown"
             fallback_text = ""
             if fallback is not None:
                 fallback_text = f" fallback={bool(fallback)}"
@@ -4645,7 +6122,7 @@ class ConversationMemoryService:
                 f"Request outcome {payload.get('decision_state', 'unknown')} "
                 f"success={payload.get('success', 'unknown')} "
                 f"via {provider}/{model} "
-                f"profile={retrieval_profile} transport={transport}{fallback_text}."
+                f"profile={retrieval_profile} transport={transport} path={response_path}{fallback_text}."
             )
         if event.type == "agent_trust_update":
             return (

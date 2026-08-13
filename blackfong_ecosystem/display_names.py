@@ -49,7 +49,7 @@ def format_chat_status_line(
     *,
     result: Optional[Dict[str, Any]] = None,
     selection: Optional[Dict[str, Any]] = None,
-    analysis_mode: str = "fast",
+    analysis_mode: str = "standard",
     request_id: Optional[str] = None,
 ) -> str:
     agent = display_agent_name(
@@ -61,7 +61,7 @@ def format_chat_status_line(
     confidence_text = f"{confidence:.2f}" if confidence is not None else "n/a"
     elapsed = (result or {}).get("execution_time_ms")
     elapsed_text = f"{float(elapsed) / 1000:.1f}s" if isinstance(elapsed, (int, float)) else ""
-    parts = [agent, str(analysis_mode or "fast"), f"confidence {confidence_text}"]
+    parts = [agent, str(analysis_mode or "standard"), f"confidence {confidence_text}"]
     if elapsed_text:
         parts.append(elapsed_text)
     if request_id:

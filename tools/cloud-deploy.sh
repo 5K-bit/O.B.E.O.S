@@ -4,6 +4,7 @@ set -Eeuo pipefail
 APP_DIR="${OBEOS_APP_DIR:-/opt/obeos}"
 DEPLOY_KEY="${OBEOS_DEPLOY_KEY:-$HOME/.ssh/obeos_cloud_deploy_ed25519}"
 BRANCH="$(git -C "${OBEOS_APP_DIR:-/opt/obeos}" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'main')"
+DEPLOY_HISTORY_FILE="${OBEOS_DEPLOY_HISTORY_FILE:-$APP_DIR/data/deploy-history.log}"
 
 log() {
   printf '\n[%s] %s\n' "$(date -Is)" "$*"
@@ -49,6 +50,14 @@ fi
 after_ref="$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
 log "Updated revision: ${after_ref}"
 git status --short --branch || true
+
+mkdir -p "$(dirname "$DEPLOY_HISTORY_FILE")"
+printf '%s branch=%s before=%s after=%s host=%s\n' \
+  "$(date -Is)" \
+  "$BRANCH" \
+  "$before_ref" \
+  "$after_ref" \
+  "$(hostname)" >>"$DEPLOY_HISTORY_FILE"
 
 log "Deploying containers"
 cp -n .env.cloud.example .env.cloud

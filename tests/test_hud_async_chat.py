@@ -259,6 +259,7 @@ def test_completed_background_chat_refreshes_session_messages(tmp_path: Path):
         },
     ).get_json()
 
+    assert accepted["analysis_mode"] == "standard"
     session_id = accepted["session_id"]
     deadline = time.time() + 2.0
     while time.time() < deadline:

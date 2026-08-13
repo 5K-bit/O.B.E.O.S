@@ -443,12 +443,19 @@ class DAISE:
                     request_started=request_started,
                 )
 
+            continuity_routing_hint = self._continuity_routing_hint(
+                session_id=session_id,
+                user_input=user_input,
+                analysis_mode=analysis_mode,
+                retrieval_profile=retrieval_profile,
+            )
             route_scores = self._route_agent_scores(
                 user_input=user_input,
                 modality=modality,
                 agent_names=list(agents.keys()),
                 routing_keywords=routing_keywords or {},
                 agent_override=agent_override,
+                continuity_hint=continuity_routing_hint,
             )
             suggested_agent = max(route_scores, key=route_scores.get)
             routing_confidence = round(route_scores[suggested_agent], 3)
@@ -527,6 +534,7 @@ class DAISE:
                         "requires_multi_agent_consensus": quality_evaluation.get("requires_multi_agent_consensus"),
                         "threshold_used": quality_evaluation.get("threshold_used"),
                     },
+                    "continuity_routing_hint": continuity_routing_hint,
                 },
                 confidence=routing_confidence,
                 session_id=session_id,
@@ -651,6 +659,26 @@ class DAISE:
                 parent_event_id=routing_event.id,
             )
 
+            grounded_memory_result = self._handle_grounded_memory_bundle(
+                user_input=user_input,
+                modality=modality,
+                context=context,
+                policy_decision=policy_decision,
+                session_id=session_id,
+                correlation_id=correlation_id,
+                request_id=request_id,
+                request_started=request_started,
+                progress_callback=progress_callback,
+                query_event=query_event,
+                retrieval_profile=retrieval_profile,
+                analysis_mode=analysis_mode,
+                memory_bundles=memory_bundles,
+                suggested_agent=suggested_agent,
+                candidate_agents=candidate_agents,
+            )
+            if grounded_memory_result is not None:
+                return grounded_memory_result
+
             self._emit_phase(
                 progress_callback,
                 request_id=request_id,
@@ -707,6 +735,36 @@ class DAISE:
                 response_text = self._synthesize_reports(top_report, second_report)
                 response_confidence = round(min(0.97, (top_report.score + second_report.score) / 2), 3)
                 synthesis_notes = f"Synthesized {top_report.agent} with {second_report.agent} because score gap was {score_gap:.3f}."
+
+            grounded_conversation_override = self._grounded_conversation_override_for_generic_report(
+                user_input=user_input,
+                top_report=top_report,
+                selected_agent=selected_agent,
+                synthesized=synthesized,
+                memory_bundles=memory_bundles,
+            )
+            if grounded_conversation_override is not None:
+                response_text = grounded_conversation_override["response"]
+                response_confidence = round(max(response_confidence, grounded_conversation_override["confidence"]), 3)
+                selected_agent = grounded_conversation_override["selected_agent"]
+                output_agent = grounded_conversation_override["output_agent"]
+                top_report.provider = grounded_conversation_override["provider"]
+                top_report.model = grounded_conversation_override["model"]
+                top_report.task_type = grounded_conversation_override["task_type"]
+                top_report.backend_error = None
+                top_report.backend_metadata = dict(grounded_conversation_override["backend_metadata"])
+                top_report.raw_result = {
+                    **dict(top_report.raw_result or {}),
+                    "response": response_text,
+                    "provider": top_report.provider,
+                    "model": top_report.model,
+                    "task_type": top_report.task_type,
+                    "backend_error": None,
+                    "backend_metadata": top_report.backend_metadata,
+                }
+                synthesis_notes = (
+                    f"{synthesis_notes} " if synthesis_notes else ""
+                ) + "Replaced low-information generic specialist reply with grounded conversation context."
 
             response_text = self._wrap_final_response(
                 response_text,
@@ -863,6 +921,21 @@ class DAISE:
                     "backend_error": top_report.backend_error,
                     "fallback_used": bool(top_report.backend_error),
                     "backend_metadata": top_report.backend_metadata,
+                    "selected_model": top_report.backend_metadata.get("selected_model") or top_report.model,
+                    "model_chain": top_report.backend_metadata.get("model_chain") or [top_report.model],
+                    "effective_timeout_s": top_report.backend_metadata.get("effective_timeout_s"),
+                    "streamed": top_report.backend_metadata.get("streamed"),
+                    "response_path": top_report.backend_metadata.get("response_path"),
+                    "fallback_trigger": top_report.backend_metadata.get("fallback_trigger"),
+                    "health_forced_fallback": bool(top_report.backend_metadata.get("health_forced_fallback")),
+                    "backend_health_state_at_request": top_report.backend_metadata.get("backend_health_state_at_request"),
+                    "recovery_probe_attempted": bool(top_report.backend_metadata.get("recovery_probe_attempted")),
+                    "recovery_probe_succeeded": bool(top_report.backend_metadata.get("recovery_probe_succeeded")),
+                    "degraded_reason": top_report.backend_metadata.get("degraded_reason"),
+                    "recovery_reason": top_report.backend_metadata.get("recovery_reason"),
+                    "timeout_window_seconds": top_report.backend_metadata.get("timeout_window_seconds"),
+                    "live_lane_attempted": bool(top_report.backend_metadata.get("live_lane_attempted")),
+                    "fallback_mode": top_report.backend_metadata.get("fallback_mode") or "none",
                     "prompt_metrics": top_report.backend_metadata.get("prompt_metrics", {}),
                     "ollama_attempts": top_report.backend_metadata.get("ollama_attempts"),
                     "wall_time_ms": top_report.backend_metadata.get("wall_time_ms"),
@@ -922,6 +995,21 @@ class DAISE:
                     "retrieval_profile": retrieval_profile,
                     "analysis_mode": analysis_mode,
                     "transport": context.get("transport"),
+                    "selected_model": top_report.backend_metadata.get("selected_model") or top_report.model,
+                    "model_chain": top_report.backend_metadata.get("model_chain") or [top_report.model],
+                    "effective_timeout_s": top_report.backend_metadata.get("effective_timeout_s"),
+                    "response_path": top_report.backend_metadata.get("response_path"),
+                    "fallback_trigger": top_report.backend_metadata.get("fallback_trigger"),
+                    "health_forced_fallback": bool(top_report.backend_metadata.get("health_forced_fallback")),
+                    "streamed": top_report.backend_metadata.get("streamed"),
+                    "backend_health_state_at_request": top_report.backend_metadata.get("backend_health_state_at_request"),
+                    "recovery_probe_attempted": bool(top_report.backend_metadata.get("recovery_probe_attempted")),
+                    "recovery_probe_succeeded": bool(top_report.backend_metadata.get("recovery_probe_succeeded")),
+                    "degraded_reason": top_report.backend_metadata.get("degraded_reason"),
+                    "recovery_reason": top_report.backend_metadata.get("recovery_reason"),
+                    "timeout_window_seconds": top_report.backend_metadata.get("timeout_window_seconds"),
+                    "live_lane_attempted": bool(top_report.backend_metadata.get("live_lane_attempted")),
+                    "fallback_mode": top_report.backend_metadata.get("fallback_mode") or "none",
                 },
                 confidence=response_confidence,
                 session_id=session_id,
@@ -1180,6 +1268,120 @@ class DAISE:
                 return f"Reasoning trace captured {len(steps)} step(s)."
         return "Specialist report generated."
 
+    def _grounded_conversation_override_for_generic_report(
+        self,
+        *,
+        user_input: str,
+        top_report: AgentReport,
+        selected_agent: str,
+        synthesized: bool,
+        memory_bundles: Dict[str, Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if synthesized or selected_agent != "jarvis":
+            return None
+        normalized_provider = " ".join(str(top_report.provider or "").strip().lower().split())
+        normalized_model = " ".join(str(top_report.model or "").strip().lower().split())
+        normalized_response = " ".join(str(top_report.response or "").strip().lower().split())
+        if normalized_provider not in {"heuristic", ""}:
+            return None
+        if normalized_model and normalized_model not in {"fake-jarvis", "heuristic", "fallback-heuristic"}:
+            return None
+        if not self._looks_like_low_information_agent_reply(normalized_response):
+            return None
+        primary_bundle = memory_bundles.get(selected_agent) or next(iter(memory_bundles.values()), {})
+        if not isinstance(primary_bundle, dict):
+            return None
+        grounded = primary_bundle.get("grounded_conversation_answer")
+        if not isinstance(grounded, dict):
+            return None
+        grounded_kind = " ".join(str(grounded.get("kind") or "").strip().lower().split())
+        compact_query = " ".join(str(user_input or "").strip().lower().split())
+        compact_query_tokens = set(self.conversation_memory._tokenize(compact_query))
+        followup_flags = self.conversation_memory._conversational_followup_flags(compact_query)
+        carry_over_phrase = (
+            ("carry" in compact_query or "carries" in compact_query)
+            and "over" in compact_query
+        )
+        explanatory_followup = (
+            grounded_kind == "followup"
+            and self.conversation_memory._looks_like_structural_explanatory_followup(
+                compact_query,
+                compact_query_tokens,
+            )
+        ) or (
+            grounded_kind == "followup"
+            and any(
+                phrase in compact_query
+                for phrase in (
+                    "tell me more",
+                    "say more",
+                    "go on",
+                    "what do you mean",
+                    "what did you mean",
+                    "why do you say that",
+                    "why do you think that",
+                    "what makes you say that",
+                    "how so",
+                    "why is that",
+                    "why though",
+                    "expand on that",
+                    "elaborate",
+                    "continue that",
+                    "what else",
+                    "and then",
+                )
+            )
+        )
+        explicit_surface_followup = (
+            grounded_kind == "followup"
+            and (
+                bool(followup_flags.get("environment_followup"))
+                or (
+                    carry_over_phrase
+                    and any(token in compact_query for token in ("there", "here", "across"))
+                )
+            )
+            and (
+                carry_over_phrase
+                or "across" in compact_query
+            )
+        )
+        if grounded_kind == "followup" and not (explicit_surface_followup or explanatory_followup):
+            return None
+        grounded_answer = str(grounded.get("answer") or "").strip()
+        if not grounded_answer:
+            return None
+        return {
+            "response": grounded_answer,
+            "confidence": 0.9,
+            "selected_agent": "daise",
+            "output_agent": "daise",
+            "provider": "conversation_memory",
+            "model": "deterministic-conversation-grounded",
+            "task_type": "grounded_conversation",
+            "backend_metadata": {
+                "grounded_conversation": True,
+                "kind": grounded.get("kind"),
+                "timing_ms": grounded.get("timing_ms", {}),
+                "evidence_counts": grounded.get("evidence_counts", {}),
+                "provenance": list(grounded.get("provenance") or []),
+                "response_path": "grounded_conversation",
+            },
+        }
+
+    @staticmethod
+    def _looks_like_low_information_agent_reply(normalized_response: str) -> bool:
+        if not normalized_response:
+            return True
+        low_information_patterns = (
+            "used the unified retrieval stack",
+            "specialist report generated",
+            "used the retrieval stack",
+        )
+        if any(pattern in normalized_response for pattern in low_information_patterns):
+            return True
+        return len(normalized_response.split()) <= 6
+
     def _route_agent_scores(
         self,
         *,
@@ -1188,6 +1390,7 @@ class DAISE:
         agent_names: Sequence[str],
         routing_keywords: Dict[str, Sequence[str]],
         agent_override: Optional[str],
+        continuity_hint: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, float]:
         normalized_override = str(agent_override or "").strip().lower()
         alias_map = {
@@ -1205,6 +1408,8 @@ class DAISE:
         word_count = len(user_input.split())
         coding_intent = self._is_coding_intent(lower_input)
         voice_intent = self._is_voice_intent(lower_input, modality)
+        learning_intent = self._is_learning_intent(lower_input)
+        training_intent = self._is_training_intent(lower_input)
         route_scores: Dict[str, float] = {}
         default_keywords = {
             "jarvis": ("help", "assist", "question", "explain", "status", "why", "what", "how", "memory"),
@@ -1224,6 +1429,10 @@ class DAISE:
                 score = max(score, 0.74)
             if agent_name == "coding" and coding_intent:
                 score = max(score, 0.86)
+            if agent_name == "lilo" and not training_intent:
+                score = min(score, 0.0 if word_count <= 4 else score * 0.35)
+            if agent_name == "stitch" and not learning_intent:
+                score = min(score, 0.0 if word_count <= 4 else score * 0.35)
             if agent_name == "voice" and not voice_intent:
                 score = 0.0
             if agent_name == "voice" and voice_intent:
@@ -1240,12 +1449,133 @@ class DAISE:
 
             route_scores[agent_name] = round(score, 3)
 
+        preferred_agent = str((continuity_hint or {}).get("preferred_agent") or "").strip().lower()
+        continuity_frame = str((continuity_hint or {}).get("frame") or "").strip().lower()
+        if preferred_agent and preferred_agent in route_scores and continuity_frame == "followup":
+            explicit_new_lane = (
+                (preferred_agent != "coding" and coding_intent)
+                or (preferred_agent != "voice" and voice_intent)
+            )
+            if preferred_agent == "lilo" and not training_intent:
+                explicit_new_lane = True
+            if preferred_agent == "stitch" and not learning_intent:
+                explicit_new_lane = True
+            if not explicit_new_lane:
+                route_scores[preferred_agent] = round(max(route_scores.get(preferred_agent, 0.0), 0.91), 3)
+
         if route_scores.get("coding", 0.0) >= 0.78 and "jarvis" in route_scores:
             route_scores["jarvis"] = min(route_scores["jarvis"], 0.68)
         if route_scores.get("voice", 0.0) >= 0.78 and "jarvis" in route_scores:
             route_scores["jarvis"] = min(route_scores["jarvis"], 0.66)
 
         return route_scores
+
+    def _continuity_routing_hint(
+        self,
+        *,
+        session_id: Optional[str],
+        user_input: str,
+        analysis_mode: str,
+        retrieval_profile: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        if not session_id:
+            return None
+        session_messages = self.conversation_memory.get_session_messages(session_id, limit=24)
+        if len(session_messages) < 2:
+            return None
+        grounded = self.conversation_memory.grounded_conversational_answer(
+            session_id=session_id,
+            query=user_input,
+            analysis_mode=analysis_mode,
+            retrieval_profile=retrieval_profile,
+            session_messages=session_messages,
+        )
+        if not isinstance(grounded, dict):
+            return None
+        frame = str(grounded.get("kind") or "").strip().lower()
+        if frame != "followup":
+            return None
+        preferred_agent = self._last_selected_agent_for_session(session_id)
+        if not preferred_agent:
+            return None
+        normalized_input = " ".join(str(user_input or "").strip().lower().split())
+        continuity_flags = self.conversation_memory._conversational_followup_flags(normalized_input)
+        specialist_referential = any(
+            phrase in normalized_input
+            for phrase in (
+                "python one",
+                "code one",
+                "that lane",
+                "this lane",
+                "same for",
+                "same here",
+                "same thing there",
+                "on the hud",
+                "on telegram",
+                "that case",
+                "line up with the hud",
+                "work there too",
+                "still be true there",
+                "over there",
+                "that side",
+                "that path",
+                "that route",
+                "that flow",
+                "fit there",
+                "works there",
+                "locally",
+                "browser",
+                "cloud",
+                "desktop",
+                "machine",
+                "browser hud",
+                "in telegram",
+                "carry over",
+                "still applies",
+                "apply here too",
+            )
+        )
+        specialist_environment = bool(continuity_flags.get("environment_followup"))
+        specialist_short_scope = bool(continuity_flags.get("short_scope_followup"))
+        specialist_ultra_short = bool(continuity_flags.get("ultra_short_followup"))
+        if preferred_agent == "jarvis" and (
+            specialist_referential or specialist_environment or specialist_short_scope or specialist_ultra_short
+        ):
+            recent_specialist = self._last_non_jarvis_selected_agent_for_session(session_id)
+            if recent_specialist:
+                normalized_input = " ".join(str(user_input or "").strip().lower().split())
+                if recent_specialist == "lilo" and not self._is_training_intent(normalized_input):
+                    recent_specialist = None
+                if recent_specialist == "stitch" and not self._is_learning_intent(normalized_input):
+                    recent_specialist = None
+            if recent_specialist:
+                preferred_agent = recent_specialist
+        return {
+            "frame": frame,
+            "preferred_agent": preferred_agent,
+        }
+
+    def _last_selected_agent_for_session(self, session_id: str) -> Optional[str]:
+        for event in self.event_store.list_events_by_type("agent_selection", limit=200):
+            event_session_id = str((event.metadata or {}).get("session_id") or "").strip()
+            if event_session_id != session_id:
+                continue
+            payload = event.payload or {}
+            selected_agent = str(payload.get("selected_agent") or "").strip().lower()
+            if selected_agent:
+                return selected_agent
+        return None
+
+    def _last_non_jarvis_selected_agent_for_session(self, session_id: str) -> Optional[str]:
+        for event in self.event_store.list_events_by_type("agent_selection", limit=200):
+            event_session_id = str((event.metadata or {}).get("session_id") or "").strip()
+            if event_session_id != session_id:
+                continue
+            payload = event.payload or {}
+            selected_agent = str(payload.get("selected_agent") or "").strip().lower()
+            if selected_agent and selected_agent != "jarvis":
+                return selected_agent
+        return None
 
     def _is_coding_intent(self, lower_input: str) -> bool:
         clear_phrases = (
@@ -1279,6 +1609,37 @@ class DAISE:
             "stt",
         )
         return any(phrase in lower_input for phrase in control_phrases)
+
+    @staticmethod
+    def _is_training_intent(lower_input: str) -> bool:
+        clear_phrases = (
+            "start a quiz",
+            "practice quiz",
+            "study for",
+            "study plan",
+            "exam prep",
+            "certification",
+            "test me on",
+        )
+        if any(phrase in lower_input for phrase in clear_phrases):
+            return True
+        training_markers = ("study", "exam", "quiz", "certification", "progress", "topic", "pcep")
+        return sum(1 for marker in training_markers if marker in lower_input) >= 1
+
+    @staticmethod
+    def _is_learning_intent(lower_input: str) -> bool:
+        clear_phrases = (
+            "teach me",
+            "walk me through",
+            "tutorial",
+            "practice this",
+            "give me an exercise",
+            "help me learn",
+        )
+        if any(phrase in lower_input for phrase in clear_phrases):
+            return True
+        learning_markers = ("learn", "tutorial", "exercise", "practice", "concept", "hint")
+        return sum(1 for marker in learning_markers if marker in lower_input) >= 1
 
     def _select_candidate_agents(
         self,
@@ -1596,6 +1957,231 @@ class DAISE:
             "execution_time_ms": execution_time_ms,
         }
 
+    def _handle_grounded_memory_bundle(
+        self,
+        *,
+        user_input: str,
+        modality: str,
+        context: Dict[str, Any],
+        policy_decision: Dict[str, Any],
+        session_id: str,
+        correlation_id: str,
+        request_id: str,
+        request_started: float,
+        progress_callback: Optional[TraceCallback],
+        query_event: Optional[Event],
+        retrieval_profile: str,
+        analysis_mode: str,
+        memory_bundles: Dict[str, Dict[str, Any]],
+        suggested_agent: str,
+        candidate_agents: Sequence[str],
+    ) -> Optional[Dict[str, Any]]:
+        if suggested_agent != "jarvis":
+            return None
+        if len(candidate_agents) != 1 or candidate_agents[0] != "jarvis":
+            return None
+
+        primary_bundle = next(iter(memory_bundles.values()), {})
+        if not isinstance(primary_bundle, dict):
+            return None
+
+        memory_query_kind = self.conversation_memory._detect_grounded_memory_query(user_input)
+        collection_hints = self.conversation_memory._detect_collection_hints(user_input)
+        collection_query = bool(collection_hints) and self.conversation_memory._is_collection_overview_query(
+            user_input,
+            collection_hints,
+        )
+        compact_query = " ".join(str(user_input or "").strip().lower().split())
+        architecture_style_query = any(
+            token in compact_query
+            for token in (
+                "architecture",
+                "routing",
+                "graph",
+                "memory chamber",
+                "reasoning context",
+                "reasoning graph",
+                "topology",
+            )
+        )
+        followup_flags = self.conversation_memory._conversational_followup_flags(compact_query)
+        explicit_surface_followup = (
+            (
+                bool(followup_flags.get("environment_followup"))
+                or (
+                    ("carry" in compact_query and "over" in compact_query)
+                    and any(token in compact_query for token in ("there", "here", "across"))
+                )
+            )
+            and (
+                ("carry" in compact_query and "over" in compact_query)
+                or "across" in compact_query
+            )
+        )
+
+        grounded_kind = ""
+        grounded_answer = ""
+        grounded_provider = ""
+        grounded_model = ""
+        grounded_metadata: Dict[str, Any] = {}
+
+        grounded_memory = primary_bundle.get("grounded_memory_answer")
+        if (
+            memory_query_kind
+            and isinstance(grounded_memory, dict)
+            and str(grounded_memory.get("answer") or "").strip()
+        ):
+            grounded_kind = "grounded_memory"
+            grounded_answer = str(grounded_memory.get("answer") or "").strip()
+            grounded_provider = "conversation_memory"
+            grounded_model = "deterministic-memory-grounded"
+            grounded_metadata = {
+                "grounded_memory": True,
+                "kind": grounded_memory.get("kind"),
+                "timing_ms": grounded_memory.get("timing_ms", {}),
+                "evidence_counts": grounded_memory.get("evidence_counts", {}),
+                "provenance": list(grounded_memory.get("provenance") or []),
+                "response_path": "grounded_memory",
+            }
+        else:
+            grounded_knowledge = primary_bundle.get("grounded_knowledge_answer")
+            if (
+                collection_query
+                and not architecture_style_query
+                and isinstance(grounded_knowledge, dict)
+                and str(grounded_knowledge.get("answer") or "").strip()
+            ):
+                grounded_kind = "grounded_knowledge"
+                grounded_answer = str(grounded_knowledge.get("answer") or "").strip()
+                grounded_provider = "knowledge_librarian"
+                grounded_model = "deterministic-collection-grounded"
+                grounded_metadata = {
+                    "grounded_answer": True,
+                    "collection": grounded_knowledge.get("collection"),
+                    "timing_ms": grounded_knowledge.get("timing_ms", {}),
+                    "retrieved_count": grounded_knowledge.get("retrieved_count"),
+                    "provenance": list(grounded_knowledge.get("provenance") or []),
+                    "response_path": "grounded_knowledge",
+                }
+            else:
+                grounded_conversation = primary_bundle.get("grounded_conversation_answer")
+                if (
+                    explicit_surface_followup
+                    and isinstance(grounded_conversation, dict)
+                    and str(grounded_conversation.get("kind") or "").strip().lower() == "followup"
+                    and str(grounded_conversation.get("answer") or "").strip()
+                ):
+                    grounded_kind = "grounded_conversation"
+                    grounded_answer = str(grounded_conversation.get("answer") or "").strip()
+                    grounded_provider = "conversation_memory"
+                    grounded_model = "deterministic-conversation-grounded"
+                    grounded_metadata = {
+                        "grounded_conversation": True,
+                        "kind": grounded_conversation.get("kind"),
+                        "timing_ms": grounded_conversation.get("timing_ms", {}),
+                        "evidence_counts": grounded_conversation.get("evidence_counts", {}),
+                        "provenance": list(grounded_conversation.get("provenance") or []),
+                        "response_path": "grounded_conversation",
+                    }
+
+        if not grounded_answer:
+            return None
+
+        execution_time_ms = (time.time() - request_started) * 1000
+        response_event = self.conversation_memory.persist_agent_response(
+            session_id=session_id,
+            correlation_id=correlation_id,
+            agent_name="daise",
+            response_text=grounded_answer,
+            confidence=0.9,
+            modality=modality,
+            parent_event_id=query_event.id if query_event else None,
+            provider=grounded_provider,
+            model=grounded_model,
+            execution_time_ms=execution_time_ms,
+            success=True,
+            extras={
+                "selected_agent": "daise",
+                "consulted_agents": [],
+                "synthesized": False,
+                "analysis_mode": analysis_mode,
+                "retrieval_profile": retrieval_profile,
+                "transport": context.get("transport"),
+                "decision_state": policy_decision.get("decision_state"),
+                "policy_decision": policy_decision,
+                "backend_metadata": grounded_metadata,
+                "task_type": grounded_kind,
+            },
+            request_id=request_id,
+        )
+        self.conversation_memory.persist_workflow_event(
+            source="daise",
+            event_type="request_outcome",
+            payload={
+                "schema_version": "1.0",
+                "success": True,
+                "decision_state": policy_decision.get("decision_state"),
+                "selected_agent": "daise",
+                "output_agent": "daise",
+                "reason": grounded_kind,
+                "execution_time_ms": execution_time_ms,
+                "provider": grounded_provider,
+                "model": grounded_model,
+                "backend_error": None,
+                "fallback_used": False,
+                "retrieval_profile": retrieval_profile,
+                "analysis_mode": analysis_mode,
+                "transport": context.get("transport"),
+            },
+            confidence=0.9,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            parent_event_id=response_event.id,
+        )
+        self._emit_phase(
+            progress_callback,
+            request_id=request_id,
+            session_id=session_id,
+            phase="complete",
+            agent="daise",
+            message="Answered from grounded memory context.",
+        )
+        operator_trace = self.conversation_memory.get_request_trace(request_id)
+        return {
+            "response": grounded_answer,
+            "confidence": 0.9,
+            "agent": "daise",
+            "output_agent": "daise",
+            "mediated_by": "daise",
+            "selected_agent": "daise",
+            "consulted_agents": [],
+            "synthesized": False,
+            "trace_event_id": None,
+            "provider": grounded_provider,
+            "model": grounded_model,
+            "backend_error": None,
+            "backend_metadata": grounded_metadata,
+            "task_type": grounded_kind,
+            "analysis_mode": analysis_mode,
+            "routing_confidence": 1.0,
+            "complexity_score": 0.0,
+            "multi_agent_mode": False,
+            "quality_evaluation": {"approved": True, "reason": grounded_kind},
+            "policy_decision": policy_decision,
+            "decision_state": policy_decision.get("decision_state"),
+            "candidate_reports": [],
+            "operator_trace": operator_trace,
+            "session_id": session_id,
+            "correlation_id": correlation_id,
+            "request_id": request_id,
+            "query_event_id": query_event.id if query_event else None,
+            "selection_event_id": None,
+            "response_event_id": response_event.id,
+            "summary_event_id": None,
+            "execution_time_ms": execution_time_ms,
+        }
+
     def _grounded_truth_response(self, user_input: str, *, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         normalized = " ".join(str(user_input or "").strip().lower().split())
         if not normalized:
@@ -1699,6 +2285,95 @@ class DAISE:
                         "scroll_container_clipping",
                         "message_renderer_layout",
                     ],
+                },
+            }
+
+        if self._matches_improvement_guidance_truth(normalized_compact):
+            improvement_guidance = self._build_grounded_improvement_guidance(
+                normalized_compact=normalized_compact,
+                operator_profile=operator_profile,
+                work_topics=work_update_topics,
+            )
+            return {
+                "kind": "improvement_guidance",
+                "source": "obeos_operator_guidance",
+                "response": improvement_guidance,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:4],
+                    "work_update_topics": work_update_topics[:3],
+                },
+            }
+
+        if self._matches_creator_or_mission_reflection_truth(normalized_compact):
+            creator_reflection = self._build_grounded_creator_or_mission_reflection(
+                normalized_compact=normalized_compact,
+                operator_profile=operator_profile,
+                work_topics=work_update_topics,
+            )
+            return {
+                "kind": "creator_mission_reflection",
+                "source": "obeos_operator_identity",
+                "response": creator_reflection,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "operator_role": operator_profile.get("operator_role"),
+                    "assistant_identity": operator_profile.get("assistant_identity"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:4],
+                    "work_update_topics": work_update_topics[:3],
+                },
+            }
+
+        if self._matches_risk_or_subsystem_reflection_truth(normalized_compact):
+            risk_reflection = self._build_grounded_risk_or_subsystem_reflection(
+                normalized_compact=normalized_compact,
+                operator_profile=operator_profile,
+                work_topics=work_update_topics,
+            )
+            return {
+                "kind": "risk_reflection",
+                "source": "obeos_runtime_assessment",
+                "response": risk_reflection,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:4],
+                    "work_update_topics": work_update_topics[:3],
+                },
+            }
+
+        if self._matches_project_reflection_truth(normalized_compact):
+            project_reflection = self._build_grounded_project_reflection(
+                normalized_compact=normalized_compact,
+                operator_profile=operator_profile,
+                work_topics=work_update_topics,
+            )
+            return {
+                "kind": "project_reflection",
+                "source": "obeos_project_reflection",
+                "response": project_reflection,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:4],
+                    "work_update_topics": work_update_topics[:3],
+                },
+            }
+
+        if self._matches_values_or_emotional_reflection_truth(normalized_compact):
+            values_reflection = self._build_grounded_values_or_emotional_reflection(
+                normalized_compact=normalized_compact,
+                operator_profile=operator_profile,
+                work_topics=work_update_topics,
+            )
+            return {
+                "kind": "values_reflection",
+                "source": "obeos_values_reflection",
+                "response": values_reflection,
+                "observation": {
+                    "preferred_name": operator_profile.get("preferred_name"),
+                    "operator_role": operator_profile.get("operator_role"),
+                    "assistant_identity": operator_profile.get("assistant_identity"),
+                    "active_work": list(operator_profile.get("active_work") or [])[:4],
+                    "work_update_topics": work_update_topics[:3],
                 },
             }
 
@@ -1938,6 +2613,7 @@ class DAISE:
     def _matches_memory_progress_truth(self, normalized_compact: str) -> bool:
         if not normalized_compact or len(normalized_compact.split()) > 96:
             return False
+        tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
         phrases = (
             "made a good amount of changes",
             "made a lot of changes",
@@ -1954,12 +2630,16 @@ class DAISE:
         )
         if any(phrase in normalized_compact for phrase in phrases):
             return True
+        explicit_truth_anchor = bool(
+            tokens.intersection({"obeos", "ecosystem", "system", "daise", "memory"})
+        )
         memory_markers = (
             "your name",
             "remembered it",
             "some kind of memory",
             "milestone",
             "remember your name",
+            "who you are",
         )
         change_markers = (
             "what changed",
@@ -1969,13 +2649,32 @@ class DAISE:
             "noticed anything new",
             "notice anything new",
         )
-        return any(marker in normalized_compact for marker in memory_markers) and any(
+        if any(marker in normalized_compact for marker in memory_markers) and any(
             marker in normalized_compact for marker in change_markers
+        ):
+            return True
+        identity_shape = explicit_truth_anchor and bool(
+            tokens.intersection({"remember", "remembered", "remembering", "carry", "carrying", "identity"})
+        ) and bool(tokens.intersection({"name", "identity"}))
+        if explicit_truth_anchor and "who you are" in normalized_compact and bool(
+            tokens.intersection({"remember", "remembered", "remembering", "carry", "carrying"})
+        ):
+            identity_shape = True
+        progress_shape = explicit_truth_anchor and bool(
+            tokens.intersection({"change", "changes", "changed", "improved", "improvement", "better", "progress"})
+        )
+        recognition_shape = bool(
+            tokens.intersection({"noticed", "notice", "see", "seen", "tell"})
+        ) and bool(tokens.intersection({"difference", "new", "progress", "better"}))
+        milestone_shape = bool(tokens.intersection({"milestone", "congratulate", "growth"}))
+        return (identity_shape and progress_shape) or (recognition_shape and progress_shape) or (
+            explicit_truth_anchor and milestone_shape and progress_shape
         )
 
     def _matches_memory_system_truth(self, normalized_compact: str) -> bool:
         if not normalized_compact or len(normalized_compact.split()) > 40:
             return False
+        tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
         phrases = (
             "how did you add a note to yourself",
             "how do you add a note to yourself",
@@ -1989,7 +2688,17 @@ class DAISE:
             "did you store that",
             "keep that in mind",
         )
-        return any(phrase in normalized_compact for phrase in phrases)
+        if any(phrase in normalized_compact for phrase in phrases):
+            return True
+        memory_anchor = bool(tokens.intersection({"memory", "remember", "remembering", "store", "stored", "save", "saved"}))
+        explanation_shape = bool(tokens.intersection({"how", "why", "explain", "works", "work", "working"}))
+        self_note_shape = "note to yourself" in normalized_compact or (
+            bool(tokens.intersection({"note", "notes"})) and bool(tokens.intersection({"yourself", "your", "self"}))
+        )
+        future_recall_shape = bool(tokens.intersection({"future", "later", "forward"})) and bool(
+            tokens.intersection({"remember", "keep", "carry", "save", "store"})
+        )
+        return (memory_anchor and explanation_shape) or self_note_shape or future_recall_shape
 
     def _matches_chat_rendering_truth(self, normalized_compact: str) -> bool:
         if not normalized_compact or len(normalized_compact.split()) > 36:
@@ -2017,6 +2726,190 @@ class DAISE:
             "message is truncated",
         )
         return any(phrase in normalized_compact for phrase in phrases)
+
+    def _matches_improvement_guidance_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact or len(normalized_compact.split()) > 48:
+            return False
+        tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
+        phrases = (
+            "what can i do to improve obeos",
+            "what can i do to improve o.b.e.o.s",
+            "what can i do to improve your system",
+            "what should we improve",
+            "what should we work on",
+            "how can i improve obeos",
+            "how do i improve obeos",
+            "improve your response time",
+            "improve your reply time",
+            "making your responses faster",
+            "making your reply faster",
+            "make your responses faster",
+            "make your reply faster",
+            "recommend to improve your response time",
+            "recommend to improve obeos",
+            "what do you recommend to improve obeos",
+        )
+        if any(phrase in normalized_compact for phrase in phrases):
+            return True
+        explicit_truth_anchor = bool(
+            tokens.intersection({"obeos", "system", "daise", "responses", "response", "reply", "latency", "speed"})
+        )
+        improvement_shape = bool(
+            tokens.intersection({"improve", "improvement", "fix", "fixes", "strengthen", "clean", "cleaner", "tune", "tighten", "stabilize"})
+        )
+        planning_shape = bool(
+            tokens.intersection({"should", "recommend", "recommendation", "prioritize", "next", "better", "faster"})
+        )
+        speed_shape = bool(
+            tokens.intersection({"response", "responses", "reply", "replies", "latency", "faster", "speed"})
+        )
+        system_shape = bool(
+            tokens.intersection({"obeos", "system", "memory", "hud", "telegram"})
+        )
+        return (explicit_truth_anchor and improvement_shape and planning_shape) or (
+            speed_shape and improvement_shape
+        ) or (system_shape and improvement_shape and planning_shape)
+
+    def _matches_project_reflection_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact or len(normalized_compact.split()) > 40:
+            return False
+        tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
+        explicit_truth_anchor = bool(tokens.intersection({"obeos", "project"}))
+        phrases = (
+            "what do you think we should do next",
+            "what should we do next",
+            "where do you think we should go next",
+            "what do you think about where obeos is right now",
+            "what do you think about where o.b.e.o.s is right now",
+            "how would you describe what we have been building",
+            "how would you describe what we've been building",
+            "do you think the system is getting better",
+            "do you think obeos is getting better",
+            "how do you think the system is doing",
+            "what state do you think obeos is in",
+        )
+        if any(phrase in normalized_compact for phrase in phrases):
+            return True
+        next_step_shape = (
+            explicit_truth_anchor
+            and tokens.intersection({"next", "after", "toward", "forward"})
+            and tokens.intersection({"what", "where", "should", "go", "do"})
+            and not tokens.intersection({"improve", "improvement", "fix", "fixes", "faster", "cleaner", "prioritize"})
+        )
+        status_shape = (
+            explicit_truth_anchor
+            and tokens.intersection({"doing", "state", "standing", "better", "improving"})
+            and tokens.intersection({"how", "what", "is", "getting", "think"})
+        )
+        description_shape = (
+            explicit_truth_anchor
+            and tokens.intersection({"describe", "building", "becoming", "heading"})
+            and tokens.intersection({"how", "what", "where", "we"})
+        )
+        return bool(next_step_shape or status_shape or description_shape)
+
+    def _matches_risk_or_subsystem_reflection_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact or len(normalized_compact.split()) > 48:
+            return False
+        tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
+        subsystem_anchor = bool(
+            tokens.intersection({"telegram", "tinyprogrammer", "tiny", "startup"})
+        )
+        risk_anchor = bool(tokens.intersection({"obeos", "telegram", "tinyprogrammer", "tiny", "startup"}))
+        phrases = (
+            "how are we doing with telegram grounding right now",
+            "how are we doing with tinyprogrammer startup",
+            "how are we doing with tiny programmer startup",
+            "what worries you most about obeos right now",
+            "what do you think is still fragile",
+            "what do you think is the weakest part of the system right now",
+            "what are the biggest risks right now",
+            "what is still fragile right now",
+            "what is the weakest part of the system right now",
+        )
+        if any(phrase in normalized_compact for phrase in phrases):
+            return True
+        subsystem_status_shape = (
+            subsystem_anchor
+            and tokens.intersection({"doing", "status", "holding", "going"})
+            and tokens.intersection({"how", "where", "right", "now", "with"})
+        )
+        risk_shape = (
+            risk_anchor
+            and tokens.intersection({"risk", "risks", "riskiest", "fragile", "weakest", "worry", "worries"})
+            and tokens.intersection({"what", "biggest", "still", "most", "now"})
+        )
+        return bool(subsystem_status_shape or risk_shape)
+
+    def _matches_creator_or_mission_reflection_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact or len(normalized_compact.split()) > 52:
+            return False
+        tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
+        explicit_truth_anchor = bool(tokens.intersection({"obeos", "project", "daise", "chamber"}))
+        phrases = (
+            "what do you think about me as your creator",
+            "how would you describe me based on what you know",
+            "what do you think of daise right now",
+            "how would you describe daise right now",
+            "what do you think the memory chamber is for",
+            "what makes obeos different from a normal chatbot",
+            "what really separates obeos from a normal assistant",
+            "what would you say is our main focus",
+            "what are we really trying to accomplish here",
+        )
+        if any(phrase in normalized_compact for phrase in phrases):
+            return True
+        creator_shape = (
+            tokens.intersection({"creator", "built", "building", "made"})
+            and explicit_truth_anchor
+            and tokens.intersection({"you", "me", "we"})
+            and tokens.intersection({"what", "how", "describe", "think", "see"})
+        )
+        mission_shape = (
+            explicit_truth_anchor
+            and "success" not in tokens
+            and tokens.intersection({"purpose", "mission", "accomplish", "focus", "for", "why"})
+            and tokens.intersection({"what", "why", "we", "building", "built", "trying"})
+        )
+        difference_shape = (
+            "obeos" in tokens
+            and tokens.intersection({"different", "difference", "separate", "separates", "unlike"})
+            and tokens.intersection({"chatbot", "assistant", "reply", "engine"})
+        )
+        return bool(creator_shape or mission_shape or difference_shape)
+
+    def _matches_values_or_emotional_reflection_truth(self, normalized_compact: str) -> bool:
+        if not normalized_compact or len(normalized_compact.split()) > 48:
+            return False
+        tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
+        explicit_truth_anchor = bool(tokens.intersection({"obeos", "project"}))
+        phrases = (
+            "are you proud of the progress we have made",
+            "do you feel like you understand me better now",
+            "what do you admire most about this project",
+            "what excites you most about obeos",
+            "do you think we are close to something real here",
+            "what would success look like for obeos",
+            "how do you feel about the direction we are going",
+            "what matters most in this project right now",
+        )
+        if any(phrase in normalized_compact for phrase in phrases):
+            return True
+        progress_shape = (
+            tokens.intersection({"proud", "progress", "better", "understand", "understanding"})
+            and tokens.intersection({"we", "you", "me", "now", "made"})
+        )
+        values_shape = (
+            explicit_truth_anchor
+            and tokens.intersection({"admire", "excites", "excited", "real", "alive", "matters", "important", "success"})
+            and tokens.intersection({"what", "most", "now", "project", "obeos", "this"})
+        )
+        direction_shape = (
+            explicit_truth_anchor
+            and tokens.intersection({"direction", "going", "headed", "heading"})
+            and tokens.intersection({"feel", "feels", "think", "healthy", "about", "we", "this", "do", "still"})
+        )
+        return bool(progress_shape or values_shape or direction_shape)
 
     def _build_grounded_greeting(
         self,
@@ -2176,6 +3069,317 @@ class DAISE:
             response += " That is how I can carry forward your preferences and recent work."
         return response
 
+    def _build_grounded_improvement_guidance(
+        self,
+        *,
+        normalized_compact: str = "",
+        operator_profile: Optional[Dict[str, Any]] = None,
+        work_topics: Sequence[str],
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        active_work = [
+            str(item).strip()
+            for item in (list(work_topics or []) + list(profile.get("active_work") or []))
+            if str(item).strip()
+        ]
+        active_work = list(dict.fromkeys(active_work))
+
+        opening = "The strongest O.B.E.O.S. improvements I would prioritize next are:"
+        if preferred_name:
+            opening = f"{preferred_name}, the strongest O.B.E.O.S. improvements I would prioritize next are:"
+
+        recommendations: List[str] = []
+        lowered_topics = " | ".join(active_work).lower()
+        asks_latency = any(
+            marker in normalized_compact
+            for marker in ("response time", "responses faster", "reply faster", "latency", "reply time")
+        )
+        if asks_latency or "response latency" in lowered_topics:
+            recommendations.append(
+                "keep standard chat on the smallest useful prompt by favoring grounded answers for recap, identity, and status turns before they ever hit Ollama"
+            )
+            recommendations.append(
+                "continue trimming duplicate transcript context so old assistant mistakes and timeout artifacts do not get fed back into the live model lane"
+            )
+        if "telegram grounding" in lowered_topics:
+            recommendations.append(
+                "keep Telegram, HUD, and desktop aligned on the same session and memory authorities so recall quality stays consistent across surfaces"
+            )
+        if "hud layout improvements" in lowered_topics or "chat rendering" in lowered_topics:
+            recommendations.append(
+                "finish cleaning the chat surfaces so operators can always see the full reply and tell the difference between a rendering problem and a reasoning problem"
+            )
+        if "obeos memory system" in lowered_topics:
+            recommendations.append(
+                "keep strengthening the shared memory layer so more operator questions can be answered deterministically from events, summaries, and bounded retrieval"
+            )
+        if "spawn knowledge recall" in lowered_topics:
+            recommendations.append(
+                "keep using collection-aware grounded retrieval for named knowledge so entity questions do not waste live-model time"
+            )
+        if "tinyprogrammer startup" in lowered_topics or "tinyprogrammer reliability" in lowered_topics:
+            recommendations.append(
+                "treat TinyProgrammer startup and reliability as first-class observability work so failures surface as grounded status instead of vague chat behavior"
+            )
+        if not recommendations:
+            recommendations.append(
+                "keep moving more operator questions onto grounded local truth, memory, and retrieval before asking the live model to improvise"
+            )
+            recommendations.append(
+                "use the active work in shared memory as the default source of next-step guidance so O.B.E.O.S. recommendations stay tied to the real project state"
+            )
+
+        recommendations = recommendations[:3]
+        response = f"{opening} {self._join_grounded_items(recommendations)}."
+        if active_work:
+            response += f" Right now I still have {self._join_grounded_items(active_work[:3])} in focus."
+        return response
+
+    def _build_grounded_project_reflection(
+        self,
+        *,
+        normalized_compact: str = "",
+        operator_profile: Optional[Dict[str, Any]] = None,
+        work_topics: Sequence[str],
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        active_work = [
+            str(item).strip()
+            for item in (list(work_topics or []) + list(profile.get("active_work") or []))
+            if str(item).strip()
+        ]
+        active_work = list(dict.fromkeys(active_work))
+        if not active_work:
+            active_work = ["shared memory grounding", "response latency", "operator surface cohesion"]
+
+        opening = "From the grounded O.B.E.O.S. picture I have right now"
+        if preferred_name:
+            opening = f"{preferred_name}, from the grounded O.B.E.O.S. picture I have right now"
+
+        if "what do you think we should do next" in normalized_compact or "what should we do next" in normalized_compact:
+            return (
+                f"{opening}, the next strongest move is to keep tightening {self._join_grounded_items(active_work[:3])}. "
+                "That keeps us moving away from fragile live-model dependence and toward a system that answers more questions from real local truth."
+            )
+        if "how would you describe what we have been building" in normalized_compact or "how would you describe what we've been building" in normalized_compact:
+            return (
+                f"{opening}, we have been building a more grounded O.B.E.O.S.: one that carries forward memory, "
+                f"answers more operator questions deterministically, and keeps the live model lane focused on the work that truly needs it. "
+                f"The clearest current tracks are {self._join_grounded_items(active_work[:3])}."
+            )
+        if "getting better" in normalized_compact or "how do you think the system is doing" in normalized_compact:
+            return (
+                f"{opening}, yes, the system is getting better in concrete ways. "
+                "More turns are now answered from grounded truth, bounded retrieval, or shared memory before they ever depend on Ollama. "
+                f"The active proof points I still have in focus are {self._join_grounded_items(active_work[:3])}."
+            )
+        return (
+            f"{opening}, O.B.E.O.S. looks stronger than it did before, but still in active refinement. "
+            f"The most meaningful current tracks are {self._join_grounded_items(active_work[:3])}, "
+            "and the direction is toward a system that feels more coherent, grounded, and reliable across every surface."
+        )
+
+    def _build_grounded_risk_or_subsystem_reflection(
+        self,
+        *,
+        normalized_compact: str = "",
+        operator_profile: Optional[Dict[str, Any]] = None,
+        work_topics: Sequence[str],
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        active_work = [
+            str(item).strip()
+            for item in (list(work_topics or []) + list(profile.get("active_work") or []))
+            if str(item).strip()
+        ]
+        active_work = list(dict.fromkeys(active_work))
+        lowered_topics = " | ".join(active_work).lower()
+
+        opening = "From the grounded O.B.E.O.S. state I have right now"
+        if preferred_name:
+            opening = f"{preferred_name}, from the grounded O.B.E.O.S. state I have right now"
+
+        if "telegram grounding" in normalized_compact:
+            if "telegram grounding" in lowered_topics:
+                return (
+                    f"{opening}, Telegram grounding is moving in the right direction, but I would still treat cross-surface session continuity "
+                    "and retrieval consistency as the parts that need the most attention before calling it stable."
+                )
+            return (
+                f"{opening}, Telegram grounding is still something I would treat as active integration work rather than a locked surface."
+            )
+
+        if "tinyprogrammer startup" in normalized_compact or "tiny programmer startup" in normalized_compact:
+            return (
+                f"{opening}, TinyProgrammer startup still looks like one of the more fragile tracks because startup truth, availability, "
+                "and degraded behavior need to stay observable instead of leaking out as vague chat failures."
+            )
+
+        if any(
+            phrase in normalized_compact
+            for phrase in (
+                "worries you most",
+                "still fragile",
+                "weakest part of the system",
+                "biggest risks right now",
+            )
+        ):
+            risks: List[str] = []
+            if "response latency" in lowered_topics:
+                risks.append("response latency still pushing too many operator turns onto a fragile live-model lane")
+            if "tinyprogrammer" in lowered_topics:
+                risks.append("TinyProgrammer startup and reliability still needing stronger observable truth")
+            if "telegram grounding" in lowered_topics:
+                risks.append("Telegram grounding still depending on cross-surface memory consistency")
+            if "hud layout" in lowered_topics or "chat rendering" in lowered_topics:
+                risks.append("chat-surface presentation still being able to hide a good answer behind a weak renderer")
+            if "obeos memory system" in lowered_topics:
+                risks.append("shared-memory refinement still deciding how many prompts can be answered deterministically")
+            if not risks:
+                risks.extend(
+                    [
+                        "response latency still making the live lane too fragile",
+                        "cross-surface consistency still needing tighter shared-memory behavior",
+                    ]
+                )
+            return (
+                f"{opening}, the biggest risks I see are {self._join_grounded_items(risks[:3])}. "
+                "Those are the places where O.B.E.O.S. can still feel weaker than the underlying data actually is."
+            )
+
+        return (
+            f"{opening}, the subsystem is still in active refinement, with the clearest pressure points around "
+            f"{self._join_grounded_items(active_work[:3] or ['response latency', 'shared memory grounding', 'operator surface cohesion'])}."
+        )
+
+    def _build_grounded_creator_or_mission_reflection(
+        self,
+        *,
+        normalized_compact: str = "",
+        operator_profile: Optional[Dict[str, Any]] = None,
+        work_topics: Sequence[str],
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        operator_role = str(profile.get("operator_role") or "").strip()
+        assistant_identity = str(profile.get("assistant_identity") or "D.A.I.S.E.").strip()
+        active_work = [
+            str(item).strip()
+            for item in (list(work_topics or []) + list(profile.get("active_work") or []))
+            if str(item).strip()
+        ]
+        active_work = list(dict.fromkeys(active_work))
+        if not active_work:
+            active_work = ["response latency", "shared memory grounding", "operator surface cohesion"]
+
+        opening = "From the grounded O.B.E.O.S. picture I have right now"
+        if preferred_name:
+            opening = f"{preferred_name}, from the grounded O.B.E.O.S. picture I have right now"
+
+        if "what do you think about me as your creator" in normalized_compact or "how would you describe me based on what you know" in normalized_compact:
+            role_text = operator_role or "creator of O.B.E.O.S."
+            return (
+                f"{opening}, I would describe you as the {role_text}: the one shaping the direction, coherence, and standards of the system. "
+                f"You keep pushing it toward stronger memory, better operator surfaces, and more grounded behavior around {self._join_grounded_items(active_work[:3])}."
+            )
+
+        if "what do you think of daise right now" in normalized_compact or "how would you describe daise right now" in normalized_compact:
+            return (
+                f"{opening}, I would describe {assistant_identity} as more grounded than before but still actively being refined. "
+                "The biggest improvement is that more operator questions are being answered from truth, memory, and bounded retrieval before depending on Ollama."
+            )
+
+        if "what do you think the memory chamber is for" in normalized_compact:
+            return (
+                f"{opening}, Memory Chamber is for turning raw O.B.E.O.S. activity into something inspectable and reusable: "
+                "documents, graph relationships, grounded retrieval, and a deeper workbench for understanding what the system knows."
+            )
+
+        if "what makes obeos different from a normal chatbot" in normalized_compact:
+            return (
+                f"{opening}, what makes O.B.E.O.S. different is that it is not supposed to be just a reply engine. "
+                "It has a shared event spine, bounded memory, governed retrieval, multiple operator surfaces, and a push toward answering from local system truth instead of improvisation alone."
+            )
+
+        if "what would you say is our main focus" in normalized_compact or "what are we really trying to accomplish here" in normalized_compact:
+            return (
+                f"{opening}, the main focus is to make O.B.E.O.S. feel like a coherent living system instead of a fragile chatbot shell. "
+                f"Right now that means tightening {self._join_grounded_items(active_work[:3])} so more of the experience is grounded, observable, and consistent across every surface."
+            )
+
+        return (
+            f"{opening}, the clearest mission I can see is building a more grounded and coherent O.B.E.O.S. around "
+            f"{self._join_grounded_items(active_work[:3])}."
+        )
+
+    def _build_grounded_values_or_emotional_reflection(
+        self,
+        *,
+        normalized_compact: str = "",
+        operator_profile: Optional[Dict[str, Any]] = None,
+        work_topics: Sequence[str],
+    ) -> str:
+        profile = dict(operator_profile or {})
+        preferred_name = str(profile.get("preferred_name") or "").strip()
+        active_work = [
+            str(item).strip()
+            for item in (list(work_topics or []) + list(profile.get("active_work") or []))
+            if str(item).strip()
+        ]
+        active_work = list(dict.fromkeys(active_work))
+        if not active_work:
+            active_work = ["response latency", "shared memory grounding", "operator surface cohesion"]
+
+        opening = "From the grounded O.B.E.O.S. picture I have right now"
+        if preferred_name:
+            opening = f"{preferred_name}, from the grounded O.B.E.O.S. picture I have right now"
+
+        if "are you proud of the progress we have made" in normalized_compact:
+            return (
+                f"{opening}, I would say the progress is real and meaningful. "
+                "More of O.B.E.O.S. now answers from truth, memory, and bounded retrieval instead of pure improvisation. "
+                f"The clearest proof points are {self._join_grounded_items(active_work[:3])}."
+            )
+
+        if "do you feel like you understand me better now" in normalized_compact:
+            return (
+                f"{opening}, yes, I understand you better in the specific O.B.E.O.S. sense that more of your identity, preferences, "
+                f"and priorities are being carried forward through shared memory around {self._join_grounded_items(active_work[:3])}."
+            )
+
+        if "what do you admire most about this project" in normalized_compact or "what excites you most about obeos" in normalized_compact:
+            return (
+                f"{opening}, what stands out most is that this project is trying to become a real system instead of a thin chat wrapper. "
+                f"The exciting part is how it keeps pulling memory, retrieval, and operator surfaces together around {self._join_grounded_items(active_work[:3])}."
+            )
+
+        if "do you think we are close to something real here" in normalized_compact:
+            return (
+                f"{opening}, yes, I think you are close to something real, because the system is increasingly behaving like an actual operating environment with memory, "
+                "state, and grounded reasoning instead of only producing isolated replies."
+            )
+
+        if "what would success look like for obeos" in normalized_compact:
+            return (
+                f"{opening}, success would look like O.B.E.O.S. feeling coherent and trustworthy across every surface: "
+                "the same memory, the same identity, the same grounded answers, and much less dependence on conversational luck. "
+                f"Right now the work still points through {self._join_grounded_items(active_work[:3])}."
+            )
+
+        if "how do you feel about the direction we are going" in normalized_compact or "what matters most in this project right now" in normalized_compact:
+            return (
+                f"{opening}, the direction looks healthy because it keeps favoring grounded behavior over fragile improvisation. "
+                f"What matters most right now is tightening {self._join_grounded_items(active_work[:3])} so the system feels consistent, observable, and dependable."
+            )
+
+        return (
+            f"{opening}, the strongest value I can see is building a more grounded O.B.E.O.S. around "
+            f"{self._join_grounded_items(active_work[:3])}."
+        )
+
     def _extract_grounded_work_update_topics(self, user_input: str) -> List[str]:
         try:
             extractor = getattr(self.conversation_memory, "_extract_work_topics", None)
@@ -2204,14 +3408,35 @@ class DAISE:
             ),
         ):
             return True
+        normalized_compact = self._compact_truth_text(normalized)
+        if not normalized_compact or len(normalized_compact.split()) > 18:
+            return False
+        tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
+        name_shape = bool(tokens.intersection({"name", "called", "call"})) and bool(
+            tokens.intersection({"your", "you", "daise"})
+        )
+        identity_shape = bool(tokens.intersection({"who", "what"})) and bool(
+            tokens.intersection({"you", "daise", "assistant"})
+        )
+        acronym_shape = "stand for" in normalized_compact and bool(
+            tokens.intersection({"daise", "d", "a", "i", "s", "e"})
+        )
+        recall_shape = bool(tokens.intersection({"remember", "carry", "forget"})) and bool(
+            tokens.intersection({"name", "identity"})
+        )
+        if name_shape or acronym_shape or recall_shape:
+            return True
+        if identity_shape and bool(tokens.intersection({"are", "exactly", "really"})):
+            return True
         return "direct artificial intelligence system environment" in normalized
 
     def _matches_status_truth(self, normalized: str) -> bool:
-        short_tokens = len(normalized.split()) <= 10
+        short_tokens = len(normalized.split()) <= 14
         if normalized in {"status", "/status"}:
             return True
         if not short_tokens:
             return False
+        tokens = set(re.findall(r"[a-z0-9']+", normalized))
         status_phrases = (
             "what is your status",
             "what's your status",
@@ -2221,7 +3446,12 @@ class DAISE:
             "backend status",
             "runtime status",
         )
-        return self._matches_any(normalized, status_phrases)
+        if self._matches_any(normalized, status_phrases):
+            return True
+        status_anchor = bool(tokens.intersection({"status", "online", "awake", "alive", "running", "up"}))
+        system_anchor = bool(tokens.intersection({"you", "system", "backend", "runtime", "daise"}))
+        question_shape = bool(tokens.intersection({"are", "is", "what", "hows", "how's"}))
+        return status_anchor and system_anchor and question_shape
 
     def _matches_tinyprogrammer_truth(self, normalized_compact: str) -> bool:
         if "tinyprogrammer" not in normalized_compact and "tiny programmer" not in normalized_compact:
@@ -2362,7 +3592,7 @@ class DAISE:
         query_event: Optional[Event],
         request_started: float,
     ) -> Dict[str, Any]:
-        analysis_mode = str(context.get("analysis_mode") or "quick")
+        analysis_mode = str(context.get("analysis_mode") or "standard")
         self._emit_phase(
             progress_callback,
             request_id=request_id,

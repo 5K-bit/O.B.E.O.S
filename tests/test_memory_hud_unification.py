@@ -44,16 +44,29 @@ class StubUnifiedOrchestrator:
             session_id=session_id,
             query=user_input,
             agent_name=context.get("agent_override") or "jarvis",
+            analysis_mode=context.get("analysis_mode", "standard"),
+            request_id=context.get("request_id"),
+            transport=context.get("transport"),
         )
+        grounded = (
+            memory_context.get("grounded_memory_answer")
+            or memory_context.get("grounded_conversation_answer")
+            or {}
+        )
+        grounded_answer = str(grounded.get("answer") or "").strip()
         remembered_green = "green" in str(memory_context).lower()
-        response = "Your favorite color is green." if "favorite color" in user_input.lower() and remembered_green else "I'll remember that your favorite color is green."
+        response = grounded_answer or (
+            "Your favorite color is green."
+            if "favorite color" in user_input.lower() and remembered_green
+            else "I'll remember that your favorite color is green."
+        )
         result = {
             "agent": "jarvis",
             "selected_agent": "jarvis",
             "response": response,
             "confidence": 0.9,
-            "provider": "heuristic",
-            "model": "stub",
+            "provider": "conversation_memory" if grounded_answer else "heuristic",
+            "model": "deterministic-memory-grounded" if grounded_answer else "stub",
             "timestamp": time.time(),
         }
         response_event = self.memory_service.persist_agent_response(
@@ -178,6 +191,39 @@ def test_hud_chat_sessions_pin_and_commands(monkeypatch, tmp_path):
 
     status = client.post("/api/commands/execute", json={"command": "/status", "session_id": session_id}).get_json()
     assert status["status"] == "ok"
+
+
+def test_hud_chat_keeps_grounded_short_followup_on_same_session(monkeypatch, tmp_path):
+    service = build_memory_service(tmp_path)
+    monkeypatch.setattr("blackfong_ecosystem.agent.EventStore", partial(EventStore, tmp_path / "agent-events.db"))
+    dashboard = WebDashboard(host="127.0.0.1", port=8099, memory_service=service, orchestrator_instance=StubUnifiedOrchestrator(service))
+    client = dashboard.app.test_client()
+
+    first = client.post(
+        "/api/chat",
+        json={
+            "message": "We have been working on response latency, Telegram grounding, and HUD improvements.",
+            "request_id": "hud-followup-1",
+        },
+    )
+    assert first.status_code == 202
+    session_id = first.get_json()["session_id"]
+    wait_for_request(client, "hud-followup-1")
+
+    second = client.post(
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "message": "and telegram?",
+            "request_id": "hud-followup-2",
+        },
+    )
+    assert second.status_code == 202
+    second_trace = wait_for_request(client, "hud-followup-2")
+
+    assert second_trace["session_id"] == session_id
+    assert second_trace["result"]["provider"] == "conversation_memory"
+    assert "response latency" in second_trace["result"]["response"] or "Telegram grounding" in second_trace["result"]["response"]
 
 
 def test_cli_help_exposes_hud_and_event_metadata_flags():

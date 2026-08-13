@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from blackfong_ecosystem.model_routing import (
+    OllamaRoutingChatBackend,
     backend_options_for_context,
     detect_intent,
     model_chain_for_agent,
@@ -45,3 +46,11 @@ def test_fast_backend_caps_tokens():
     options = backend_options_for_context({"analysis_mode": "fast"}, "jarvis")
     assert options["mode"] == "fast"
     assert options["num_predict"] >= 384
+
+
+def test_disable_chain_fallbacks_returns_primary_only():
+    backend = OllamaRoutingChatBackend(model="primary-model", fallback_models=["fallback-a", "fallback-b"])
+
+    chain = backend._model_chain({"disable_chain_fallbacks": True})
+
+    assert chain == ["primary-model"]

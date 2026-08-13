@@ -22,7 +22,7 @@ class OperatorChatService:
         session_id: Optional[str] = None,
         request_id: Optional[str] = None,
         agent_override: Optional[str] = None,
-        analysis_mode: str = "fast",
+        analysis_mode: str = "standard",
         stream_callback: Optional[Any] = None,
         include_memory: bool = False,
         include_messages: bool = True,
@@ -75,6 +75,7 @@ class OperatorChatService:
         orchestrator_context["analysis_mode"] = analysis_mode
         orchestrator_context["response_mode"] = analysis_mode
         orchestrator_context["input_origin"] = orchestrator_context.get("input_origin") or "operator_chat"
+        orchestrator_context["transport"] = orchestrator_context.get("transport") or orchestrator_context["input_origin"]
         orchestrator_context["input_modality"] = str(modality or "text").strip().lower() or "text"
         if stream_callback is not None:
             orchestrator_context["stream_callback"] = stream_callback

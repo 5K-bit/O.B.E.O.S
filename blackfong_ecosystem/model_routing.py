@@ -278,6 +278,8 @@ class OllamaRoutingChatBackend(OllamaChatBackend):
         override = options.get("model")
         if override:
             return [str(override)]
+        if options.get("disable_chain_fallbacks"):
+            return [self.model]
         return [self.model, *self.fallback_models]
 
     @staticmethod
