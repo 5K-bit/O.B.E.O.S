@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "obeos-core",
+  "component_type": "service",
+  "version": "0.9.0-rc",
+  "entrypoint": "blackfong",
+  "interfaces": ["cli", "workspace", "hud", "tui", "event-spine", "component-registry"],
+  "capabilities": ["orchestration", "memory", "reasoning", "component-discovery", "event-routing", "operator-surfaces"],
+  "lifecycle": "system",
+  "health": {"mode": "blackfong-verify", "command": "blackfong verify integrations"},
+  "health_aggregator": "maxpayne",
+  "dependencies": [],
+  "source_repository": "5K-bit/O.B.E.O.S."
+}

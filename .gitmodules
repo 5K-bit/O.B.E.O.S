@@ -7,3 +7,9 @@
 [submodule "Night-watch-OS"]
 	path = Night-watch-OS
 	url = https://github.com/5K-bit/Night-watch-OS.git
+[submodule "Max-Payne"]
+	path = Max-Payne
+	url = https://github.com/5K-bit/Max-Payne.git
+[submodule "3000-main"]
+	path = 3000-main
+	url = https://github.com/5K-bit/3000.git
