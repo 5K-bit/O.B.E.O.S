@@ -1899,7 +1899,9 @@ class WebDashboard:
                 session_id=gesture.get("session_id"),
                 request_id=gesture.get("request_id"),
                 layer=self.cognition_focus.get("layer", "live_brain"),
+                use_cache=False,
             )
+            self._cognition_snapshot_cache = None
             self.cognition_router.emit_focus(snapshot["focus"])
             self.cognition_router.emit_delta(
                 {
