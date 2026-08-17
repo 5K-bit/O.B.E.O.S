@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Patch gesture snapshot cache
+      - name: Apply deterministic Thoughtglass cache repair
         run: python tools/patch_thoughtglass_cache.py
       - name: Commit repair
         run: |
