@@ -1,0 +1,49 @@
+name: Thoughtglass Cache Repair
+
+on:
+  push:
+    branches: [agent/integration-stabilization-v0.9]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[thoughtglass-cache-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Invalidate cognition cache after focus-changing gestures
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('blackfong_ecosystem/operational_interfaces.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''            snapshot = self._build_cognition_snapshot(
+                session_id=gesture.get("session_id"),
+                request_id=gesture.get("request_id"),
+                layer=self.cognition_focus.get("layer", "live_brain"),
+            )
+            self.cognition_router.emit_focus(snapshot["focus"])
+'''
+          new = '''            snapshot = self._build_cognition_snapshot(
+                session_id=gesture.get("session_id"),
+                request_id=gesture.get("request_id"),
+                layer=self.cognition_focus.get("layer", "live_brain"),
+                use_cache=False,
+            )
+            self._cognition_snapshot_cache = None
+            self.cognition_router.emit_focus(snapshot["focus"])
+'''
+          if old not in text:
+              raise SystemExit('Expected cognition gesture snapshot block not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add blackfong_ecosystem/operational_interfaces.py
+          git commit -m "Fix Thoughtglass gesture snapshot cache [thoughtglass-cache-fixed]"
+          git push origin HEAD:agent/integration-stabilization-v0.9
