@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Initialize accessible canonical submodules
         shell: bash
-        run: git submodule update --init --depth=1 Max-Payne Night-watch-OS Blackforge 3000-main
+        run: git submodule update --init --depth=1 Max-Payne Night-watch-OS Blackforge 3000-main QuietDrop
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -74,6 +74,9 @@ jobs:
         run: python -m pip install -e '.[dev]' && python -m pytest -q
       - name: 3000
         working-directory: 3000-main
+        run: python -m pip install -e '.[dev]' && python -m pytest -q
+      - name: QuietDrop
+        working-directory: QuietDrop
         run: python -m pip install -e '.[dev]' && python -m pytest -q
       - name: Private EarthGlass boundary
         run: echo 'EarthGlass is private and is validated in its own canonical repository workflow.'
@@ -93,9 +96,9 @@ jobs:
       - name: Confirm canonical public gitlinks are initialized cleanly
         shell: bash
         run: |
-          git submodule update --init --depth=1 Max-Payne Night-watch-OS Blackforge 3000-main
-          git submodule status Max-Payne Night-watch-OS Blackforge 3000-main
-          if git submodule status Max-Payne Night-watch-OS Blackforge 3000-main | grep -E '^[+-]'; then
+          git submodule update --init --depth=1 Max-Payne Night-watch-OS Blackforge 3000-main QuietDrop
+          git submodule status Max-Payne Night-watch-OS Blackforge 3000-main QuietDrop
+          if git submodule status Max-Payne Night-watch-OS Blackforge 3000-main QuietDrop | grep -E '^[+-]'; then
             echo 'Public submodule mismatch or uninitialized submodule detected'
             exit 1
           fi
