@@ -26,7 +26,6 @@ These are the current rules that packaging and branding should follow.
 - **Deep graph/archive workbench**: `Memory Chamber`
 - **Thoughtglass HUD**: supported browser-based secondary cockpit for remote access, debugging, and fallback
 - **TUI**: supported fallback/home surface, not the canonical product shell
-- **Legacy alias**: `jarvis` remains a compatibility alias only and should not be treated as the visible product identity
 
 ## Surface Hierarchy
 
@@ -67,7 +66,7 @@ python -m blackfong_ecosystem.cli hud
 
 O.B.E.O.S keeps two complementary history tracks:
 
-- repo-tracked product history in [OBEOS Release Log](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\obeos-release-log.md)
+- repo-tracked product history in `docs/obeos-release-log.md`
 - runtime deploy history on cloud hosts in `data/deploy-history.log`
 
 Working rule:
@@ -157,6 +156,21 @@ Bootstrap doctrine:
 - **Stage B** is explicit `blackfong obeos activate-home`
 - degraded fallback is mandatory if TUI-home cannot start cleanly
 
+## Integration & Stabilization
+
+The v0.9 stabilization branch freezes these rules:
+
+- canonical child projects are pinned submodules rather than duplicated editable copies
+- OBEOS components declare `obeos.manifest.json` schema v1
+- component discovery is manifest-driven
+- cross-component health uses OBEOS Health Contract v1 with MaxPayne as aggregator
+- cross-component events use OBEOS Event Contract v1
+- D.A.I.S.E. is model-led; memory, retrieval, system state, and tools provide context rather than replacement intelligence
+- release-facing identity uses O.B.E.O.S., Blackfong, Blackcomputer, and D.A.I.S.E.
+- the shipping installer targets Kubuntu 24.04 LTS + KDE Plasma
+
+See `docs/obeos-integration-stabilization-phase.md` and `docs/obeos-v0.9-release-gate.md`.
+
 ## Packaging Status
 
 This repo already contains:
@@ -168,22 +182,7 @@ This repo already contains:
 - a VM checklist and acceptance snapshot path
 - an installer-plan validation service
 
-What is still being tightened:
-
-- branding consistency across surfaces
-- doctrine consistency across docs
-- legacy alias cleanup
-- installer alignment with Kubuntu/Plasma truth
-
-See:
-
-- [O.B.E.O.S Packaging Readiness Plan](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\obeos-packaging-readiness-plan.md)
-- [Branding Doctrine](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\branding-doctrine.md)
-- [Release Surface Hierarchy](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\release-surface-hierarchy.md)
-- [Release Artifacts](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\release-artifacts.md)
-- [Cloud Release Flow](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\cloud-release-flow.md)
-- [OBEOS Release Log](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\obeos-release-log.md)
-- [Operator Environment Variables](C:\Users\New%20User\Documents\Projects%202026\O.B.E.O.S%20(official%20blackfong%20ecosystem%20operating%20system)\docs\operator-env.md)
+The v0.9 release candidate remains gated on passing the full integration matrix and producing fresh release evidence from a clean checkout.
 
 ## Architecture Summary
 
@@ -209,16 +208,7 @@ See:
 The product is moving toward:
 
 - stronger native-shell-first operation
-- cleaner branding consistency
+- manifest-driven component integration
+- contract-driven health and events
 - packaging-ready Kubuntu/Plasma deployment
-- installer alignment with the actual O.B.E.O.S. session contract
-
-## Notes on Legacy Material
-
-Some code and historical tooling still contain older terminology such as `jarvis` and older installer assumptions.
-
-Current rule:
-
-- keep compatibility where needed for runtime stability
-- do not present legacy identity as current product truth
-- treat the external installer repo's XFCE/Xubuntu assumptions as migration input until it is fully aligned with O.B.E.O.S. v1 doctrine
+- a reproducible OBEOS v0.9 release candidate
