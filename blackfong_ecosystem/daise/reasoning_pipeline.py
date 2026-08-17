@@ -164,14 +164,16 @@ def _legacy_file_result(daise: Any, *, user_input: str, modality: str, context: 
     workflow = result.get("file_workflow") if isinstance(result, dict) else None
     if isinstance(workflow, Mapping) and workflow.get("success"):
         proposal = workflow.get("proposal")
-        if isinstance(proposal, Mapping) and proposal.get("id"):
-            proposal_id = str(proposal["id"])
-            path = proposal.get("path")
-            result["response"] = (
-                f"Proposal ID: {proposal_id}\n"
-                f"Path: {path}\n"
-                "The change is proposed only; review/validation/approval are still required before apply."
-            )
+        if isinstance(proposal, Mapping):
+            raw_proposal_id = proposal.get("proposal_id") or proposal.get("id")
+            if raw_proposal_id:
+                proposal_id = str(raw_proposal_id)
+                path = proposal.get("path")
+                result["response"] = (
+                    f"Proposal ID: {proposal_id}\n"
+                    f"Path: {path}\n"
+                    "The change is proposed only; review/validation/approval are still required before apply."
+                )
     return result
 
 
@@ -212,8 +214,6 @@ def process_request_v1(
             routing_keywords=routing_keywords,
         )
 
-    # Preserve identity semantics across the cutover. Compatibility aliases are
-    # normalized internally but never become the visible assistant identity.
     resolutions = identity_registry.resolve_mentions(user_input)
     if context.get("agent_override"):
         resolutions.append(identity_registry.resolve(str(context["agent_override"])))
