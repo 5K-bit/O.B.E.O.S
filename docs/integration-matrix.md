@@ -6,9 +6,11 @@ OBEOS v0.9 cannot leave draft status until the automated matrix passes and the m
 
 - Ubuntu Python 3.11: DAISE cutover, contracts, existing DAISE regression, Thoughtglass, automated/surface/integration verification.
 - Windows Python 3.11: same core matrix.
-- Canonical child components: MaxPayne, Nightwatch, EarthGlass, BlackForge, 3000 test suites from pinned submodules.
+- Canonical child components: MaxPayne, Nightwatch, EarthGlass, BlackForge, 3000 test suites from pinned submodules/canonical repositories.
 - Full OBEOS verification after all preceding jobs pass.
-- Recursive submodule status must contain no uninitialized (`-`) or drifted (`+`) entries.
+- Recursive public submodule status must contain no uninitialized (`-`) or drifted (`+`) entries.
+
+Current automated status for the stabilization branch: **PASS**. Ubuntu, Windows, public child components, full OBEOS verification, and public gitlink integrity are green on the repaired v0.9 stabilization revision.
 
 ## Manual/runtime gates
 
@@ -22,4 +24,4 @@ OBEOS v0.9 cannot leave draft status until the automated matrix passes and the m
 
 ## Merge rule
 
-PR #6 and installer PR #7 remain draft until all applicable automated jobs are green and the manual/runtime evidence above is recorded. A passing static installer workflow alone is not sufficient evidence for the VM gate.
+OBEOS follow-up PR #7 (`Complete OBEOS v0.9 integration stabilization`) and Blackfong-Installer PR #7 remain draft until the applicable runtime evidence above is recorded. A passing static installer workflow or automated OBEOS workflow alone is not sufficient evidence for the UEFI VM, private cloud/Telegram, or real Legion client gates.
