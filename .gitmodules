@@ -1,0 +1,3 @@
+[submodule "Blackforge"]
+	path = Blackforge
+	url = https://github.com/5K-bit/Blackforge.git
