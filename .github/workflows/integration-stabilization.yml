@@ -39,6 +39,12 @@ jobs:
         run: python -m pytest -q tests/test_agent_model_and_memory_profiles.py tests/test_daise_file_chat_and_cognition.py tests/test_identity_safety_semantics.py
       - name: Thoughtglass regression suite
         run: python -m pytest -q tests/test_blackfong_cortex_thoughtglass.py
+      - name: Telegram gateway regression suite
+        run: python -m pytest -q tests/test_telegram_gateway.py
+      - name: Legion dashboard regression suite
+        run: python -m pytest -q tests/test_legion_dashboard.py
+      - name: Runtime branding consistency
+        run: python -m pytest -q tests/test_runtime_branding_consistency.py
       - name: OBEOS automated verification
         run: python -m blackfong_ecosystem.cli verify automated
       - name: OBEOS surface verification
