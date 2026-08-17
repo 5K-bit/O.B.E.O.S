@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EarthGlass</title>
+
+    {% if assets.online_tiles_enabled %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    {% elif assets.local_leaflet_available %}
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/leaflet.css') }}" />
+    {% endif %}
+    <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <header class="sidebar-header">
+          <h1>EarthGlass</h1>
+          <p class="tagline">A layered view of the planet.</p>
+        </header>
+
+        <section class="layers">
+          <h2>Layers</h2>
+          <ul id="layer-list">
+            {% for layer in layers %}
+            <li class="layer">
+              <label>
+                <input
+                  type="checkbox"
+                  class="layer-toggle"
+                  data-layer-id="{{ layer.id }}"
+                  {% if layer.enabled %}checked{% endif %}
+                />
+                <span class="layer-name">{{ layer.name }}</span>
+              </label>
+              <p class="layer-description">{{ layer.description }}</p>
+            </li>
+            {% endfor %}
+          </ul>
+        </section>
+
+        <footer class="sidebar-footer">
+          <span>Milestone 1</span>
+        </footer>
+      </aside>
+
+      <main id="map" {% if not assets.map_enabled %}class="map-fallback"{% endif %}>
+        {% if not assets.map_enabled %}
+        <section>
+          <h2>Map Assets Offline</h2>
+          <p>Leaflet assets are not available locally, and online map assets are disabled.</p>
+        </section>
+        {% endif %}
+      </main>
+    </div>
+
+    {% if assets.map_enabled %}
+    {% if assets.online_tiles_enabled %}
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    {% else %}
+    <script src="{{ url_for('static', path='vendor/leaflet.js') }}"></script>
+    {% endif %}
+    <script>
+      const map = L.map("map", { worldCopyJump: true }).setView([20, 0], 2);
+
+      {% if assets.online_tiles_enabled %}
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
+      {% endif %}
+
+      // Layer groups are placeholders for Milestone 1; data wiring comes later.
+      const layerGroups = {
+        earthquakes: L.layerGroup(),
+      };
+
+      document.querySelectorAll(".layer-toggle").forEach((toggle) => {
+        const id = toggle.dataset.layerId;
+        const group = layerGroups[id];
+        if (!group) return;
+
+        if (toggle.checked) {
+          group.addTo(map);
+        }
+
+        toggle.addEventListener("change", (event) => {
+          if (event.target.checked) {
+            group.addTo(map);
+          } else {
+            map.removeLayer(group);
+          }
+        });
+      });
+    </script>
+    {% endif %}
+  </body>
+</html>

@@ -1,0 +1,135 @@
+:root {
+  --bg: #0b1622;
+  --panel: #121f2e;
+  --panel-border: #1f3147;
+  --text: #e6edf3;
+  --muted: #8aa0b6;
+  --accent: #4fb0ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+#sidebar {
+  width: 300px;
+  flex: 0 0 300px;
+  background: var(--panel);
+  border-right: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+.sidebar-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: 0.5px;
+}
+
+.tagline {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.layers {
+  margin-top: 1.75rem;
+  flex: 1;
+}
+
+.layers h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+}
+
+#layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.layer {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.6rem;
+}
+
+.layer label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.layer-toggle {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+
+.layer-description {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.sidebar-footer {
+  margin-top: 1.25rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 0.75rem;
+}
+
+#map {
+  flex: 1;
+  height: 100%;
+}
+
+.map-fallback {
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  text-align: center;
+  background:
+    linear-gradient(rgba(11, 22, 34, 0.88), rgba(11, 22, 34, 0.88)),
+    repeating-linear-gradient(45deg, rgba(79, 176, 255, 0.12) 0 1px, transparent 1px 22px);
+}
+
+.map-fallback section {
+  max-width: 460px;
+}
+
+.map-fallback h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+}
+
+.map-fallback p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
