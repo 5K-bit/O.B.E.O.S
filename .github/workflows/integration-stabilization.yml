@@ -14,6 +14,9 @@ jobs:
   core-matrix:
     name: Core ${{ matrix.os }} Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
     defaults:
       run:
         working-directory: obeos
