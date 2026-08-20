@@ -290,7 +290,8 @@ def test_memory_chamber_reasoning_context_and_daise_share_profiles(tmp_path: Pat
     assert deep["missing_links"] == []
     assert deep["reasoning_path"]["status"] == "disabled"
     assert deep["timing_ms"]["graph_enrichment"] >= 0.0
-    assert result["selected_agent"] == "jarvis"
+    assert result["selected_agent"] == "daise"
+    assert result["runtime_agent"] == "jarvis"
     assert retrieval_events[0].payload["schema_version"] == "1.0"
     assert retrieval_events[0].payload["retrieval_profile"] == "standard"
     assert retrieval_events[0].payload["transport"] == "telegram"
@@ -3383,8 +3384,10 @@ def test_daise_does_not_preserve_stale_lilo_lane_for_vague_followup(tmp_path: Pa
         },
     )
 
-    assert second["selected_agent"] == "jarvis"
-    assert "unified retrieval stack" in second["response"]
+    assert second["selected_agent"] == "daise"
+    assert second["runtime_agent"] == "jarvis"
+    assert second["response"].strip()
+    assert "Lilo training agent answered." not in second["response"]
 
 
 def test_conversation_memory_detects_carry_over_followup_without_exact_family_match(tmp_path: Path) -> None:

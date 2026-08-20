@@ -4,6 +4,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
 
 from ..chat_backends import HeuristicChatBackend
@@ -202,6 +203,7 @@ def process_request_v1(
     correlation_id = context.get("correlation_id") or daise.conversation_memory.create_correlation_id()
     request_id = context.get("request_id") or str(uuid.uuid4())[:8]
     mode = normalize_response_mode(context.get("analysis_mode") or context.get("response_mode"))
+    policy_decision = {"decision_state": "approve", "reason": "v1_cutover"}
     intent = detect_intent(user_input)
 
     if intent.file_ops and hasattr(daise, "process_request_legacy"):
@@ -227,14 +229,141 @@ def process_request_v1(
                 request_id=request_id,
             )
 
-    selected_internal = _select_agent(
-        user_input,
-        agents=agents,
-        routing_keywords=routing_keywords,
-        agent_override=context.get("agent_override"),
-        modality=modality,
+    try:
+        memory_query_kind = daise.conversation_memory._detect_grounded_memory_query(user_input) or ""
+        prior_session_context = bool(daise.conversation_memory.get_session_messages(str(session_id), limit=1))
+        prompt_tokens = set(daise.conversation_memory._tokenize(user_input))
+    except Exception:
+        memory_query_kind = ""
+        prior_session_context = False
+        prompt_tokens = set(str(user_input or "").lower().split())
+    explicit_identity_query = bool(prompt_tokens.intersection({"identity", "name", "daise", "assistant", "stand", "call", "called"}))
+    truth_probe = getattr(daise, "_grounded_truth_response", None)
+    try:
+        probed_truth = truth_probe(user_input, session_id=session_id) if callable(truth_probe) else None
+        probed_truth_kind = str((probed_truth or {}).get("kind") or "")
+    except Exception:
+        probed_truth_kind = ""
+    defer_memory_system_to_recall = bool(
+        memory_query_kind
+        and probed_truth_kind == "memory_system"
+        and prompt_tokens.intersection({"work", "recent", "memory"})
     )
+    defer_truth_to_memory = bool(
+        prior_session_context
+        and not explicit_identity_query
+        and (probed_truth_kind == "identity" or defer_memory_system_to_recall)
+    )
+
+    grounded_truth_handler = getattr(daise, "_handle_grounded_truth_request", None)
+    if callable(grounded_truth_handler) and mode != "deep" and not defer_truth_to_memory:
+        grounded_result = grounded_truth_handler(
+            user_input=user_input,
+            modality=modality,
+            context={**context, "analysis_mode": mode},
+            policy_decision=policy_decision,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            request_started=request_started,
+            progress_callback=context.get("progress_callback"),
+        )
+        if grounded_result is not None:
+            grounded_result.setdefault("runtime_agent", "jarvis")
+            return grounded_result
+
+    continuity_routing_hint = None
+    continuity_hint_builder = getattr(daise, "_continuity_routing_hint", None)
+    if callable(continuity_hint_builder):
+        continuity_routing_hint = continuity_hint_builder(
+            session_id=session_id,
+            user_input=user_input,
+            analysis_mode=mode,
+            retrieval_profile=context.get("retrieval_profile"),
+        )
+    route_scores: dict[str, float] = {}
+    route_score_builder = getattr(daise, "_route_agent_scores", None)
+    if callable(route_score_builder):
+        route_scores = dict(
+            route_score_builder(
+                user_input=user_input,
+                modality=modality,
+                agent_names=list(agents.keys()),
+                routing_keywords=routing_keywords,
+                agent_override=context.get("agent_override"),
+                continuity_hint=continuity_routing_hint,
+            )
+        )
+        selected_internal = max(route_scores, key=route_scores.get) if route_scores else ""
+    else:
+        selected_internal = _select_agent(
+            user_input,
+            agents=agents,
+            routing_keywords=routing_keywords,
+            agent_override=context.get("agent_override"),
+            modality=modality,
+        )
+        if intent.coding and "coding" in agents:
+            selected_internal = "coding"
+        route_scores = {name: 1.0 if name == selected_internal else 0.0 for name in agents}
+    if not selected_internal:
+        selected_internal = _select_agent(
+            user_input,
+            agents=agents,
+            routing_keywords=routing_keywords,
+            agent_override=context.get("agent_override"),
+            modality=modality,
+        )
+    routing_confidence = round(float(route_scores.get(selected_internal, 1.0)), 3)
     visible_agent = "daise" if selected_internal == "jarvis" else selected_internal
+    task_type_hint = {
+        "coding": "coding_help",
+        "jarvis": "general_conversation",
+        "lilo": "lilo",
+        "stitch": "learning",
+        "voice": "voice",
+    }.get(selected_internal, selected_internal)
+
+    daise.conversation_memory.persist_workflow_event(
+        source="daise",
+        event_type="routing_decision",
+        payload={
+            "schema_version": "1.0",
+            "query": user_input,
+            "modality": modality,
+            "analysis_mode": mode,
+            "agent_override": context.get("agent_override"),
+            "suggested_agent": selected_internal,
+            "selected_agent": visible_agent,
+            "candidates": [
+                {"agent": agent_name, "routing_relevance": round(float(score), 3)}
+                for agent_name, score in route_scores.items()
+            ],
+            "routing_confidence": routing_confidence,
+            "continuity_routing_hint": continuity_routing_hint,
+        },
+        confidence=routing_confidence,
+        session_id=session_id,
+        correlation_id=correlation_id,
+        request_id=request_id,
+    )
+    daise.conversation_memory.persist_workflow_event(
+        source="daise",
+        event_type="agent_selection",
+        payload={
+            "schema_version": "1.0",
+            "selected_agent": selected_internal,
+            "visible_agent": visible_agent,
+            "output_agent": "daise",
+            "task_type": task_type_hint,
+            "synthesized": False,
+            "routing_confidence": routing_confidence,
+        },
+        confidence=routing_confidence,
+        session_id=session_id,
+        correlation_id=correlation_id,
+        request_id=request_id,
+    )
 
     query_event = daise.conversation_memory.persist_user_turn(
         session_id=session_id,
@@ -257,8 +386,99 @@ def process_request_v1(
         request_id=request_id,
         transport=context.get("transport"),
     )
+
+    if daise.memory_chamber is not None and mode == "deep":
+        try:
+            bundle["cognition_graph"] = daise.memory_chamber.reasoning_context(
+                user_input,
+                session_id=session_id,
+                request_id=request_id,
+                limit=8,
+                profile="deep",
+            )
+        except Exception:
+            bundle["cognition_graph"] = {}
+
     conversation = _normalize_conversation(bundle)
     evidence = _memory_evidence(bundle)
+
+    graph_bundle = bundle.get("cognition_graph") or {}
+    retrieval_profile = bundle.get("retrieval_profile") or context.get("retrieval_profile") or mode
+    try:
+        retrieval_event = daise.conversation_memory.persist_workflow_event(
+            source="daise",
+            event_type="memory_retrieval",
+            payload={
+                "schema_version": "1.0",
+                "query": user_input,
+                "selected_candidates": [selected_internal],
+                "retrieval_profile": retrieval_profile,
+                "analysis_mode": mode,
+                "transport": context.get("transport"),
+                "session_messages": len(bundle.get("session_messages") or []),
+                "session_summaries": len(bundle.get("session_summaries") or []),
+                "global_memories": len(bundle.get("global_memories") or []),
+                "recent_events": len(bundle.get("recent_events") or []),
+                "knowledge_hits": len(bundle.get("knowledge_hits") or []),
+                "knowledge_citations": len(bundle.get("citations") or []),
+                "graph_neighborhoods": {
+                    selected_internal: {
+                        "matched_nodes": graph_bundle.get("matched_nodes") or [],
+                        "semantic_hits": graph_bundle.get("semantic_hits") or [],
+                        "timing_ms": graph_bundle.get("timing_ms") or {},
+                    }
+                },
+            },
+            confidence=1.0,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            parent_event_id=query_event.id,
+        )
+        daise.conversation_memory.persist_workflow_event(
+            source="daise",
+            event_type="memory_retrieval_observation",
+            payload={
+                "schema_version": "1.0",
+                "retrieval_profile": retrieval_profile,
+                "analysis_mode": mode,
+                "transport": context.get("transport"),
+                "selected_candidates": [selected_internal],
+                "knowledge_hits": len(bundle.get("knowledge_hits") or []),
+                "graph_matches": len(graph_bundle.get("matched_nodes") or []) + len(graph_bundle.get("semantic_hits") or []),
+                "timing_ms": graph_bundle.get("timing_ms") or {},
+            },
+            confidence=0.9,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            parent_event_id=retrieval_event.id,
+        )
+    except Exception:
+        pass
+
+    grounded_memory_handler = getattr(daise, "_handle_grounded_memory_bundle", None)
+    if callable(grounded_memory_handler):
+        grounded_memory_result = grounded_memory_handler(
+            user_input=user_input,
+            modality=modality,
+            context={**context, "analysis_mode": mode},
+            policy_decision=policy_decision,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            request_started=request_started,
+            progress_callback=context.get("progress_callback"),
+            query_event=query_event,
+            retrieval_profile=str(retrieval_profile),
+            analysis_mode=mode,
+            memory_bundles={selected_internal: bundle},
+            suggested_agent=selected_internal,
+            candidate_agents=[selected_internal],
+        )
+        if grounded_memory_result is not None:
+            grounded_memory_result.setdefault("runtime_agent", selected_internal)
+            return grounded_memory_result
 
     system_state: dict[str, Any] = {}
     if isinstance(context.get("system_state"), Mapping):
@@ -324,15 +544,80 @@ def process_request_v1(
             }
             return str(getattr(generated, "text", generated))
 
-    pipeline = ReasoningPipeline(model=model_callable)
-    response_text = pipeline.answer(
-        user_input,
-        conversation=conversation,
-        memory=evidence,
-        system_state=system_state,
-        requested_tools=(),
-        instructions={"analysis_mode": mode, "selected_runtime": selected_internal},
-    )
+    specialist_result = None
+    specialist = agents.get(selected_internal)
+
+    if specialist is not None and hasattr(specialist, "process"):
+        try:
+            specialist_result = specialist.process(
+                user_input,
+                context={
+                    **context,
+                    "session_id": session_id,
+                    "correlation_id": correlation_id,
+                    "request_id": request_id,
+                    "memory_context": bundle,
+                    "daise_selected_candidates": [selected_internal],
+                },
+            )
+        except Exception:
+            specialist_result = None
+
+    grounded_conversation_override = getattr(daise, "_grounded_conversation_override_for_generic_report", None)
+    if callable(grounded_conversation_override) and isinstance(specialist_result, Mapping):
+        override = grounded_conversation_override(
+            user_input=user_input,
+            top_report=SimpleNamespace(
+                provider=specialist_result.get("provider"),
+                model=specialist_result.get("model"),
+                response=specialist_result.get("response"),
+            ),
+            selected_agent=selected_internal,
+            synthesized=False,
+            memory_bundles={selected_internal: bundle},
+        )
+        if override is not None:
+            specialist_result = {
+                **dict(specialist_result),
+                "response": override.get("response"),
+                "confidence": override.get("confidence", specialist_result.get("confidence")),
+                "provider": override.get("provider"),
+                "model": override.get("model"),
+                "task_type": override.get("task_type"),
+                "backend_metadata": dict(override.get("backend_metadata") or {}),
+                "backend_error": None,
+            }
+
+    if isinstance(specialist_result, Mapping) and str(specialist_result.get("response") or "").strip():
+        response_text = str(specialist_result["response"]).strip()
+
+        for prefix in (
+            "CODINGAGENT:",
+            "CODING AGENT:",
+            "JARVIS:",
+            "LILO:",
+            "STITCH:",
+        ):
+            if response_text.upper().startswith(prefix):
+                response_text = response_text[len(prefix):].lstrip()
+                break
+
+        backend_meta = {
+            "provider": specialist_result.get("provider") or "specialist",
+            "model": specialist_result.get("model") or selected_internal,
+            "metadata": dict(specialist_result.get("backend_metadata") or {}),
+            "backend_error": specialist_result.get("backend_error"),
+        }
+    else:
+        pipeline = ReasoningPipeline(model=model_callable)
+        response_text = pipeline.answer(
+            user_input,
+            conversation=conversation,
+            memory=evidence,
+            system_state=system_state,
+            requested_tools=(),
+            instructions={"analysis_mode": mode, "selected_runtime": selected_internal},
+        )
 
     provider = str(backend_meta.get("provider") or "unknown")
     confidence = 0.92 if provider == "ollama" else 0.64
@@ -362,7 +647,52 @@ def process_request_v1(
         request_id=request_id,
     )
 
+    backend_metadata = dict(backend_meta.get("metadata") or {})
+    latency_payload = {
+        "schema_version": "1.0",
+        "request_id": request_id,
+        "selected_agent": visible_agent,
+        "runtime_agent": selected_internal,
+        "output_agent": "daise",
+        "provider": provider,
+        "model": backend_meta.get("model"),
+        "analysis_mode": mode,
+        "retrieval_profile": retrieval_profile,
+        "transport": context.get("transport"),
+        "execution_time_ms": execution_time_ms,
+        "backend_error": backend_meta.get("backend_error"),
+        "fallback_used": bool(backend_meta.get("backend_error")),
+        "selected_model": backend_metadata.get("selected_model") or backend_meta.get("model"),
+        "model_chain": backend_metadata.get("model_chain") or [backend_meta.get("model")],
+        "effective_timeout_s": backend_metadata.get("effective_timeout_s"),
+        "streamed": backend_metadata.get("streamed", False),
+        "response_path": backend_metadata.get("response_path") or "live_model",
+        "fallback_trigger": backend_metadata.get("fallback_trigger"),
+        "live_lane_attempted": bool(backend_metadata.get("live_lane_attempted", False)),
+        "fallback_mode": backend_metadata.get("fallback_mode") or "none",
+        "prompt_metrics": backend_metadata.get("prompt_metrics", {}),
+        "ollama_attempts": backend_metadata.get("ollama_attempts"),
+        "wall_time_ms": backend_metadata.get("wall_time_ms"),
+        "ollama_total_duration_ms": backend_metadata.get("ollama_total_duration_ms"),
+        "load_duration_ms": backend_metadata.get("load_duration_ms"),
+        "prompt_eval_count": backend_metadata.get("prompt_eval_count"),
+        "eval_count": backend_metadata.get("eval_count"),
+        "timeout_reason": backend_metadata.get("timeout_reason"),
+        "fallback_reason": backend_metadata.get("fallback_reason"),
+    }
+
     try:
+        daise.conversation_memory.persist_workflow_event(
+            source="daise",
+            event_type="latency_observation",
+            payload=latency_payload,
+            confidence=confidence,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            parent_event_id=response_event.id,
+        )
+
         daise.conversation_memory.persist_workflow_event(
             source="daise",
             event_type="request_outcome",
@@ -375,9 +705,18 @@ def process_request_v1(
                 "model": backend_meta.get("model"),
                 "backend_error": backend_meta.get("backend_error"),
                 "analysis_mode": mode,
+                "retrieval_profile": retrieval_profile,
+                "transport": context.get("transport"),
                 "reasoning_architecture": "model-context-memory-tools",
                 "retrieval_is_evidence_only": True,
                 "execution_time_ms": execution_time_ms,
+                "fallback_used": latency_payload["fallback_used"],
+                "response_path": latency_payload["response_path"],
+                "live_lane_attempted": latency_payload["live_lane_attempted"],
+                "fallback_mode": latency_payload["fallback_mode"],
+                "selected_model": latency_payload["selected_model"],
+                "model_chain": latency_payload["model_chain"],
+                "effective_timeout_s": latency_payload["effective_timeout_s"],
             },
             confidence=confidence,
             session_id=session_id,
@@ -391,7 +730,7 @@ def process_request_v1(
     return {
         "response": response_text,
         "confidence": confidence,
-        "agent": visible_agent,
+        "agent": "daise",
         "output_agent": "daise",
         "mediated_by": "daise",
         "selected_agent": visible_agent,
