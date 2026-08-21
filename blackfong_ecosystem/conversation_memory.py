@@ -3940,6 +3940,8 @@ class ConversationMemoryService:
         if not cleaned:
             return []
         cleaned = self._strip_work_topic_greeting_prefix(cleaned)
+        if self._looks_like_question_topic(cleaned):
+            return []
         topics: List[str] = list(self._canonical_work_topics(cleaned))
         lowered = cleaned.lower()
         for pattern in (
@@ -4026,6 +4028,12 @@ class ConversationMemoryService:
                 "hint",
                 "you never responded",
                 "know about obeos",
+                "jarvis or daise",
+                "shared memory from my computer",
+                "communicating to you now through telegram",
+                "communicating to you through telegram",
+                "through telegram you just have",
+                "just have a shared memory",
             )
         ):
             return []
@@ -4141,6 +4149,22 @@ class ConversationMemoryService:
             return False
         if lowered.startswith(("you ", "your ", "yes ", "add ", "as of ", "from ")):
             return False
+        if any(
+            token in lowered
+            for token in (
+                "jarvis or daise",
+                "shared memory",
+                "through telegram",
+                "communicating to you",
+                "from my computer",
+                "good evening",
+                "good morning",
+                "good afternoon",
+                "still there",
+                "are you hungry",
+            )
+        ):
+            return False
         if lowered in {
             "yes for now",
             "add to you",
@@ -4228,6 +4252,14 @@ class ConversationMemoryService:
                 "they should reflect",
                 "congratulate you on that milestone",
                 "some kind of memory",
+                "jarvis or daise",
+                "shared memory from my computer",
+                "communicating to you now through telegram",
+                "communicating to you through telegram",
+                "through telegram you just have",
+                "are you hungry",
+                "are you still there",
+                "still there",
             )
         )
 

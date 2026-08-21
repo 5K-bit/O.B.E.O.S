@@ -482,6 +482,18 @@ class HeuristicChatBackend(BaseChatBackend):
                 "Hello. D.A.I.S.E. is here with local O.B.E.O.S. memory, recent session context, "
                 "and stored knowledge still available."
             )
+        if self._contains_any_phrase(
+            lowered,
+            "good evening",
+            "good morning",
+            "good afternoon",
+            "how are you",
+            "are you still there",
+            "are you there",
+            "still there",
+            "are you hungry",
+        ):
+            return "I am here inside O.B.E.O.S., and I can still answer from local memory while the live model lane recovers."
 
         if fallback_reason:
             fallback_source = "live model" if provider == "ollama" else provider or "the unavailable backend"
@@ -816,9 +828,25 @@ class HeuristicChatBackend(BaseChatBackend):
 
         cleaned = re.sub(r"[_*#~`|]+", " ", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:-")
+        if (
+            "[page" in cleaned.lower()
+            or "ufg " in cleaned.lower()
+            or " j! " in cleaned.lower()
+            or HeuristicChatBackend._looks_like_ocr_noise(cleaned)
+        ):
+            return ""
         if len(cleaned) > 320:
             cleaned = cleaned[:317].rstrip(" ,.;:-") + "..."
         return cleaned
+
+    @staticmethod
+    def _looks_like_ocr_noise(text: str) -> bool:
+        tokens = re.findall(r"[A-Za-z]{2,}", str(text or ""))
+        if not tokens:
+            return True
+        uppercase_tokens = [token for token in tokens if token.isupper() and len(token) >= 3]
+        short_tokens = [token for token in tokens if len(token) <= 3]
+        return len(uppercase_tokens) >= 4 or (len(short_tokens) >= 8 and len(tokens) >= 10)
 
     @staticmethod
     def _contains_any_word(text: str, *words: str) -> bool:

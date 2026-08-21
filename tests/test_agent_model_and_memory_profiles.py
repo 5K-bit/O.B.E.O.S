@@ -285,6 +285,33 @@ def test_operator_profile_filters_low_value_work_fragments(tmp_path):
     assert "Telegram grounding" in active_work
 
 
+def test_operator_profile_filters_transport_identity_reflection_fragments(tmp_path):
+    service = build_memory_service(tmp_path)
+    session_id = service.create_session_id()
+    correlation_id = service.create_correlation_id()
+
+    service.persist_user_turn(
+        session_id=session_id,
+        correlation_id=correlation_id,
+        text=(
+            "Your gaining intelligence I see, So are you Jarvis or DAISE, "
+            "and I'm communicating to you now through telegram you just have a shared memory from my computer and."
+        ),
+    )
+    service.persist_user_turn(
+        session_id=session_id,
+        correlation_id=correlation_id,
+        text='Call me "Five". I am working on Telegram grounding and response latency.',
+    )
+
+    profile = service.operator_profile_snapshot(session_id=session_id)
+    active_work = [item.lower() for item in profile["active_work"]]
+
+    assert not any("jarvis or daise" in item for item in active_work)
+    assert not any("shared memory from my computer" in item for item in active_work)
+    assert "telegram grounding" in active_work
+
+
 def test_operator_profile_prefers_recent_user_work_over_older_stored_work(tmp_path):
     service = build_memory_service(tmp_path)
     session_id = service.create_session_id()
@@ -467,6 +494,71 @@ def test_timeout_fallback_synthesizes_state_summary_from_active_work():
     assert "response latency" in result["response"] or "OBEOS improvements" in result["response"]
     assert "Irrelevant fallback source" not in result["response"]
     assert result["backend_metadata"]["bounded_context_fallback"] is True
+
+
+def test_timeout_fallback_social_checkin_ignores_grounded_knowledge_dump():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "are you hungry? are you still there?",
+        context={
+            "session_id": "test-session",
+            "transport": "telegram",
+            "memory_context": {
+                "operator_profile": {
+                    "preferred_name": "Five",
+                    "active_work": ["response latency", "Telegram grounding"],
+                },
+                "grounded_knowledge_answer": {
+                    "answer": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\nRAW OCR CHUNK",
+                },
+                "citations": [{"collection": "spawn", "title": "Spawn"}],
+            },
+        },
+    )
+
+    assert result["provider"] == "heuristic"
+    assert "I'm here" in result["response"]
+    assert "[Source 1]" not in result["response"]
+    assert "RAW OCR CHUNK" not in result["response"]
+
+
+def test_timeout_fallback_runtime_status_reports_surface_without_source_dump():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "OBEOS trace test. Tell me which surface this came from and report current runtime status.",
+        context={
+            "session_id": "test-session",
+            "transport": "telegram",
+            "memory_context": {
+                "operator_profile": {
+                    "preferred_name": "Five",
+                    "active_work": ["response latency", "Telegram grounding"],
+                },
+                "backend_health": {
+                    "state": "degraded",
+                    "allow_recovery_probe": True,
+                    "degraded_reason": "recent_transient_timeout",
+                },
+                "grounded_knowledge_answer": {
+                    "answer": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\nRAW OCR CHUNK",
+                },
+                "citations": [{"collection": "spawn", "title": "Spawn"}],
+            },
+        },
+    )
+
+    assert result["provider"] == "heuristic"
+    assert "came through telegram" in result["response"].lower()
+    assert "degraded" in result["response"].lower()
+    assert "[Source 1]" not in result["response"]
 
 
 def test_streaming_timeout_falls_back_cleanly(monkeypatch):

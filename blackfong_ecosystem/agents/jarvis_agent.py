@@ -178,7 +178,10 @@ class JARVISAgent(Agent):
     
     def _generate_response(self, user_input: str, context: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         """Generate a response with the configured local backend and safe fallback."""
-        grounded = self._grounded_memory_response(context) or self._grounded_knowledge_response(context)
+        grounded = self._grounded_memory_response(context) or self._grounded_knowledge_response(
+            context,
+            user_input=user_input,
+        )
         if grounded is not None:
             prompt_metrics = dict(((context.get("memory_context") or {}).get("prompt_metrics") or {}))
             metadata = dict(grounded["metadata"])
@@ -571,13 +574,17 @@ class JARVISAgent(Agent):
             },
         }
 
-    def _grounded_knowledge_response(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _grounded_knowledge_response(self, context: Dict[str, Any], *, user_input: str) -> Optional[Dict[str, Any]]:
         memory_context = context.get("memory_context") or {}
         grounded = memory_context.get("grounded_knowledge_answer")
         if not isinstance(grounded, dict):
             return None
         answer_text = str(grounded.get("answer") or "").strip()
         if not answer_text:
+            return None
+        citations = list(memory_context.get("citations") or [])
+        lowered = str(user_input or "").strip().lower()
+        if not self._should_use_grounded_knowledge(lowered, citations):
             return None
         return {
             "answer": answer_text,
@@ -616,10 +623,21 @@ class JARVISAgent(Agent):
         grounded_conversation = memory_context.get("grounded_conversation_answer") or {}
         knowledge_context = str(memory_context.get("knowledge_context") or "").strip()
         citations = list(memory_context.get("citations") or [])
+        backend_health = dict(memory_context.get("backend_health") or {})
         lowered = str(user_input or "").strip().lower()
 
         answer = ""
-        if active_work and any(
+        if self._is_social_checkin_prompt(lowered):
+            answer = self._compose_social_checkin_fallback(active_work, operator_profile)
+        elif self._is_runtime_status_prompt(lowered):
+            answer = self._compose_runtime_status_fallback(
+                active_work=active_work,
+                operator_profile=operator_profile,
+                backend_health=backend_health,
+                transport=str(context.get("transport") or memory_context.get("transport") or "").strip(),
+                user_input=user_input,
+            )
+        elif active_work and any(
             phrase in lowered
             for phrase in (
                 "improve obeos",
@@ -663,11 +681,15 @@ class JARVISAgent(Agent):
             )
         ):
             answer = self._compose_project_direction_fallback(active_work, operator_profile)
-        elif grounded_knowledge and str(grounded_knowledge.get("answer") or "").strip():
+        elif (
+            grounded_knowledge
+            and str(grounded_knowledge.get("answer") or "").strip()
+            and self._should_use_grounded_knowledge(lowered, citations)
+        ):
             answer = str(grounded_knowledge.get("answer") or "").strip()
         elif grounded_conversation and str(grounded_conversation.get("answer") or "").strip():
             answer = str(grounded_conversation.get("answer") or "").strip()
-        elif knowledge_context:
+        elif knowledge_context and self._should_use_grounded_knowledge(lowered, citations):
             answer = self._compose_knowledge_context_fallback(
                 user_input=user_input,
                 knowledge_context=knowledge_context,
@@ -746,6 +768,52 @@ class JARVISAgent(Agent):
             "Those are the tracks most likely to improve whether O.B.E.O.S. feels grounded, coherent, and dependable across its surfaces."
         )
 
+    def _compose_social_checkin_fallback(
+        self,
+        active_work: List[str],
+        operator_profile: Dict[str, Any],
+    ) -> str:
+        preferred_name = str(operator_profile.get("preferred_name") or "").strip()
+        salutation = f"{preferred_name}, " if preferred_name else ""
+        if active_work:
+            return (
+                f"{salutation}I'm here, and still tracking {self._join_items(active_work[:2])} inside O.B.E.O.S."
+            )
+        return f"{salutation}I'm here and still present inside O.B.E.O.S."
+
+    def _compose_runtime_status_fallback(
+        self,
+        *,
+        active_work: List[str],
+        operator_profile: Dict[str, Any],
+        backend_health: Dict[str, Any],
+        transport: str,
+        user_input: str,
+    ) -> str:
+        preferred_name = str(operator_profile.get("preferred_name") or "").strip()
+        salutation = f"{preferred_name}, " if preferred_name else ""
+        parts: List[str] = []
+        lowered = str(user_input or "").strip().lower()
+        surface = transport.replace("_", " ").strip()
+        if any(token in lowered for token in ("which surface", "came from", "trace test")):
+            if surface:
+                parts.append(f"{salutation}this turn came through {surface}.")
+            else:
+                parts.append(f"{salutation}this turn came through the current O.B.E.O.S. surface.")
+        state = str(backend_health.get("state") or "").strip().lower()
+        if state == "degraded":
+            reason = str(backend_health.get("degraded_reason") or "recent backend issues").replace("_", " ").strip()
+            parts.append(f"The last runtime health I have is degraded because of {reason}.")
+            if backend_health.get("allow_recovery_probe"):
+                parts.append("A bounded live-model recovery probe is still allowed on the next turn.")
+        elif state:
+            parts.append(f"The last runtime health I have is {state}.")
+        else:
+            parts.append("I do not have a fresh runtime health snapshot in this fallback lane, but I am still present.")
+        if active_work:
+            parts.append(f"I still have {self._join_items(active_work[:2])} in focus.")
+        return " ".join(part.strip() for part in parts if part.strip()).strip()
+
     def _compose_knowledge_context_fallback(
         self,
         *,
@@ -782,6 +850,88 @@ class JARVISAgent(Agent):
         if len(cleaned) == 2:
             return f"{cleaned[0]} and {cleaned[1]}"
         return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
+
+    @staticmethod
+    def _is_social_checkin_prompt(lowered: str) -> bool:
+        return any(
+            token in lowered
+            for token in (
+                "good evening",
+                "good morning",
+                "good afternoon",
+                "how are you",
+                "howre you",
+                "how's it going",
+                "hows it going",
+                "are you still there",
+                "still there",
+                "are you there",
+                "you still there",
+                "are you hungry",
+            )
+        )
+
+    @staticmethod
+    def _is_runtime_status_prompt(lowered: str) -> bool:
+        return any(
+            token in lowered
+            for token in (
+                "runtime status",
+                "system status",
+                "backend status",
+                "which surface",
+                "came from",
+                "trace test",
+                "runtime looking",
+                "backend alive",
+            )
+        )
+
+    @staticmethod
+    def _should_use_grounded_knowledge(lowered: str, citations: List[Dict[str, Any]]) -> bool:
+        if any(
+            token in lowered
+            for token in (
+                "good evening",
+                "good morning",
+                "good afternoon",
+                "how are you",
+                "howre you",
+                "are you hungry",
+                "are you still there",
+                "still there",
+                "trace test",
+                "runtime status",
+                "system status",
+                "backend status",
+                "which surface",
+                "came from",
+            )
+        ):
+            return False
+        if any(
+            token in lowered
+            for token in (
+                "tell me about",
+                "what do we know",
+                "do you still know",
+                "what have we got",
+                "what is",
+                "what's",
+                "who is",
+                "who's",
+                "explain",
+                "remember",
+                "recall",
+            )
+        ):
+            return True
+        collection_tokens = {
+            str(item.get("collection") or "").strip().lower()
+            for item in citations
+            if str(item.get("collection") or "").strip()
+        }
+        return any(token and token in lowered for token in collection_tokens)
 
     @staticmethod
     def _backend_chain_preview(chat_backend: BaseChatBackend, response_mode: str, options: Dict[str, Any]) -> List[str]:

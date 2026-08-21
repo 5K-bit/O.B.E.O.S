@@ -5541,3 +5541,23 @@ def test_heuristic_fallback_handles_memory_commitment_prompt() -> None:
 
     assert "carry it forward" in result.text
     assert "nation only when it is striving" not in result.text
+
+
+def test_heuristic_fallback_drops_noisy_ocr_excerpt_for_social_checkin() -> None:
+    backend = HeuristicChatBackend()
+    result = backend.generate(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Conversation memory and ecosystem context:\n"
+                    "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\n"
+                    "UFg AT AM ZJbOQ r v^eze MOf (jOfNO TO V WOP. Er^'i L: J! i! [PAGE 1]\n"
+                ),
+            },
+            {"role": "user", "content": "are you still there?"},
+        ]
+    )
+
+    assert "I am here inside O.B.E.O.S." in result.text
+    assert "UFg AT AM" not in result.text
