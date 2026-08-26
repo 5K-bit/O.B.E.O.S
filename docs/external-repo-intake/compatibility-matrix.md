@@ -28,7 +28,17 @@ This matrix records the initial compatibility position for Graphify, OpenHuman, 
 
 ### Graphify
 
-Graphify should be evaluated first. It can produce architecture graphs and reports without changing O.B.E.O.S runtime behavior. The first pass should map O.B.E.O.S itself, then compare the external forks against the current manifest, event, device, and HUD boundaries.
+Graphify has completed its first code-only O.B.E.O.S review. The local AST scan
+mapped 397 supported source files into 5,773 nodes and 15,336 links without a model
+backend or runtime change. Its strongest evidence is that the current event store,
+dashboard, D.A.I.S.E, device registry, Event Contract v1, and component registry
+are distinct, inspectable boundaries. See
+`graphify-findings/obeos-code-scan-2026-08-26.md`.
+
+Graphify remains an offline developer and architecture-review tool. A later runtime
+experiment, if justified, must be an on-demand manifest-backed worker that publishes
+only namespaced scan lifecycle events and bounded report references. It must not read
+Legion credentials, become a D.A.I.S.E authority, or add work to HUD page loads.
 
 ### OpenHuman
 

@@ -3,7 +3,8 @@
 ## Phase 1: Docs And Graph Review
 
 - Keep this phase docs/artifacts only.
-- Use Graphify to generate a code graph for O.B.E.O.S.
+- Completed: use Graphify to generate a local, code-only graph for O.B.E.O.S.
+- Completed: record the baseline result in `graphify-findings/obeos-code-scan-2026-08-26.md`.
 - Use Graphify to generate smaller comparison graphs for Graphify, OpenHuman, and Gotify/server.
 - Store generated reports under `docs/external-repo-intake/graphify-findings/`.
 - Record exact repo refs and commands so the review is reproducible.
