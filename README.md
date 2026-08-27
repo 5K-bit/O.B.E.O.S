@@ -27,6 +27,20 @@ These are the current rules that packaging and branding should follow.
 - **Thoughtglass HUD**: supported browser-based secondary cockpit for remote access, debugging, and fallback
 - **TUI**: supported fallback/home surface, not the canonical product shell
 
+## v2 Architecture Direction
+
+O.B.E.O.S. v2 keeps the v0.9 governing spine and contracts while adding a multimodal cognitive architecture.
+
+The core rule is:
+
+> **Events describe what happened. Context describes what is happening. D.A.I.S.E. determines what it means and what to do.**
+
+The v2 architecture introduces a `context_fabric` layer between the event fabric and D.A.I.S.E. so raw subsystem activity does not become conversational noise. D.A.I.S.E. becomes multimodal at the cognitive layer, while specialized systems such as 3000, EarthGlass, and BlackForge provide observations, evidence, and capabilities.
+
+BlackForge evolves into O.B.E.O.S.'s multimodal engineering, diagnostic, automation, and reasoning specialist with capability-based model routing. It does **not** replace D.A.I.S.E. or `event_backbone`.
+
+See [`docs/OBEOS-v2-architecture-patch.md`](docs/OBEOS-v2-architecture-patch.md) for the full architecture and implementation plan.
+
 ## Surface Hierarchy
 
 O.B.E.O.S. now has a clear surface hierarchy:
@@ -189,12 +203,16 @@ The v0.9 release candidate remains gated on passing the full integration matrix 
 ### Core components
 
 - **Blackfong**: governing spine, routing authority, policy, memory governance
-- **D.A.I.S.E.**: visible operator assistant
+- **D.A.I.S.E.**: visible operator assistant and future multimodal cognitive layer
 - **Blackcomputer**: orchestrator host and knowledge vault
 - **Thoughtglass**: live operational cognition surface
 - **Memory Chamber**: deep graph/archive and analysis workbench
 - **Mobray**: question-only interrogator
 - **TinyProgrammer**: companion participant and artifact generator
+- **BlackForge**: engineering, diagnostic, automation, and multimodal reasoning specialist
+- **3000**: perception specialist
+- **EarthGlass**: Earth/environment specialist
+- **`context_fabric`**: v2 situation-building and relevance boundary between events and D.A.I.S.E.
 
 ### Storage and memory
 
@@ -202,6 +220,7 @@ The v0.9 release candidate remains gated on passing the full integration matrix 
 - local vector storage behind the existing abstraction
 - unified cognition graph for Thoughtglass / Memory Chamber / D.A.I.S.E. retrieval
 - shared conversation memory across workspace, HUD, and TUI
+- v2 evidence references for multimodal observations and large artifacts
 
 ### Product direction
 
@@ -210,5 +229,8 @@ The product is moving toward:
 - stronger native-shell-first operation
 - manifest-driven component integration
 - contract-driven health and events
+- multimodal D.A.I.S.E. reasoning
+- situation-aware context aggregation
+- multimodal BlackForge engineering and diagnostics
 - packaging-ready Kubuntu/Plasma deployment
-- a reproducible OBEOS v0.9 release candidate
+- a reproducible OBEOS v0.9 release candidate with a v2 architecture path
