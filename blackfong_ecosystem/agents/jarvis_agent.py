@@ -584,7 +584,10 @@ class JARVISAgent(Agent):
             return None
         citations = list(memory_context.get("citations") or [])
         lowered = str(user_input or "").strip().lower()
-        if not self._should_use_grounded_knowledge(lowered, citations):
+        if (
+            self._looks_like_raw_knowledge_dump(answer_text)
+            or not self._should_use_grounded_knowledge(lowered, citations)
+        ):
             return None
         return {
             "answer": answer_text,
@@ -684,6 +687,7 @@ class JARVISAgent(Agent):
         elif (
             grounded_knowledge
             and str(grounded_knowledge.get("answer") or "").strip()
+            and not self._looks_like_raw_knowledge_dump(str(grounded_knowledge.get("answer") or ""))
             and self._should_use_grounded_knowledge(lowered, citations)
         ):
             answer = str(grounded_knowledge.get("answer") or "").strip()
@@ -824,6 +828,8 @@ class JARVISAgent(Agent):
         cleaned = re.sub(r"\s+", " ", knowledge_context).strip()
         if not cleaned:
             return ""
+        if self._looks_like_raw_knowledge_dump(cleaned):
+            return ""
         cleaned = re.sub(r"^Bounded retrieval context:\s*", "", cleaned, flags=re.IGNORECASE)
         cleaned = cleaned.replace("[truncated for standard chat latency]", "").strip()
         cleaned = cleaned[:320].rstrip(" ,.;:-")
@@ -909,29 +915,42 @@ class JARVISAgent(Agent):
             )
         ):
             return False
-        if any(
-            token in lowered
-            for token in (
-                "tell me about",
-                "what do we know",
-                "do you still know",
-                "what have we got",
-                "what is",
-                "what's",
-                "who is",
-                "who's",
-                "explain",
-                "remember",
-                "recall",
-            )
-        ):
-            return True
-        collection_tokens = {
-            str(item.get("collection") or "").strip().lower()
-            for item in citations
-            if str(item.get("collection") or "").strip()
+        query_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9][a-z0-9_.-]+", lowered)
+            if token not in {
+                "about", "and", "are", "can", "do", "does", "explain", "have", "how",
+                "i", "is", "me", "of", "please", "remember", "recall", "tell", "the",
+                "this", "to", "what", "we", "who", "with", "you", "your",
+            }
         }
-        return any(token and token in lowered for token in collection_tokens)
+        evidence_tokens: set[str] = set()
+        for item in citations:
+            for field in ("collection", "title", "source_file", "path"):
+                value = str(item.get(field) or "").strip().lower()
+                evidence_tokens.update(
+                    token
+                    for token in re.findall(r"[a-z0-9][a-z0-9_.-]+", value)
+                    if len(token) >= 3
+                )
+        # Retrieval is supplementary. A relevant topic must be named in the
+        # question before a citation can become the answer.
+        return bool(query_tokens & evidence_tokens)
+
+    @staticmethod
+    def _looks_like_raw_knowledge_dump(text: str) -> bool:
+        normalized = str(text or "").strip().lower()
+        if not normalized:
+            return False
+        return any(
+            marker in normalized
+            for marker in (
+                "kind=knowledge_collection",
+                "raw ocr",
+                "[page 1]",
+                "ufg ",
+            )
+        )
 
     @staticmethod
     def _backend_chain_preview(chat_backend: BaseChatBackend, response_mode: str, options: Dict[str, Any]) -> List[str]:

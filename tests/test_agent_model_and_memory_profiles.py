@@ -561,6 +561,55 @@ def test_timeout_fallback_runtime_status_reports_surface_without_source_dump():
     assert "[Source 1]" not in result["response"]
 
 
+def test_unrelated_question_does_not_use_an_unrelated_collection_citation():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "what do you think about the stars?",
+        context={
+            "session_id": "test-session",
+            "transport": "telegram",
+            "memory_context": {
+                "grounded_knowledge_answer": {
+                    "answer": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\nRAW OCR CHUNK",
+                },
+                "knowledge_context": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn RAW OCR CHUNK",
+                "citations": [{"collection": "spawn", "title": "Spawn"}],
+            },
+        },
+    )
+
+    assert result["provider"] == "heuristic"
+    assert "Spawn" not in result["response"]
+    assert "RAW OCR" not in result["response"]
+
+
+def test_raw_grounded_collection_answer_is_not_emitted_verbatim():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "tell me about Spawn",
+        context={
+            "session_id": "test-session",
+            "memory_context": {
+                "grounded_knowledge_answer": {
+                    "answer": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\nRAW OCR CHUNK",
+                },
+                "citations": [{"collection": "spawn", "title": "Spawn"}],
+            },
+        },
+    )
+
+    assert "[Source 1]" not in result["response"]
+    assert "RAW OCR" not in result["response"]
+
+
 def test_streaming_timeout_falls_back_cleanly(monkeypatch):
     class TimeoutStream:
         status_code = 200
