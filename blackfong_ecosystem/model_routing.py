@@ -12,7 +12,9 @@ from .ollama_models import filter_model_chain
 
 MAX_MODEL_CHAIN_WALL_S = 90.0
 FAST_CHAIN_TIMEOUT_CAP_S = 25.0
-STANDARD_CHAIN_TIMEOUT_CAP_S = 45.0
+# A single standard-model request may need time to load a cold local model.
+# Multi-model chains are still divided below so retries remain bounded.
+STANDARD_CHAIN_TIMEOUT_CAP_S = 75.0
 DEEP_CHAIN_TIMEOUT_CAP_S = 90.0
 
 ResponseMode = str  # "fast" | "standard" | "deep"

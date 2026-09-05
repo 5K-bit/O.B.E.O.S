@@ -983,7 +983,7 @@ class JARVISAgent(Agent):
         agent_override = context.get("agent_override")
         transcript_limit = 0 if prompt_mode.startswith("quick") else min(
             len(session_messages),
-            6 if prompt_mode == "standard" else chat_settings.transcript_window,
+            4 if prompt_mode == "standard" else chat_settings.transcript_window,
         )
         transcript_messages = self._sanitize_session_messages(
             session_messages[-transcript_limit:] if transcript_limit else [],

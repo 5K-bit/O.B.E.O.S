@@ -662,7 +662,16 @@ def test_standard_chain_timeout_is_split_across_models():
         chain_length=2,
     )
 
-    assert capped == 22.5
+    assert capped == 37.5
+
+
+def test_standard_single_model_timeout_allows_cold_model_startup():
+    capped = OllamaRoutingChatBackend._capped_timeout(
+        {"mode": "standard", "timeout": 90.0},
+        chain_length=1,
+    )
+
+    assert capped == 75.0
 
 
 def test_transport_backend_health_recovers_after_newer_global_ollama_success(tmp_path):

@@ -3940,7 +3940,23 @@ class ConversationMemoryService:
         if not cleaned:
             return []
         cleaned = self._strip_work_topic_greeting_prefix(cleaned)
-        if self._looks_like_question_topic(cleaned):
+        if self._looks_like_question_topic(cleaned) and not any(
+            marker in cleaned.lower()
+            for marker in (
+                "improve ",
+                "improving ",
+                "working on ",
+                "trying to ",
+                "keeps failing",
+                "fix ",
+                "build ",
+                "implement ",
+                "enable ",
+                "set up ",
+                "configure ",
+                "update ",
+            )
+        ):
             return []
         topics: List[str] = list(self._canonical_work_topics(cleaned))
         lowered = cleaned.lower()
