@@ -67,6 +67,34 @@ _FILE_KEYWORDS = (
     "file workflow",
 )
 
+_KNOWN_KNOWLEDGE_NAMES = (
+    "spawn",
+    "obeos",
+    "blackforge",
+    "night-watch",
+    "nightwatch",
+    "quietdrop",
+    "earthglass",
+    "earth glass",
+    "dreamgraph",
+    "memory chamber",
+    "tinyprogrammer",
+    "tiny programmer",
+    "max payne",
+)
+
+_KNOWLEDGE_QUERY_MARKERS = (
+    "tell me about",
+    "what is",
+    "what are",
+    "explain",
+    "describe",
+    "recall",
+    "remember",
+    "what do you know",
+    "where did we",
+)
+
 
 @dataclass(frozen=True)
 class DetectedIntent:
@@ -134,7 +162,20 @@ def resolve_response_mode(
         return "deep"
     if intent.coding and mode == "fast":
         return "standard"
+    # Fast remains the low-latency default, but named knowledge questions need
+    # enough retrieval context to avoid a confident shallow guess.
+    if mode == "fast" and _looks_like_named_knowledge_query(user_input):
+        return "standard"
     return mode
+
+
+def _looks_like_named_knowledge_query(user_input: str) -> bool:
+    lowered = " ".join(str(user_input or "").lower().split())
+    if not lowered or lowered.startswith("/"):
+        return False
+    has_name = any(name in lowered for name in _KNOWN_KNOWLEDGE_NAMES)
+    has_request = any(marker in lowered for marker in _KNOWLEDGE_QUERY_MARKERS)
+    return has_name and has_request
 
 
 def should_use_fast_path(user_input: str, context: Dict[str, Any]) -> bool:

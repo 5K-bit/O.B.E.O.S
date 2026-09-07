@@ -14,7 +14,7 @@ from blackfong_ecosystem.chat_backends import (
 )
 from blackfong_ecosystem.config import ChatSettings
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
-from blackfong_ecosystem.model_routing import OllamaRoutingChatBackend
+from blackfong_ecosystem.model_routing import OllamaRoutingChatBackend, resolve_response_mode
 from blackfong_ecosystem.storage import EventStore, NullVectorStore
 
 
@@ -244,6 +244,78 @@ def test_simple_greeting_does_not_become_active_work(tmp_path):
     memory_text = "\n".join(str(item.get("text") or "") for item in memories)
 
     assert "The operator has been working on im back" not in memory_text
+
+
+def test_named_knowledge_question_escalates_fast_to_standard():
+    assert resolve_response_mode("Tell me about Spawn.", "fast") == "standard"
+    assert resolve_response_mode("How are you?", "fast") == "fast"
+
+
+def test_ordinary_conversation_does_not_include_active_work_stance(tmp_path):
+    service = build_memory_service(tmp_path)
+    stance = service._build_conversational_stance(
+        query="How are you?",
+        operator_profile={
+            "preferred_name": "Five",
+            "active_work": ["response latency", "HUD layout improvements"],
+        },
+    )
+
+    assert "Current shared focus" not in stance
+    assert "Five" in stance
+
+
+def test_derived_memory_ignores_transport_and_debug_chatter(tmp_path):
+    service = build_memory_service(tmp_path)
+    session_id = service.create_session_id()
+    correlation_id = service.create_correlation_id()
+
+    service.persist_user_turn(
+        session_id=session_id,
+        correlation_id=correlation_id,
+        text="OBEOS trace test. Tell me which surface this came from through Telegram.",
+    )
+
+    memories = service.list_global_memories(
+        query="what are we working on",
+        limit=20,
+        agent_name="jarvis",
+        session_id=session_id,
+    )
+    memory_text = "\n".join(str(item.get("text") or "") for item in memories)
+    assert "trace test" not in memory_text.lower()
+
+
+def test_visible_response_sanitizes_raw_retrieval_and_legacy_identity(tmp_path):
+    agent = JARVISAgent(chat_backend=StubFallbackBackend())
+
+    raw, raw_metadata = agent._sanitize_visible_response(
+        "[Source 1] kind=knowledge_collection [PAGE 1] unreadable OCR",
+        "Tell me about Spawn",
+    )
+    identity, identity_metadata = agent._sanitize_visible_response(
+        "I am the Digital Assistant for Intelligent Systems and Expertise.",
+        "What does D.A.I.S.E. stand for?",
+    )
+
+    assert "[Source 1]" not in raw
+    assert raw_metadata["sanitization_reason"] == "raw_retrieval_artifact"
+    assert "Direct Artificial Intelligence System Environment" in identity
+    assert identity_metadata["response_sanitized"] is True
+
+
+def test_grounded_response_promotes_backend_response_path_to_event_payload(tmp_path):
+    service = build_memory_service(tmp_path)
+    event = service.persist_agent_response(
+        session_id="session",
+        correlation_id="correlation",
+        agent_name="daise",
+        response_text="Grounded answer",
+        confidence=0.9,
+        extras={"backend_metadata": {"response_path": "grounded_memory"}},
+    )
+
+    assert event.payload["response_path"] == "grounded_memory"
 
 
 def test_operator_profile_filters_low_value_work_fragments(tmp_path):
@@ -801,7 +873,7 @@ def test_transport_backend_health_does_not_degrade_on_non_timeout_fallback_only(
     assert health["allow_recovery_probe"] is False
 
 
-def test_standard_casual_chat_uses_fast_generation_lane(monkeypatch):
+def test_standard_casual_chat_keeps_standard_generation_lane(monkeypatch):
     captured: dict[str, str] = {}
 
     class RecordingBackend(BaseChatBackend):
@@ -843,10 +915,10 @@ def test_standard_casual_chat_uses_fast_generation_lane(monkeypatch):
         },
     )
 
-    assert captured["response_mode"] == "fast"
-    assert captured["options_mode"] == "fast"
+    assert captured["response_mode"] == "standard"
+    assert captured["options_mode"] == "standard"
     assert result["provider"] == "ollama"
-    assert result["backend_metadata"]["generation_mode"] == "fast"
+    assert result["backend_metadata"]["generation_mode"] == "standard"
     assert result["backend_metadata"]["requested_mode"] == "standard"
 
 

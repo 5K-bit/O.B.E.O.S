@@ -2881,6 +2881,22 @@ class DAISE:
     def _matches_values_or_emotional_reflection_truth(self, normalized_compact: str) -> bool:
         if not normalized_compact or len(normalized_compact.split()) > 48:
             return False
+        # Operator corrections are conversation feedback, not invitations to
+        # generate a values reflection from the current work ledger.
+        if any(
+            phrase in normalized_compact
+            for phrase in (
+                "just saying things",
+                "not answering",
+                "didn't answer",
+                "didnt answer",
+                "not my question",
+                "better conversing than remembering",
+                "wont ask you to recall",
+                "won't ask you to recall",
+            )
+        ):
+            return False
         tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
         explicit_truth_anchor = bool(tokens.intersection({"obeos", "project"}))
         phrases = (

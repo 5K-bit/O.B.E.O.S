@@ -25,7 +25,6 @@ from blackfong_ecosystem.conversation_memory import conversation_memory_service
 from blackfong_ecosystem.model_routing import (
     backend_options_for_context,
     build_routed_chat_backend,
-    detect_intent,
     model_chain_for_agent,
     normalize_response_mode,
 )
@@ -123,6 +122,11 @@ class JARVISAgent(Agent):
 
             # Step 3: Generate response with the local chat backend
             response_text, backend_info = self._generate_response(user_input, context or {})
+            response_text, sanitization = self._sanitize_visible_response(response_text, user_input)
+            backend_info = dict(backend_info)
+            backend_metadata = dict(backend_info.get("metadata") or {})
+            backend_metadata.update(sanitization)
+            backend_info["metadata"] = backend_metadata
             
             step_3 = ReasoningStep(
                 step_id="generate_response",
@@ -162,6 +166,7 @@ class JARVISAgent(Agent):
                 "model": backend_info.get("model"),
                 "backend_error": backend_info.get("backend_error"),
                 "backend_metadata": backend_info.get("metadata"),
+                "response_path": (backend_info.get("metadata") or {}).get("response_path") or "unknown",
                 "agent": self.name,
             }
         
@@ -175,6 +180,42 @@ class JARVISAgent(Agent):
                 "error": str(e),
                 "agent": self.name,
             }
+
+    def _sanitize_visible_response(self, response_text: str, user_input: str) -> tuple[str, Dict[str, Any]]:
+        """Keep internal fallback/source artifacts out of the operator transcript."""
+        text = str(response_text or "").strip()
+        lowered = text.lower()
+        raw_markers = ("[source ", "kind=knowledge_collection", "[page 1]", "raw ocr")
+        if any(marker in lowered for marker in raw_markers):
+            return (
+                "I found local material related to this question, but the retrieved extract was not readable enough to present reliably. Please rephrase the topic or ask me to inspect that collection directly.",
+                {"response_sanitized": True, "sanitization_reason": "raw_retrieval_artifact"},
+            )
+        # These phrases are implementation diagnostics and should not become
+        # D.A.I.S.E.'s conversational voice when a backend answer is usable.
+        if not any(token in str(user_input or "").lower() for token in ("trace", "diagnos", "fallback", "backend")):
+            text = re.sub(
+                r"\s*The live model lane missed this turn, so I am answering from bounded local O\.B\.E\.O\.S\. memory and knowledge instead\.?\s*$",
+                "",
+                text,
+                flags=re.IGNORECASE,
+            ).strip()
+            text = re.sub(r"\s*I still have our recent work around .*?(?=\.|$)", "", text, flags=re.IGNORECASE).strip()
+        identity_replacements = (
+            "Digital Assistant for Intelligent Systems and Expertise",
+            "Distributed Assistant for Innovative Solutions and Expertise",
+        )
+        if any(phrase.lower() in lowered for phrase in identity_replacements):
+            text = re.sub(
+                r"Digital Assistant for Intelligent Systems and Expertise|Distributed Assistant for Innovative Solutions and Expertise",
+                "Direct Artificial Intelligence System Environment",
+                text,
+                flags=re.IGNORECASE,
+            )
+        return text or "I'm here and ready to help. What would you like to work through?", {
+            "response_sanitized": text != str(response_text or "").strip(),
+            "sanitization_reason": "internal_phrase_cleanup" if text != str(response_text or "").strip() else None,
+        }
     
     def _generate_response(self, user_input: str, context: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         """Generate a response with the configured local backend and safe fallback."""
@@ -383,57 +424,8 @@ class JARVISAgent(Agent):
         }
 
     def _effective_generation_mode(self, user_input: str, context: Dict[str, Any]) -> str:
-        """Keep standard retrieval while letting lightweight chat use the faster generation lane."""
+        """Honor the selected generation lane instead of silently downgrading it."""
         requested_mode = normalize_response_mode(context.get("analysis_mode") or context.get("response_mode"))
-        if requested_mode != "standard":
-            return requested_mode
-        transport = str(context.get("transport") or context.get("input_origin") or "").strip().lower()
-        if transport in {"telegram", "hud", "desktop", "legion", "tui", "operator_chat", "frame"}:
-            return requested_mode
-        memory_context = context.get("memory_context") or {}
-        grounded_conversation = memory_context.get("grounded_conversation_answer") or {}
-        if isinstance(grounded_conversation, dict) and str(grounded_conversation.get("answer") or "").strip():
-            return requested_mode
-        prompt_metrics = memory_context.get("prompt_metrics") or {}
-        if isinstance(prompt_metrics, dict):
-            prompt_tokens = int(prompt_metrics.get("prompt_context_tokens_estimate") or 0)
-            if (
-                prompt_tokens >= 700
-                or int(prompt_metrics.get("semantic_hits") or 0) > 0
-                or int(prompt_metrics.get("global_memories") or 0) > 0
-                or int(prompt_metrics.get("recent_events") or 0) > 0
-                or int(prompt_metrics.get("session_summaries") or 0) > 0
-                or bool(prompt_metrics.get("operator_profile"))
-                or bool(prompt_metrics.get("grounded_answer"))
-                or bool(prompt_metrics.get("grounded_memory"))
-                or bool(prompt_metrics.get("grounded_conversation"))
-                or bool(prompt_metrics.get("followup_continuity_guidance"))
-            ):
-                return requested_mode
-        if str(memory_context.get("prompt_mode") or "").strip().lower() in {"standard", "deep"}:
-            return requested_mode
-        detected = context.get("detected_intent")
-        if isinstance(detected, dict):
-            is_casual = bool(detected.get("casual"))
-            is_heavy = any(
-                bool(detected.get(key))
-                for key in ("coding", "deep_reasoning", "file_ops", "diagnostics", "tinyprogrammer")
-            )
-        else:
-            inferred = detect_intent(user_input)
-            is_casual = inferred.casual
-            is_heavy = any(
-                (
-                    inferred.coding,
-                    inferred.deep_reasoning,
-                    inferred.file_ops,
-                    inferred.diagnostics,
-                    inferred.tinyprogrammer,
-                )
-            )
-        text = str(user_input or "").strip()
-        if is_casual and not is_heavy and len(text) <= 220:
-            return "fast"
         return requested_mode
 
     @staticmethod

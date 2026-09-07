@@ -290,6 +290,7 @@ class OllamaChatBackend(BaseChatBackend):
         wall_started = time.perf_counter()
         parts: list[str] = []
         model_name = str(payload["model"])
+        final_data: Dict[str, Any] = {}
         def failure_metadata(error_type: str, *, timeout_reason: str | None = None) -> Dict[str, Any]:
             return {
                 "provider": self.provider_name,
@@ -324,6 +325,7 @@ class OllamaChatBackend(BaseChatBackend):
                             data = json.loads(line)
                         except ValueError:
                             continue
+                        final_data = data
                         token = str((data.get("message") or {}).get("content") or "")
                         if token:
                             parts.append(token)
@@ -383,6 +385,13 @@ class OllamaChatBackend(BaseChatBackend):
             metadata={
                 "mode": invocation_mode,
                 "streamed": True,
+                "done": final_data.get("done"),
+                "total_duration": final_data.get("total_duration"),
+                "load_duration": final_data.get("load_duration"),
+                "ollama_total_duration_ms": round(float(final_data.get("total_duration")) / 1_000_000, 2) if final_data.get("total_duration") else None,
+                "load_duration_ms": round(float(final_data.get("load_duration")) / 1_000_000, 2) if final_data.get("load_duration") else None,
+                "eval_count": final_data.get("eval_count"),
+                "prompt_eval_count": final_data.get("prompt_eval_count"),
                 "wall_time_ms": round((time.perf_counter() - wall_started) * 1000, 2),
             },
         )
@@ -828,11 +837,12 @@ class HeuristicChatBackend(BaseChatBackend):
 
         cleaned = re.sub(r"[_*#~`|]+", " ", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:-")
+        structured_summary = bool(passage_snippet) and len(re.findall(r"[A-Za-z]{4,}", cleaned)) >= 8
         if (
             "[page" in cleaned.lower()
             or "ufg " in cleaned.lower()
             or " j! " in cleaned.lower()
-            or HeuristicChatBackend._looks_like_ocr_noise(cleaned)
+            or (not structured_summary and HeuristicChatBackend._looks_like_ocr_noise(cleaned))
         ):
             return ""
         if len(cleaned) > 320:

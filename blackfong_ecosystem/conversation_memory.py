@@ -250,6 +250,11 @@ class ConversationMemoryService:
         }
         if extras:
             payload.update(extras)
+        backend_metadata = payload.get("backend_metadata")
+        if not payload.get("response_path") and isinstance(backend_metadata, dict):
+            response_path = str(backend_metadata.get("response_path") or "").strip()
+            if response_path:
+                payload["response_path"] = response_path
 
         event = Event.new(
             source=agent_name,  # type: ignore[arg-type]
@@ -425,6 +430,13 @@ class ConversationMemoryService:
         cleaned = self._clean_grounded_memory_text(text)
         lowered = cleaned.lower()
         if not cleaned:
+            return
+        # Greetings, test probes, transport chatter, and fallback diagnostics
+        # are conversation history, not durable operator knowledge.
+        if self._looks_like_noise_topic(cleaned) and not any(
+            marker in lowered
+            for marker in ("working on", "improve", "build", "implement", "configure", "set up")
+        ):
             return
 
         derived: List[Dict[str, Any]] = []
@@ -4276,6 +4288,18 @@ class ConversationMemoryService:
                 "are you hungry",
                 "are you still there",
                 "still there",
+                "that wasnt my question",
+                "that wasn't my question",
+                "not my question",
+                "now you are just saying things",
+                "you are just saying things",
+                "better conversing than remembering",
+                "i wont ask you to recall",
+                "i won't ask you to recall",
+                "not answering me",
+                "didnt answer me",
+                "didn't answer me",
+                "regrouping and assessing your approach",
             )
         )
 
@@ -5635,6 +5659,9 @@ class ConversationMemoryService:
             for item in list(profile.get("active_work") or [])
             if str(item).strip()
         ]
+        active_work_relevant = self._query_needs_active_work_context(query, active_work)
+        if not active_work_relevant:
+            active_work = []
         if not preferred_name and not operator_role and not active_work and not grounded_conversation_answer:
             return ""
         lines: List[str] = []
@@ -5654,6 +5681,39 @@ class ConversationMemoryService:
                 lines.append("- For broad project or system questions, ground the reply in current shared focus before expanding outward.")
         return "\n".join(lines)
 
+    @staticmethod
+    def _query_needs_active_work_context(query: str, active_work: List[str]) -> bool:
+        compact = " ".join(str(query or "").lower().split())
+        if not compact or not active_work:
+            return False
+        if any(
+            marker in compact
+            for marker in (
+                "what are we working on",
+                "what have we been working on",
+                "where did we leave off",
+                "what changed",
+                "recent update",
+                "current task",
+                "project",
+                "obeos",
+                "system",
+                "latency",
+                "hud",
+                "telegram",
+                "memory",
+                "backend",
+            )
+        ):
+            return True
+        query_tokens = set(re.findall(r"[a-z0-9]{3,}", compact))
+        work_tokens = set(
+            token
+            for item in active_work
+            for token in re.findall(r"[a-z0-9]{3,}", str(item).lower())
+        )
+        return bool(query_tokens & work_tokens)
+
     def _build_conversation_continuity(
         self,
         *,
@@ -5669,6 +5729,7 @@ class ConversationMemoryService:
             for item in list(profile.get("active_work") or [])
             if str(item).strip()
         ]
+        active_work_relevant = self._query_needs_active_work_context(query, active_work)
         if recent_topics:
             if any(
                 (
@@ -5681,6 +5742,15 @@ class ConversationMemoryService:
                 active_work = recent_topics
             else:
                 active_work = self._unique_grounded_memory_items(recent_topics + active_work, limit=4)
+        if not active_work_relevant and not any(
+            (
+                followup_flags.get("ultra_short_followup"),
+                followup_flags.get("short_scope_followup"),
+                followup_flags.get("environment_followup"),
+                followup_flags.get("referential_followup"),
+            )
+        ):
+            active_work = []
         assistant_snapshot = self._recent_assistant_snapshot(session_messages, current_query=query)
         lines: List[str] = []
         if active_work:
