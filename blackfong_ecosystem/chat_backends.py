@@ -504,14 +504,6 @@ class HeuristicChatBackend(BaseChatBackend):
         ):
             return "I am here inside O.B.E.O.S., and I can still answer from local memory while the live model lane recovers."
 
-        if fallback_reason:
-            fallback_source = "live model" if provider == "ollama" else provider or "the unavailable backend"
-            return (
-                f"The live model lane is unavailable right now. "
-                f"Falling back to local O.B.E.O.S. memory because: {fallback_reason}. "
-                "I’m answering from stored context while the primary backend recovers."
-            )
-
         if self._contains_any_phrase(lowered, "system status") or self._contains_any_word(lowered, "status", "health"):
             return "O.B.E.O.S is online locally. Use the HUD for sessions, memory, commands, and voice controls."
 
@@ -527,6 +519,13 @@ class HeuristicChatBackend(BaseChatBackend):
         grounded = self._grounded_context_fallback(lowered, context_text)
         if grounded:
             return grounded
+
+        if fallback_reason:
+            return (
+                "The live model lane did not complete this turn, so I do not want to invent an answer. "
+                f"Falling back to local O.B.E.O.S. memory because: {fallback_reason}. "
+                "I can retry the live model when it is available."
+            )
 
         return (
             "I can still help from local O.B.E.O.S. memory and stored knowledge while the live model lane recovers. "

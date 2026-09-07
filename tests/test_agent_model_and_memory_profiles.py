@@ -460,6 +460,27 @@ def test_heuristic_fallback_includes_diagnostic_reason():
     assert result["backend_metadata"]["model"] == "ollama-mini"
 
 
+def test_grounded_fallback_prefers_conversation_over_recovery_banner():
+    result = HeuristicChatBackend().generate(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Broad conversational grounding for this turn:\n"
+                    "We are discussing the OBEOS chat path.\n"
+                    "Use this as a memory-backed backbone"
+                ),
+            },
+            {"role": "user", "content": "tell me more"},
+        ],
+        fallback_reason="Ollama timed out",
+        provider="ollama",
+    )
+
+    assert "We are discussing the OBEOS chat path." in result.text
+    assert "Falling back to local O.B.E.O.S. memory" not in result.text
+
+
 def test_timeout_fallback_synthesizes_from_active_work_context():
     agent = JARVISAgent(
         chat_backend=FailingBackend(),
