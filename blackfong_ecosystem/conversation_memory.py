@@ -8,7 +8,7 @@ import time
 import uuid
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .config import chat_settings, paths
 from .events import Event
@@ -20,90 +20,9 @@ from .storage import ChromaVectorStore, EventStore, NullVectorStore, VectorStore
 
 CHAT_EVENT_TYPES = {"agent_query", "agent_response"}
 MEMORY_EVENT_TYPES = {"session_summary", "knowledge_ingested"}
-WORKFLOW_EVENT_TYPES = {
-    "routing_decision",
-    "memory_retrieval",
-    "agent_report",
-    "agent_evaluation",
-    "agent_selection",
-    "tinyprogrammer_status",
-    "tinyprogrammer_state_transition",
-    "tinyprogrammer_program_created",
-    "tinyprogrammer_program_archived",
-    "tinyprogrammer_reflection",
-    "tinyprogrammer_brief_applied",
-    "tinyprogrammer_feedback",
-    "awareness_snapshot",
-    "performance_snapshot",
-    "latency_observation",
-    "routing_quality_observation",
-    "memory_retrieval_observation",
-    "backend_health_observation",
-    "environment_snapshot",
-    "sensor_capability_snapshot",
-    "audio_device_observation",
-    "camera_device_observation",
-    "queue_pressure_observation",
-    "consistency_conflict",
-    "request_outcome",
-    "agent_trust_update",
-    "policy_decision",
-    "capability_snapshot",
-    "adapter_health_observation",
-    "agent_admission_decision",
-    "learner_profile_update",
-    "learning_attempt",
-    "resource_budget_observation",
-    "spine_conflict_detected",
-    "spine_mode_changed",
-    "vision_tool_result",
-    "installer_plan_generated",
-    "identity_resolution_event",
-    "operator_consent",
-    "file_workflow_state",
-    "file_proposal_created",
-    "file_proposal_expired",
-    "file_pre_apply_validation",
-    "file_change_applied",
-    "file_post_apply_validation",
-    "file_scope_discovery",
-    "file_scope_root_approved",
-    "file_scope_map",
-    "file_scope_read",
-    "knowledge_source_added",
-    "knowledge_cleaned",
-    "knowledge_chunked",
-    "knowledge_embedded",
-    "knowledge_ingestion_failed",
-    "knowledge_phase1_started",
-    "knowledge_inventory_created",
-    "knowledge_coverage_created",
-    "knowledge_timeline_created",
-    "knowledge_memory_chamber_graph_updated",
-    "knowledge_phase1_completed",
-    "knowledge_phase1_failed",
-    "knowledge_gaps_detected",
-    "knowledge_summary_created",
-    "knowledge_librarian_answered",
-    "perception_gate_decision",
-    "vision_sensor_observation",
-    "screen_snapshot_observation",
-    "audio_sensor_observation",
-    "companion_brief_scope_decision",
-    "tinyprogrammer_process_state",
-    "notification_created",
-    "notification_read",
-    "notification_action_taken",
-    "notification_delivery_result",
-    "operator_intent_created",
-    "operator_intent_state",
-    "operator_intent_expired",
-    "operator_action_result",
-    "state_change_summary",
-    "frame_tap_event",
-    "frame_imu_observation",
-    "frame_display_update",
-}
+from .memory_persistence import MemoryPersistence, WORKFLOW_EVENT_TYPES
+from .memory_retrieval import SemanticRetrieval
+
 
 MEMORY_PROFILE_DEFAULTS: Dict[str, Any] = {
     "agent": "default",
@@ -159,7 +78,7 @@ AGENT_MEMORY_PROFILES: Dict[str, Dict[str, Any]] = {
 }
 
 
-class ConversationMemoryService:
+class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
     """Shared session and global memory service for the chat surfaces."""
 
     def __init__(
@@ -183,122 +102,6 @@ class ConversationMemoryService:
     @staticmethod
     def create_correlation_id() -> str:
         return str(uuid.uuid4())
-
-    def persist_user_turn(
-        self,
-        *,
-        session_id: str,
-        correlation_id: str,
-        text: str,
-        modality: str = "text",
-        routed_agent: str = "daise",
-        analysis_mode: str = "standard",
-        agent_override: Optional[str] = None,
-        request_id: Optional[str] = None,
-    ) -> Event:
-        event = Event.new(
-            source="user",
-            type="agent_query",
-            payload={
-                "text": text,
-                "modality": modality,
-                "agent": routed_agent,
-                "analysis_mode": analysis_mode,
-                "agent_override": agent_override,
-            },
-            confidence=1.0,
-            session_id=session_id,
-            correlation_id=correlation_id,
-            request_id=request_id,
-            tags=["conversation", "user_turn", modality],
-        )
-        self.event_store.add_event(event)
-        self._store_lifecycle_item(event, "event")
-        self._capture_derived_user_memories(
-            session_id=session_id,
-            source_event_id=event.id,
-            text=text,
-        )
-        return event
-
-    def persist_agent_response(
-        self,
-        *,
-        session_id: str,
-        correlation_id: str,
-        agent_name: str,
-        response_text: str,
-        confidence: float,
-        modality: str = "text",
-        parent_event_id: Optional[str] = None,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
-        execution_time_ms: Optional[float] = None,
-        success: bool = True,
-        extras: Optional[Dict[str, Any]] = None,
-        request_id: Optional[str] = None,
-    ) -> Event:
-        payload = {
-            "response": response_text,
-            "text": response_text,
-            "agent": agent_name,
-            "modality": modality,
-            "success": success,
-            "provider": provider or "",
-            "model": model or "",
-            "execution_time_ms": execution_time_ms or 0.0,
-        }
-        if extras:
-            payload.update(extras)
-        backend_metadata = payload.get("backend_metadata")
-        if not payload.get("response_path") and isinstance(backend_metadata, dict):
-            response_path = str(backend_metadata.get("response_path") or "").strip()
-            if response_path:
-                payload["response_path"] = response_path
-
-        event = Event.new(
-            source=agent_name,  # type: ignore[arg-type]
-            type="agent_response",
-            payload=payload,
-            confidence=confidence,
-            parent_event=parent_event_id,
-            session_id=session_id,
-            correlation_id=correlation_id,
-            request_id=request_id,
-            tags=["conversation", "agent_response", agent_name],
-        )
-        self.event_store.add_event(event)
-        self._store_lifecycle_item(event, "event")
-        return event
-
-    def persist_workflow_event(
-        self,
-        *,
-        source: str,
-        event_type: str,
-        payload: Dict[str, Any],
-        confidence: float = 1.0,
-        session_id: Optional[str] = None,
-        correlation_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-        parent_event_id: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> Event:
-        event = Event.new(
-            source=source,  # type: ignore[arg-type]
-            type=event_type,
-            payload=payload,
-            confidence=confidence,
-            parent_event=parent_event_id,
-            session_id=session_id,
-            correlation_id=correlation_id,
-            request_id=request_id,
-            tags=tags or ["workflow", event_type],
-        )
-        self.event_store.add_event(event)
-        lifecycle_type = "trace" if event_type in WORKFLOW_EVENT_TYPES else "event"
-        self._store_lifecycle_item(event, lifecycle_type)
-        return event
 
     def maybe_create_session_summary(
         self,
@@ -2082,109 +1885,6 @@ class ConversationMemoryService:
             return cleaned
         return cleaned[: max_chars - 3].rstrip(" ,;:.") + "..."
 
-    def _retrieve_semantic_context(
-        self,
-        *,
-        query: str,
-        retrieval_profile: str,
-        skip_vector_search: bool,
-    ) -> Dict[str, Any]:
-        settings = retrieval_profile_settings(retrieval_profile)
-        empty = {
-            "hits": [],
-            "citations": [],
-            "context": "",
-            "timing_ms": {
-                "embedding": None,
-                "vector_query": 0.0,
-                "rerank_bounding": 0.0,
-                "total_retrieval": 0.0,
-            },
-        }
-        if (
-            skip_vector_search
-            or not settings.get("include_semantic")
-            or not str(query or "").strip()
-            or isinstance(self.vector_store, NullVectorStore)
-        ):
-            return empty
-
-        vector_k = int(settings.get("vector_k") or 0)
-        if vector_k <= 0:
-            return empty
-
-        query_tokens = self._tokenize(query)
-        hinted_collections = self._detect_collection_hints(query)
-        query_started = time.perf_counter()
-        try:
-            results = self.vector_store.search(query, k=max(vector_k * 3, vector_k))
-        except Exception:
-            results = []
-        query_completed = time.perf_counter()
-
-        rerank_started = time.perf_counter()
-        annotated_hits: List[Dict[str, Any]] = []
-        for collection in hinted_collections:
-            summary_hit = self._collection_summary_hit(
-                collection,
-                query=query,
-                query_tokens=query_tokens,
-                retrieval_profile=retrieval_profile,
-            )
-            if summary_hit is not None:
-                annotated_hits.append(summary_hit)
-        for result in self._search_hinted_collection_results(
-            query=query,
-            hinted_collections=hinted_collections,
-            retrieval_profile=retrieval_profile,
-            limit=max(vector_k * 2, vector_k),
-        ):
-            enriched = self._annotate_semantic_hit(
-                result,
-                query_tokens=query_tokens,
-                retrieval_profile=retrieval_profile,
-                hinted_collections=hinted_collections,
-            )
-            if enriched is not None:
-                annotated_hits.append(enriched)
-        for result in results:
-            enriched = self._annotate_semantic_hit(
-                result,
-                query_tokens=query_tokens,
-                retrieval_profile=retrieval_profile,
-                hinted_collections=hinted_collections,
-            )
-            if enriched is not None:
-                annotated_hits.append(enriched)
-        deduped_hits = self._dedupe_semantic_hits(annotated_hits)
-        deduped_hits.sort(
-            key=lambda item: (float(item["score"]), float(item["relevance"])),
-            reverse=True,
-        )
-        selected_hits = deduped_hits[: int(settings.get("citation_limit") or vector_k)]
-        selected_hits = self._limit_collection_focused_hits(
-            selected_hits,
-            query=query,
-            retrieval_profile=retrieval_profile,
-            hinted_collections=hinted_collections,
-        )
-        context = self._render_retrieval_context(
-            selected_hits,
-            max_chars=int(settings.get("context_chars") or 0),
-        )
-        rerank_completed = time.perf_counter()
-        return {
-            "hits": selected_hits,
-            "citations": [dict(item["citation"]) for item in selected_hits],
-            "context": context,
-            "timing_ms": {
-                "embedding": None,
-                "vector_query": round((query_completed - query_started) * 1000, 2),
-                "rerank_bounding": round((rerank_completed - rerank_started) * 1000, 2),
-                "total_retrieval": round((rerank_completed - query_started) * 1000, 2),
-            },
-        }
-
     def _annotate_semantic_hit(
         self,
         result: Dict[str, Any],
@@ -3890,6 +3590,8 @@ class ConversationMemoryService:
             match = re.search(pattern, cleaned, re.IGNORECASE)
             if match:
                 candidate = " ".join(match.group(1).split()).strip()
+                candidate = re.sub(r"^by my name\s+", "", candidate, flags=re.IGNORECASE)
+                candidate = re.split(r"[,.;!?]", candidate, maxsplit=1)[0].strip()
                 if self._is_plausible_operator_name(candidate):
                     return self._normalize_operator_display_name(candidate)
         return ""

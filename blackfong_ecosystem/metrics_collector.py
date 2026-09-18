@@ -232,8 +232,8 @@ class MetricsCollector:
         start_time = self.gauges.get(start_gauge_name)
 
         if start_time is None:
-            log_action(
-                LogLevel.WARNING,
+            _safe_log_action(
+                "WARNING",
                 "metrics_collector",
                 "timer_end_failed",
                 metric_name=name,
@@ -390,8 +390,8 @@ class MetricsCollector:
             while series.points and series.points[0].timestamp < cutoff_time:
                 series.points.popleft()
 
-        log_action(
-            LogLevel.DEBUG,
+        _safe_log_action(
+            "DEBUG",
             "metrics_collector",
             "cleanup_completed",
             histograms_cleaned=sum(len(s.points) for s in self.histograms.values()),

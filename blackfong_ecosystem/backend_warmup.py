@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional, Sequence
 import httpx
 
 from .config import chat_settings
+from .cancellation import CancellationToken, cancellation_scope, cancellation_resource, raise_if_cancelled, RequestCancelled
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ def warm_ollama_model(
     }
     started = time.perf_counter()
     try:
-        with httpx.Client(timeout=httpx.Timeout(connect=5.0, read=timeout, write=10.0, pool=5.0)) as client:
+        with httpx.Client(timeout=httpx.Timeout(connect=5.0, read=timeout, write=10.0, pool=5.0)) as client, cancellation_resource(client.close):
+            raise_if_cancelled()
             response = client.post(f"{base_url}/api/chat", json=payload)
             response.raise_for_status()
         elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -64,9 +66,12 @@ def warm_model_chain(
     chain = list(models or chat_settings.fast_model_chain())
     results: list[Dict[str, Any]] = []
     for model_name in chain[:2]:
+        raise_if_cancelled()
         results.append(
             warm_ollama_model(model=model_name, keep_alive=keep_alive, timeout=timeout)
         )
+        if results[-1].get("status") == "ready":
+            break
     ready = [item for item in results if item.get("status") == "ready"]
     if ready:
         primary = ready[0]
@@ -85,6 +90,7 @@ class BackendWarmupWorker:
 
     def __init__(self, *, on_status: Optional[Callable[[Dict[str, Any]], None]] = None) -> None:
         self._on_status = on_status
+        self._cancel = CancellationToken()
         self._thread: Optional[threading.Thread] = None
         self._result: Dict[str, Any] = {"status": "idle"}
 
@@ -102,7 +108,18 @@ class BackendWarmupWorker:
         self._thread.start()
 
     def _run(self) -> None:
-        outcome = warm_model_chain()
+        try:
+            with cancellation_scope(self._cancel):
+                outcome = warm_model_chain()
+        except RequestCancelled:
+            return
+        if self._cancel.cancelled:
+            return
         self._result = outcome
         if self._on_status is not None:
             self._on_status(outcome)
+
+    def stop(self, timeout=0):
+        self._cancel.cancel()
+        if self._thread and self._thread is not threading.current_thread():
+            self._thread.join(timeout=timeout)

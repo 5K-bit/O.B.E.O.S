@@ -13,6 +13,12 @@ It is the active product source for:
 - the **Memory Chamber** analysis workbench
 - the Kubuntu/Plasma O.B.E.O.S. deployment and branding path
 
+## Earth desktop
+
+OBEOS Earth is now the native home screen. From this checkout, run `python tools/bootstrap_earth.py` once, then `python launch_obeos.py`. Use `--offline`, `--maximized`, or `--classic` as needed. The existing `blackfong desktop workspace` entry opens the same Earth home through the desktop shell.
+
+See the [Earth V2 operator guide](docs/earth-v2-operator.md) for offline operation, optional free public-source keys, transit imports and deferred private Presence setup. The [V2 acceptance record](docs/earth-v2-acceptance.md) separates tested behavior from remaining live, native and performance gates. Local model routing is unchanged.
+
 ## Current Product Truth
 
 These are the current rules that packaging and branding should follow.
@@ -38,6 +44,9 @@ O.B.E.O.S. now has a clear surface hierarchy:
 - **Secondary cockpit**:
   - `blackfong hud`
   - browser-based remote/debug/operator access
+- **Paired companion cockpit**:
+  - `blackfong legion token` / `blackfong legion status`
+  - `Legion`, a local, pairing-token-gated fullscreen cockpit (installable PWA) for a second device, with an optional Sentinel/Brilliant Frame agent bridge
 - **Fallback/home authority surface**:
   - `blackfong tui`
   - `blackfong home`

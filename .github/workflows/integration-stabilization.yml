@@ -87,6 +87,8 @@ jobs:
       - name: PYBUS manifest
         working-directory: PYBUS
         run: python -c "import json; d=json.load(open('obeos.manifest.json', encoding='utf-8')); assert d['schema_version']==1 and d['name']=='pybus'"
+      - name: Validate canonical component paths
+        run: python tools/validate_ecosystem_paths.py --allow-uninitialized
       - name: Private EarthGlass boundary
         run: echo 'EarthGlass is private and is validated in its own canonical repository workflow.'
 

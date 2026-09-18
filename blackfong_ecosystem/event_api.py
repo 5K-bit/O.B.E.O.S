@@ -32,6 +32,11 @@ def create_app() -> Flask:
     app = Flask(__name__)
     event_store.init_db()
     event_queue.init_db()
+    event_v1_ingestor.start_delivery()
+    import atexit
+    atexit.register(event_v1_ingestor.stop_delivery)
+    app.extensions["event_delivery"] = event_v1_ingestor
+    app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
 
     @app.route("/health", methods=["GET"])
     def health() -> Dict[str, Any]:
@@ -39,6 +44,8 @@ def create_app() -> Flask:
             "status": "healthy",
             "service": "blackfong_control_plane",
             "event_contract": "1.0",
+            "delivery_error": event_v1_ingestor.delivery_error,
+            "outbox": event_v1_ingestor._outbox.status() if event_v1_ingestor._outbox else {},
         })
 
     @app.route("/events/v1/publish", methods=["POST"])

@@ -11,11 +11,10 @@ if str(root) not in sys.path:
 for project_root in (
     "3000-main",
     "Blackforge",
-    "Blackforge/earthglass",
     "EarthGlass",
     "Max-Payne",
     "Night-watch-OS",
-    "QuietDrop/QuietDrop-main",
+    "QuietDrop",
 ):
     candidate = root / project_root
     if candidate.exists() and str(candidate) not in sys.path:

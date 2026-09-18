@@ -67,6 +67,25 @@ def test_chat_pane_history_renders_full_assistant_message():
     assert long_reply in html
 
 
+def test_stream_has_separate_speaker_and_final_response_wins():
+    pane = _build_chat_pane()
+    pane.transcript.setHtml(pane._message_card_html(role="user", text="Hello"))
+    pane._append_stream_token("Partial")
+    assert "Hello\nD.A.I.S.E" in pane.transcript.toPlainText()
+    pane._handle_result({"status": "complete", "result": {"response": "Final answer"}})
+    assert "Final answer" in pane.transcript.toPlainText()
+    assert "Partial" not in pane.transcript.toPlainText()
+
+
+def test_blank_reply_is_not_success_and_late_tokens_are_ignored():
+    pane = _build_chat_pane()
+    pane._handle_result({"status": "complete", "result": {"response": " "}})
+    assert pane.status_label.text().startswith("FAILED")
+    before = pane.transcript.toPlainText()
+    pane._append_stream_token("Late token")
+    assert pane.transcript.toPlainText() == before
+
+
 def test_chat_pane_message_body_preserves_line_breaks():
     pane = _build_chat_pane()
     html = pane._message_card_html(role="assistant", text="line one\nline two", agent="daise")
@@ -91,3 +110,20 @@ def test_chat_pane_fresh_local_session_stays_local():
     assert "(local)" in pane.session_label.text()
     assert "Fresh local session ready." in pane.transcript.toPlainText()
     assert pane.new_session_button.text() == "Fresh Local Session"
+
+
+def test_busy_chat_rejects_shortcut_send_and_history_changes():
+    from types import SimpleNamespace
+    pane = _build_chat_pane()
+    pane._worker = SimpleNamespace(isRunning=lambda: True)
+    pane.transcript.setPlainText("You: original\nD.A.I.S.E: streaming")
+    before = pane.transcript.toPlainText()
+    session = pane.session_id
+    pane.input.setPlainText("Second send")
+    pane.new_session()
+    pane.refresh_history()
+    pane.send_message()
+    assert pane.session_id == session
+    assert pane.transcript.toPlainText() == before
+    assert pane.input.toPlainText() == "Second send"
+    pane._worker = None

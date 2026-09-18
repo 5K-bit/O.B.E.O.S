@@ -133,6 +133,15 @@ def test_brain_metrics_line_from_snapshot():
     assert "2 nodes" in line
 
 
+def test_boot_animation_assets_exist():
+    from blackfong_ecosystem.workspace_boot_splash import boot_asset_path, branding_root
+
+    assert (branding_root() / "obeos-mark.png").is_file()
+    assert (branding_root() / "obeos-wordmark.png").is_file()
+    for name in ("earth", "forming", "ring", "wordmark", "end"):
+        assert boot_asset_path(name).is_file(), name
+
+
 def test_tinyprogrammer_warming_does_not_block_overall_ready():
     from blackfong_ecosystem.startup_coordinator import StartupCoordinator
 

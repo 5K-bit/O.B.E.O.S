@@ -4354,8 +4354,12 @@ def test_broad_grounded_conversation_still_drives_fallback_when_backend_misses(t
         context={"request_id": "grounded-conversation-fallback-1", "analysis_mode": "standard", "session_id": session_id},
     )
 
-    assert result["provider"] == "heuristic"
+    # A failed live turn reports the backend that actually failed; the fallback
+    # identity lives in backend metadata instead of the provider name.
+    assert result["provider"] == "local"
     assert result["model"] == "bounded-context-grounded"
+    assert result["backend_metadata"]["fallback_provider"] == "heuristic"
+    assert result["backend_metadata"]["response_path"] == "bounded_context_fallback"
     assert "weakest areas" in result["response"]
     assert "response latency" in result["response"] or "shared memory grounding" in result["response"]
 

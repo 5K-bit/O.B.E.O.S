@@ -83,6 +83,27 @@ class EventQueue:
             s.commit()
         return queue_id
     
+    def enqueue_once(self, event_id: str) -> str:
+        """Idempotent delivery, including a crash between queue commit and outbox ack."""
+        import uuid
+        with self.engine.connect() as conn:
+            conn.execute(text("BEGIN IMMEDIATE"))
+            try:
+                existing = conn.execute(text("SELECT id FROM event_queue WHERE event_id=:id LIMIT 1"), {"id": event_id}).scalar()
+                if existing:
+                    conn.commit()
+                    return existing
+                queue_id = str(uuid.uuid4())
+                conn.execute(QueueItem.__table__.insert().values(
+                    id=queue_id, event_id=event_id, status=QueueStatus.PENDING.value,
+                    retry_count=0, max_retries=3, created_at=datetime.now(tz=timezone.utc),
+                ))
+                conn.commit()
+                return queue_id
+            except Exception:
+                conn.rollback()
+                raise
+
     def dequeue(self, batch_size: int = 10) -> List[str]:
         """Get pending events, mark as PROCESSING."""
         with self.session() as s:

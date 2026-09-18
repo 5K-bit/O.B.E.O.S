@@ -474,7 +474,7 @@ class StateReconciler:
             if hasattr(self.orchestrator, 'semantic_search') and self.orchestrator.semantic_search:
                 # This is a placeholder - actual implementation would query the vector store
                 return {}
-        except:
+        except Exception:
             pass
         return {}
 
@@ -492,8 +492,8 @@ class StateReconciler:
         event_timestamp = event_data.get("last_event_timestamp", 0)
         vector_timestamp = vector_data.get("last_updated", 0)
 
-        # Vector embeddings can be slightly stale (5 minutes)
-        return (time.time() - vector_timestamp) < 300
+        # Vector embeddings can lag the event they were built from by up to 5 minutes.
+        return (event_timestamp - vector_timestamp) < 300
 
     def _repair_inconsistency(self, inconsistency: InconsistencyReport, component_a: str, component_b: str) -> bool:
         """Attempt to repair a detected inconsistency."""

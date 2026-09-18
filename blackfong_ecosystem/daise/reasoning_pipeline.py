@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
 
-from ..chat_backends import HeuristicChatBackend
+from ..chat_backends import ChatBackendError
 from ..identity_semantics import identity_registry
 from ..model_routing import (
     backend_options_for_context,
@@ -256,7 +256,8 @@ def process_request_v1(
     )
 
     grounded_truth_handler = getattr(daise, "_handle_grounded_truth_request", None)
-    if callable(grounded_truth_handler) and mode != "deep" and not defer_truth_to_memory:
+    grounded_evidence_allowed = bool(context.get("allow_deterministic_evidence", True))
+    if callable(grounded_truth_handler) and mode != "deep" and not defer_truth_to_memory and grounded_evidence_allowed:
         grounded_result = grounded_truth_handler(
             user_input=user_input,
             modality=modality,
@@ -458,7 +459,7 @@ def process_request_v1(
         pass
 
     grounded_memory_handler = getattr(daise, "_handle_grounded_memory_bundle", None)
-    if callable(grounded_memory_handler):
+    if callable(grounded_memory_handler) and grounded_evidence_allowed:
         grounded_memory_result = grounded_memory_handler(
             user_input=user_input,
             modality=modality,
@@ -528,21 +529,18 @@ def process_request_v1(
             }
             return str(getattr(generated, "text", generated))
         except Exception as exc:
-            fallback = HeuristicChatBackend(model="daise-model-unavailable")
-            generated = fallback.generate(
-                messages,
-                backend_error=str(exc),
-                fallback_reason="model_unavailable",
-                provider=getattr(backend, "provider_name", "ollama"),
-                model=getattr(backend, "model", None),
-            )
             backend_meta = {
-                "provider": getattr(generated, "provider", "heuristic"),
-                "model": getattr(generated, "model", "daise-model-unavailable"),
-                "metadata": dict(getattr(generated, "metadata", {}) or {}),
+                "provider": getattr(backend, "provider_name", "ollama"),
+                "model": getattr(backend, "model", None),
+                "metadata": {"response_path": "model_failure"},
                 "backend_error": str(exc),
             }
-            return str(getattr(generated, "text", generated))
+            if isinstance(exc, ChatBackendError):
+                raise
+            raise ChatBackendError(
+                "D.A.I.S.E model generation failed; no conversational fallback is available",
+                metadata={"response_path": "model_failure", "cause": str(exc)[:500]},
+            ) from exc
 
     specialist_result = None
     specialist = agents.get(selected_internal)
@@ -571,6 +569,7 @@ def process_request_v1(
                 provider=specialist_result.get("provider"),
                 model=specialist_result.get("model"),
                 response=specialist_result.get("response"),
+                backend_metadata=specialist_result.get("backend_metadata"),
             ),
             selected_agent=selected_internal,
             synthesized=False,

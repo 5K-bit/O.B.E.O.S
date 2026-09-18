@@ -5,8 +5,15 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import sqlite3
 import time
 import webbrowser
+
+if __name__ == "__main__" and "--classic" not in sys.argv:
+    from blackfong_ecosystem.earth.desktop import main as earth_main
+    raise SystemExit(earth_main())
+
+from blackfong_ecosystem.cancellation import CancellationToken, RequestCancelled, cancellation_scope
 from typing import Any, Callable, Dict, Optional
 
 try:
@@ -48,6 +55,7 @@ from blackfong_ecosystem.operator_summary import OperatorSummaryService
 from blackfong_ecosystem.service_registry import get_ui_services
 from blackfong_ecosystem.system_awareness import SystemAwarenessService
 from blackfong_ecosystem.backend_warmup import BackendWarmupWorker
+from blackfong_ecosystem.llamacpp_process import LlamaCppServerManager
 from blackfong_ecosystem.cognition_renderer import NativeGraphCognitionRenderer
 from blackfong_ecosystem.config import chat_settings
 from blackfong_ecosystem.display_names import display_agent_name, format_chat_status_line
@@ -214,75 +222,7 @@ def apply_workspace_theme(app: QApplication) -> None:
     )
 
 
-class TinyProgrammerAutoStartWorker(QThread):
-    """Background worker to run TinyProgrammer auto-start without blocking UI."""
-
-    finished = Signal(dict)
-
-    def __init__(self, tinyprogrammer: Any) -> None:
-        super().__init__()
-        self.tinyprogrammer = tinyprogrammer
-
-    def run(self) -> None:
-        try:
-            result = self.tinyprogrammer.ensure_running(
-                require_stream=True,
-                adopt_external=True,
-                open_browser=False,
-                consent={"approved": True, "level": 1},
-            )
-            self.finished.emit(result)
-        except Exception as exc:
-            self.finished.emit({"success": False, "error": str(exc)})
-
-
-class ChatWorker(QThread):
-    """Run desktop-native D.A.I.S.E chat without freezing the workspace."""
-
-    finished = Signal(dict)
-    token_received = Signal(str)
-
-    def __init__(
-        self,
-        *,
-        operator_chat: Any,
-        message: str,
-        session_id: Optional[str],
-        agent_override: Optional[str],
-        analysis_mode: str,
-        stream: bool = True,
-    ) -> None:
-        super().__init__()
-        self.operator_chat = operator_chat
-        self.message = message
-        self.session_id = session_id
-        self.agent_override = agent_override
-        self.analysis_mode = analysis_mode
-        self.stream = stream
-        self._cancelled = False
-
-    def cancel(self) -> None:
-        self._cancelled = True
-
-    def run(self) -> None:
-        if self._cancelled:
-            self.finished.emit({"status": "cancelled", "error": "Chat cancelled"})
-            return
-        try:
-            stream_callback = (lambda token: self.token_received.emit(token)) if self.stream else None
-            result = self.operator_chat.send_message(
-                message=self.message,
-                session_id=self.session_id,
-                agent_override=self.agent_override,
-                analysis_mode=self.analysis_mode,
-                stream_callback=stream_callback,
-            )
-            if self._cancelled:
-                result = {"status": "cancelled", "error": "Chat cancelled", **result}
-        except Exception as exc:
-            result = {"status": "error", "error": str(exc)}
-        self.finished.emit(result)
-
+from blackfong_ecosystem.ui.desktop_workers import ChatWorker, TinyProgrammerAutoStartWorker, WarmupStatusBridge
 
 def build_workspace_snapshot(
     services: Any,
@@ -505,6 +445,7 @@ class ChatPane(QWidget):
         self._chat_state = "ready"
         self._session_scope = "shared"
         self._session_mode = "resume_shared"
+        self._last_interaction_at = 0.0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -600,6 +541,11 @@ class ChatPane(QWidget):
 
         layout.addWidget(header)
         layout.addWidget(controls_row)
+        self.companion_label = QLabel(self)
+        self.companion_label.setTextFormat(Qt.PlainText)
+        self.companion_label.setWordWrap(True)
+        self.companion_label.hide()
+        layout.addWidget(self.companion_label)
         layout.addWidget(self.transcript, 1)
         layout.addWidget(composer)
         self.setLayout(layout)
@@ -608,6 +554,8 @@ class ChatPane(QWidget):
         self.new_session()
 
     def new_session(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
         mode = self._selected_session_boot_mode()
         if self.session_boot_mode_setter is not None:
             self.session_boot_mode_setter(mode)
@@ -626,6 +574,8 @@ class ChatPane(QWidget):
         self.refresh_button.setEnabled(history_count > 0)
 
     def refresh_history(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
         if not self.session_id:
             self.new_session()
             return
@@ -641,6 +591,8 @@ class ChatPane(QWidget):
             self._set_chat_state("cancelled", "cancelling request")
 
     def send_message(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
         text = self.input.toPlainText().strip()
         if not text:
             self._set_chat_state("failed", "add a message first")
@@ -648,6 +600,8 @@ class ChatPane(QWidget):
         if text.startswith("/") and self.command_registry is not None and self.command_context is not None:
             self._run_slash_command(text)
             return
+        self._last_interaction_at = time.monotonic()
+        self.companion_label.hide()
         self._last_analysis_mode = str(self.analysis_select.currentData() or "fast")
         self.send_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -691,10 +645,13 @@ class ChatPane(QWidget):
         self._scroll_transcript_to_end()
 
     def _append_stream_token(self, token: str) -> None:
+        if self._chat_state in {"cancelled", "failed", "complete"}:
+            return
         self._streaming_buffer += str(token)
         cursor = self.transcript.textCursor()
         if not self._stream_inserted:
             cursor.movePosition(QTextCursor.End)
+            cursor.insertBlock()
             self._stream_start = cursor.position()
             self._stream_inserted = True
         cursor.setPosition(self._stream_start)
@@ -726,9 +683,19 @@ class ChatPane(QWidget):
             return
         self.input.clear()
         result = payload.get("result") or {}
+        if result.get("error") or result.get("success") is False:
+            self._set_chat_state("failed", str(result.get("error") or "Generation failed. Please retry."))
+            self._stream_inserted = False
+            self._streaming_buffer = ""
+            return
         streamed = self._streaming_buffer.strip()
         db_response = str(result.get("response") or "").strip()
-        final_text = streamed or db_response
+        final_text = db_response or streamed
+        if not final_text:
+            self._stream_inserted = False
+            self._streaming_buffer = ""
+            self._set_chat_state("failed", "No reply was returned. Please retry.")
+            return
         if final_text and self._stream_inserted:
             self._set_chat_state("finalizing", "finalizing reply")
             cursor = self.transcript.textCursor()
@@ -1004,7 +971,12 @@ class TinyPane(WorkspacePane):
         self._auto_start_worker.finished.connect(self._on_autostart_complete)
         self._auto_start_worker.start()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._trigger_background_autostart()
+
     def _on_autostart_complete(self, result: Dict[str, Any]) -> None:
+        self.refresh()
         if not result.get("success"):
             try:
                 self.tinyprogrammer.notification_service.create(
@@ -1018,14 +990,8 @@ class TinyPane(WorkspacePane):
                 pass
 
     def launch(self) -> None:
-        self.write(
-            self.tinyprogrammer.ensure_running(
-                require_stream=True,
-                adopt_external=True,
-                open_browser=False,
-                consent={"approved": True, "level": 1},
-            )
-        )
+        self.diagnostics_label.setText("Checking TinyProgrammer and waiting for its first stream frame…")
+        self._trigger_background_autostart()
 
     def open_dashboard(self) -> None:
         self.write(self.tinyprogrammer.open(open_browser=True))
@@ -1681,11 +1647,13 @@ class RedAmonPane(WorkspacePane):
 class MainWindow(QMainWindow):
     """Main window for the managed Blackfong Workspace dashboard."""
 
-    def __init__(self, *, start_timer: bool = True, initial_refresh: bool = True) -> None:
+
+    def __init__(self, *, start_timer: bool = True, initial_refresh: bool = True, start_background: bool = True) -> None:
         debug_session_log(hypothesis_id="B", location="desktop_shell.py:MainWindow.__init__", message="MainWindow init start")
         super().__init__()
         self.setWindowTitle("Blackfong Workspace")
         self.resize(1680, 1040)
+        self._closing = False
         self._refresh_worker: Optional[WorkspaceRefreshWorker] = None
         self._refresh_pending = False
         self._chat_in_progress = False
@@ -1762,14 +1730,19 @@ class MainWindow(QMainWindow):
         self.window_manager.restore_persisted()
         debug_session_log(hypothesis_id="D", location="desktop_shell.py:MainWindow.__init__", message="Layout restored")
         self._install_shortcuts()
-        self._warmup_worker = BackendWarmupWorker(on_status=self._on_warmup_status)
-        self._warmup_worker.start()
+        self._warmup_bridge = WarmupStatusBridge(self._on_warmup_status, self)
+        self._warmup_worker = BackendWarmupWorker(on_status=self._warmup_bridge.status.emit)
+        self._llamacpp_worker = LlamaCppServerManager()
+        if start_background:
+            self._warmup_worker.start()
+            self._llamacpp_worker.start()
         self._live_connected = False
         self._live_refresh_pending = False
         self._live_stream = DesktopLiveStreamWorker(parent=self)
         self._live_stream.event_received.connect(self._handle_live_event)
         self._live_stream.connection_changed.connect(self._handle_live_connection)
-        self._live_stream.start()
+        if start_background:
+            self._live_stream.start()
         debug_session_log(hypothesis_id="A", location="desktop_shell.py:MainWindow.__init__", message="Live stream worker started")
         self._warmup_timer = QTimer(self)
         self._warmup_timer.setInterval(2000)
@@ -2286,11 +2259,31 @@ class MainWindow(QMainWindow):
             )
             self.integration_pane.apply_listing(payload.get("integrations", {}))
             self.redamon_pane.apply_status(payload.get("redamon", {}))
+            self._offer_companion_suggestion(payload)
             self._update_status_chips(payload)
             self._schedule_tiny_retry_if_needed(payload.get("tiny", {}).get("status", {}))
         if self._refresh_pending:
             self._refresh_pending = False
             self.request_refresh(reason="queued")
+
+    def _offer_companion_suggestion(self, payload: Dict[str, Any]) -> None:
+        chat = self.chat_pane
+        busy = bool(chat.input.toPlainText().strip()) or bool(chat._worker and chat._worker.isRunning())
+        busy = busy or time.monotonic() - chat._last_interaction_at < 60
+        if busy or not chat.isVisible() or getattr(self, "_closing", False):
+            return
+        try:
+            if not hasattr(self, "_companion_suggestions"):
+                from blackfong_ecosystem.companion_suggestions import CompanionSuggestions
+                from blackfong_ecosystem.config import paths
+                self._companion_suggestions = CompanionSuggestions(paths.data_root / "companion-suggestions.sqlite3")
+            suggestion = self._companion_suggestions.offer((payload.get("trace") or {}).get("recent_events", []))
+            if suggestion:
+                chat.companion_label.setText("D.A.I.S.E. suggestion: " + suggestion["text"])
+                chat.companion_label.setToolTip("Evidence event: " + suggestion["evidence_event_id"])
+                chat.companion_label.show()
+        except (OSError, sqlite3.Error):
+            pass  # Optional suggestions must not prevent the workspace from updating.
 
     def _update_status_chips(self, payload: Dict[str, Any]) -> None:
         startup = (payload.get("summary", {}) or {}).get("startup", {})
@@ -2319,7 +2312,6 @@ class MainWindow(QMainWindow):
         model = str(outcome.get("model") or chat_settings.model_for_agent("daise"))
         if status == "ready":
             self.model_chip.setText(f"model: ready ({model})")
-            self.overall_chip.setText("READY")
         elif status == "warming":
             self.model_chip.setText(f"model: warming ({model})")
         elif status == "error":
@@ -2520,9 +2512,29 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def closeEvent(self, event: Any) -> None:  # pragma: no cover - GUI lifecycle
+        self._closing = True
+        for timer in self.findChildren(QTimer):
+            timer.stop()
+        if hasattr(self, "_warmup_worker"):
+            self._warmup_worker.stop()
+        if hasattr(self, "_llamacpp_worker"):
+            self._llamacpp_worker.stop()
+        chat = getattr(getattr(self, "chat_pane", None), "_worker", None)
+        if chat and chat.isRunning():
+            chat.cancel()
+        workers = [chat, self._refresh_worker, self._tiny_retry_worker,
+                   getattr(getattr(self, "tiny_pane", None), "_auto_start_worker", None)]
+        if any(worker and worker.isRunning() for worker in workers):
+            event.ignore()
+            self.setEnabled(False)
+            QTimer.singleShot(100, self.close)
+            return
         if hasattr(self, "_live_stream"):
+
             self._live_stream.stop()
             self._live_stream.wait(1500)
+        if hasattr(self, "services") and hasattr(self.services.memory_chamber, "shutdown"):
+            self.services.memory_chamber.shutdown()
         if hasattr(self, "window_manager"):
             self.window_manager.close_all_floats()
         if hasattr(self, "tiny_pane") and hasattr(self.tiny_pane, "stream_view"):
@@ -2539,7 +2551,7 @@ def workspace_probe() -> Dict[str, Any]:
     try:
         app = QApplication.instance() or QApplication(["blackfong-workspace-probe", "-platform", "offscreen"])
         apply_workspace_theme(app)
-        window = MainWindow(start_timer=False, initial_refresh=False)
+        window = MainWindow(start_timer=False, initial_refresh=False, start_background=False)
         return {
             "success": True,
             "window_title": window.windowTitle(),
@@ -2576,6 +2588,11 @@ def main() -> int:
         app = QApplication.instance() or QApplication(sys.argv)
         apply_workspace_theme(app)
         window = MainWindow()
+        requested_workspace = os.getenv("OBEOS_START_WORKSPACE", "")
+        for index in range(window.workbench_tabs.count()):
+            if requested_workspace.lower() in window.workbench_tabs.tabText(index).lower() and requested_workspace:
+                window.workbench_tabs.setCurrentIndex(index)
+                break
         debug_session_log(hypothesis_id="B", location="desktop_shell.py:main", message="MainWindow constructed")
         if os.getenv("BLACKFONG_ENABLE_TRAY", "").lower() in {"1", "true", "yes"}:
             from PySide6.QtWidgets import QMenu, QSystemTrayIcon

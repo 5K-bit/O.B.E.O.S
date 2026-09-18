@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+import threading
 
 from .contracts.event_v1 import EventEnvelope
 from .event_queue import EventQueue
@@ -39,6 +40,10 @@ class EventV1Ingestor:
     def __init__(self, event_store: EventStore | None = None, event_queue: EventQueue | None = None) -> None:
         self.event_store = event_store or EventStore()
         self.event_queue = event_queue or EventQueue()
+        self._outbox = None
+        self._delivery_stop = threading.Event()
+        self._delivery_thread = None
+        self.delivery_error = None
 
     def init_db(self) -> None:
         self.event_store.init_db()
@@ -64,9 +69,57 @@ class EventV1Ingestor:
             correlation_id=envelope.correlation_id,
             tags=["obeos-event-v1", envelope.event_type, f"source:{envelope.source}"],
         )
-        self.event_store.add_event(legacy_event)
-        queue_id = self.event_queue.enqueue(legacy_event.id)
+        if hasattr(self.event_store, "engine"):
+            from .event_outbox import EventOutbox
+            if self._outbox is None:
+                self.init_db()
+                self._outbox = EventOutbox(self.event_store)
+            legacy_event = self._outbox.persist(envelope, legacy_event)
+            delivered = self._outbox.flush(self.event_queue)
+            queue_id = delivered.get(legacy_event.id)
+            if queue_id is None and hasattr(self.event_queue, "enqueue_once"):
+                # A previous successful delivery has already been acknowledged.
+                with self.event_store.engine.connect() as conn:
+                    from sqlalchemy import text
+                    complete = conn.execute(text("SELECT delivered FROM event_delivery_outbox WHERE event_id=:id"), {"id": legacy_event.id}).scalar()
+                if complete:
+                    queue_id = self.event_queue.enqueue_once(legacy_event.id)
+        else:
+            # Compatibility for in-memory adapters; durable stores use the outbox.
+            self.event_store.add_event(legacy_event)
+            queue_id = self.event_queue.enqueue(legacy_event.id)
         return IngestedEvent(envelope=envelope, legacy_event=legacy_event, queue_id=queue_id)
+
+    def start_delivery(self):
+        if not hasattr(self.event_store, "engine"):
+            return
+        if self._delivery_thread and self._delivery_thread.is_alive():
+            return
+        from .event_outbox import EventOutbox
+        self.init_db()
+        if self._outbox is None:
+            self._outbox = EventOutbox(self.event_store)
+        self._delivery_stop.clear()
+        def drain():
+            while not self._delivery_stop.wait(1):
+                try:
+                    self._outbox.flush(self.event_queue)
+                    self.delivery_error = None
+                except Exception as exc:
+                    self.delivery_error = type(exc).__name__
+        self._delivery_thread = threading.Thread(target=drain, name="obeos-event-outbox", daemon=True)
+        self._delivery_thread.start()
+
+    def flush_delivery(self):
+        """Drain persisted-but-undelivered events; a no-op when delivery never started."""
+        if self._outbox is None:
+            return 0
+        return self._outbox.flush(self.event_queue)
+
+    def stop_delivery(self):
+        self._delivery_stop.set()
+        if self._delivery_thread:
+            self._delivery_thread.join(timeout=3)
 
     @staticmethod
     def _timestamp_ms(value: str) -> int | None:
@@ -80,6 +133,7 @@ class EventV1Ingestor:
     def _legacy_source(source: str) -> str:
         normalized = source.strip().lower().replace("-", "_")
         source_map = {
+            "earthglass": "earthglass",
             "daise": "daise",
             "blackfong": "blackfong",
             "system": "system",
@@ -116,7 +170,7 @@ class EventV1Ingestor:
         if normalized.startswith("assistant."):
             return "operator_action_result"
         if normalized.startswith("earthglass."):
-            return "adapter_health_observation"
+            return "spatial_observation_batch"
         if normalized.startswith("blackforge."):
             return "operator_action_result"
         return "operator_action_result"

@@ -58,7 +58,7 @@ class ExplodingBackend(BaseChatBackend):
 def test_chat_settings_default_to_fast_jarvis_and_heavier_coding_model():
     settings = ChatSettings()
 
-    assert settings.model_for_agent("jarvis") == "llama3.2:3b"
+    assert settings.model_for_agent("jarvis") == "gemma4-heretic:latest"
     assert settings.model_for_agent("coding") == "deepseek-coder:6.7b"
     assert settings.model_for_agent("lilo") == "llama3.2:3b"
     assert settings.timeout_for_agent("jarvis") == 180.0
@@ -426,11 +426,10 @@ def test_jarvis_fallback_records_backend_error():
         context={"session_id": "test-session", "memory_context": {}},
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "fallback-heuristic"
-    assert result["backend_error"] == "simulated timeout"
-    assert result["backend_metadata"]["path"] == "fallback"
-    assert result["backend_metadata"]["fallback_reason"] == "simulated timeout"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_heuristic_fallback_includes_diagnostic_reason():
@@ -451,13 +450,10 @@ def test_heuristic_fallback_includes_diagnostic_reason():
         context={"session_id": "test-session", "memory_context": {}},
     )
 
-    assert result["provider"] == "heuristic"
-    assert "Ollama is down" in result["response"]
-    assert "Falling back to local O.B.E.O.S. memory" in result["response"]
-    assert result["backend_error"] == "Ollama is down"
-    assert result["backend_metadata"]["fallback_reason"] == "Ollama is down"
-    assert result["backend_metadata"]["provider"] == "ollama"
-    assert result["backend_metadata"]["model"] == "ollama-mini"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_grounded_fallback_prefers_conversation_over_recovery_banner():
@@ -499,12 +495,10 @@ def test_timeout_fallback_synthesizes_from_active_work_context():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "bounded-context-grounded"
-    assert "response latency" in result["response"]
-    assert "HUD layout improvements" in result["response"] or "Telegram grounding" in result["response"]
-    assert result["backend_metadata"]["bounded_context_fallback"] is True
-    assert result["backend_metadata"]["response_path"] == "bounded_context_fallback"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_timeout_fallback_synthesizes_from_knowledge_context():
@@ -527,11 +521,10 @@ def test_timeout_fallback_synthesizes_from_knowledge_context():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "bounded-context-grounded"
-    assert "D.A.I.S.E." in result["response"] or "Memory Chamber" in result["response"]
-    assert "bounded local O.B.E.O.S. knowledge" in result["response"]
-    assert result["backend_metadata"]["bounded_context_fallback"] is True
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_timeout_fallback_synthesizes_generic_project_direction_from_active_work():
@@ -553,11 +546,10 @@ def test_timeout_fallback_synthesizes_generic_project_direction_from_active_work
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "bounded-context-grounded"
-    assert "coherent living system" in result["response"]
-    assert "response latency" in result["response"] or "Telegram grounding" in result["response"]
-    assert result["backend_metadata"]["bounded_context_fallback"] is True
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_timeout_fallback_synthesizes_state_summary_from_active_work():
@@ -581,12 +573,10 @@ def test_timeout_fallback_synthesizes_state_summary_from_active_work():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "bounded-context-grounded"
-    assert "overall situation right now centers on" in result["response"]
-    assert "response latency" in result["response"] or "OBEOS improvements" in result["response"]
-    assert "Irrelevant fallback source" not in result["response"]
-    assert result["backend_metadata"]["bounded_context_fallback"] is True
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_timeout_fallback_social_checkin_ignores_grounded_knowledge_dump():
@@ -613,10 +603,10 @@ def test_timeout_fallback_social_checkin_ignores_grounded_knowledge_dump():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert "I'm here" in result["response"]
-    assert "[Source 1]" not in result["response"]
-    assert "RAW OCR CHUNK" not in result["response"]
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_timeout_fallback_runtime_status_reports_surface_without_source_dump():
@@ -648,10 +638,10 @@ def test_timeout_fallback_runtime_status_reports_surface_without_source_dump():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert "came through telegram" in result["response"].lower()
-    assert "degraded" in result["response"].lower()
-    assert "[Source 1]" not in result["response"]
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_unrelated_question_does_not_use_an_unrelated_collection_citation():
@@ -675,9 +665,10 @@ def test_unrelated_question_does_not_use_an_unrelated_collection_citation():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert "Spawn" not in result["response"]
-    assert "RAW OCR" not in result["response"]
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_raw_grounded_collection_answer_is_not_emitted_verbatim():
@@ -742,11 +733,10 @@ def test_streaming_timeout_falls_back_cleanly(monkeypatch):
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert "Falling back to local O.B.E.O.S. memory" in result["response"]
-    assert "timed out" in str(result["backend_error"] or "").lower()
-    assert result["backend_metadata"]["provider"] == "ollama"
-    assert result["backend_metadata"]["model"] == "llama3.2:3b"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_standard_chain_timeout_is_split_across_models():
@@ -1266,15 +1256,10 @@ def test_jarvis_uses_preemptive_fallback_when_backend_is_unavailable():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["backend_error"] == "Ollama connection refused"
-    assert result["backend_metadata"]["preemptive_fallback"] is True
-    assert result["backend_metadata"]["fallback_reason"] == "Ollama connection refused"
-    assert result["backend_metadata"]["response_path"] == "preemptive_fallback"
-    assert result["backend_metadata"]["health_forced_fallback"] is True
-    assert result["backend_metadata"]["recovery_probe_attempted"] is False
-    assert result["backend_metadata"]["live_lane_attempted"] is False
-    assert result["backend_metadata"]["fallback_mode"] == "preemptive"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_degraded_backend_caps_standard_timeout(monkeypatch):
@@ -1354,13 +1339,10 @@ def test_repeated_recent_failures_force_preemptive_fallback():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["backend_metadata"]["preemptive_fallback"] is True
-    assert result["backend_metadata"]["health_forced_fallback"] is True
-    assert result["backend_metadata"]["recovery_probe_attempted"] is False
-    assert result["backend_metadata"]["degraded_reason"] == "recent_repeated_timeouts"
-    assert result["backend_metadata"]["live_lane_attempted"] is False
-    assert result["backend_metadata"]["fallback_mode"] == "preemptive"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_conversational_followup_can_retry_live_lane_despite_repeated_recent_failures():

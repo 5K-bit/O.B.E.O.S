@@ -94,12 +94,67 @@ class SystemIdentity:
 
 
 @dataclass(frozen=True)
+class LlamaCppSettings:
+    """Runtime settings for the dedicated D.A.I.S.E. llama.cpp server.
+
+    llama-server loads one model per process, so this is scoped to a single
+    model (the edited Gemma model D.A.I.S.E. speaks through) rather than the
+    many-model chains Ollama still serves for the other agents.
+    """
+
+    enabled: bool = True
+    binary_path: str = ""
+    model_path: str = ""
+    mmproj_path: str = ""
+    host: str = "127.0.0.1"
+    port: int = 8091
+    model_alias: str = "gemma4-heretic"
+    context_size: int = 8192
+    threads: int = 4
+    reasoning_budget: int = 0
+    startup_timeout: float = 120.0
+    request_timeout: float = 180.0
+
+    @property
+    def base_url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+    def is_configured(self) -> bool:
+        return bool(self.binary_path and self.model_path and Path(self.binary_path).is_file() and Path(self.model_path).is_file())
+
+    @staticmethod
+    def from_env(root: Path) -> "LlamaCppSettings":
+        runtime_root = root / "runtime" / "llamacpp"
+        default_binary = runtime_root / "build_b11026" / "llama-server.exe"
+        default_model = runtime_root / "models" / "gemma4-heretic-E4B-Q4_K_M.gguf"
+        default_mmproj = runtime_root / "models" / "gemma4-heretic-E4B-mmproj.gguf"
+        return LlamaCppSettings(
+            enabled=os.getenv("BLACKFONG_LLAMACPP_ENABLED", "true").lower() != "false",
+            binary_path=os.getenv("BLACKFONG_LLAMACPP_BINARY", str(default_binary)),
+            model_path=os.getenv("BLACKFONG_LLAMACPP_MODEL_PATH", str(default_model)),
+            mmproj_path=os.getenv("BLACKFONG_LLAMACPP_MMPROJ_PATH", str(default_mmproj)),
+            host=os.getenv("BLACKFONG_LLAMACPP_HOST", "127.0.0.1"),
+            port=int(os.getenv("BLACKFONG_LLAMACPP_PORT", "8091")),
+            model_alias=os.getenv("BLACKFONG_LLAMACPP_MODEL_ALIAS", "gemma4-heretic"),
+            context_size=int(os.getenv("BLACKFONG_LLAMACPP_CONTEXT_SIZE", "8192")),
+            threads=int(os.getenv("BLACKFONG_LLAMACPP_THREADS", "4")),
+            reasoning_budget=int(os.getenv("BLACKFONG_LLAMACPP_REASONING_BUDGET", "0")),
+            startup_timeout=float(os.getenv("BLACKFONG_LLAMACPP_STARTUP_TIMEOUT", "120")),
+            request_timeout=float(os.getenv("BLACKFONG_LLAMACPP_REQUEST_TIMEOUT", "180")),
+        )
+
+
+@dataclass(frozen=True)
 class ChatSettings:
     """Runtime settings for the local chat and memory stack."""
 
     backend: str = "ollama"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:3b"
+    daise_model: str = "gemma4-heretic:latest"
+    daise_backend: str = "llamacpp"
+    daise_num_predict: int = 2048
+    daise_num_ctx: int = 8192
     ollama_timeout: float = 180.0
     ollama_keep_alive: str = "30m"
     ollama_num_ctx: int = 8192
@@ -136,7 +191,6 @@ class ChatSettings:
     jarvis_quick_timeout: float = 60.0
     jarvis_quick_num_predict: int = 384
     quick_prompt_budget_tokens: int = 600
-    deep_prompt_budget_tokens: int = 4096
     coding_model: str = "deepseek-coder:6.7b"
     coding_model_fallbacks: tuple[str, ...] = ("deepseek-coder", "llama3.2:3b")
     coding_timeout: float = 180.0
@@ -191,8 +245,8 @@ class ChatSettings:
     def model_for_agent(self, agent_name: str | None = None) -> str:
         normalized = (agent_name or "").strip().lower()
         per_agent_models = {
-            "daise": self.fast_model,
-            "jarvis": self.fast_model,
+            "daise": self.daise_model,
+            "jarvis": self.daise_model,
             "coding": self.coding_model,
             "lilo": self.lilo_model,
             "stitch": self.stitch_model,
@@ -294,6 +348,10 @@ class ChatSettings:
         )
         return ChatSettings(
             backend=os.getenv("BLACKFONG_CHAT_BACKEND", "ollama"),
+            daise_backend=os.getenv("BLACKFONG_DAISE_BACKEND", "llamacpp").strip().lower() or "llamacpp",
+            daise_model=os.getenv("BLACKFONG_DAISE_MODEL", os.getenv("BLACKFONG_JARVIS_MODEL", "gemma4-heretic:latest")),
+            daise_num_predict=int(os.getenv("BLACKFONG_DAISE_NUM_PREDICT", "2048")),
+            daise_num_ctx=int(os.getenv("BLACKFONG_DAISE_NUM_CTX", "8192")),
             ollama_url=os.getenv("BLACKFONG_OLLAMA_URL", "http://localhost:11434"),
             ollama_model=default_model,
             ollama_timeout=default_timeout,
@@ -532,6 +590,7 @@ class GPSSettings:
 paths = Paths.from_root(Path(__file__).resolve().parents[1])
 identity = SystemIdentity()
 chat_settings = ChatSettings.from_env()
+llamacpp_settings = LlamaCppSettings.from_env(paths.root)
 knowledge_settings = KnowledgeSettings.from_env()
 hud_settings = HUDSettings.from_env()
 legion_settings = LegionSettings.from_env()

@@ -1,0 +1,24 @@
+{
+  "tracks": 10000,
+  "batch_ingestion_seconds": 8.269563999958336,
+  "cached_query_limit": 2000,
+  "cached_query_p50_ms": 47.93729999801144,
+  "cached_query_p95_ms": 140.04550001118332,
+  "target_p95_ms": 250,
+  "history": {
+    "observations": 10000,
+    "payload_bytes": 6610010,
+    "entities": 10000,
+    "retention_days": 7,
+    "quota_bytes": 5368709120,
+    "database_bytes": 28522280,
+    "delivery": {
+      "pending": 10000,
+      "capacity": 20000,
+      "coalesced_by_entity": true,
+      "resync_required": false,
+      "resync_revision": "false"
+    }
+  },
+  "target_met": true
+}

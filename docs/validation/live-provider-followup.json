@@ -1,0 +1,76 @@
+{
+  "checked_at": "2026-09-10T19:05:32.967872+00:00",
+  "credentials_used": false,
+  "results": [
+    {
+      "provider": "celestrak",
+      "status": "empty_coverage",
+      "records": 0,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [],
+      "attribution": "CelesTrak / Dr. T.S. Kelso",
+      "notes": null
+    },
+    {
+      "provider": "open_meteo_gfs",
+      "status": "received",
+      "records": 9,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "predicted"
+      ],
+      "attribution": "Weather data by Open-Meteo.com / NOAA GFS",
+      "notes": null
+    },
+    {
+      "provider": "open_meteo_temperature",
+      "status": "received",
+      "records": 9,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "predicted"
+      ],
+      "attribution": "Weather data by Open-Meteo.com / NOAA GFS",
+      "notes": null
+    },
+    {
+      "provider": "overpass",
+      "status": "received",
+      "records": 13,
+      "rejected": 430,
+      "live_verified": true,
+      "measurement_kinds": [
+        "catalog"
+      ],
+      "attribution": "\u00a9 OpenStreetMap contributors",
+      "notes": null
+    },
+    {
+      "provider": "launch_library",
+      "status": "received",
+      "records": 100,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "catalog"
+      ],
+      "attribution": "Launch Library 2 \u2014 The Space Devs",
+      "notes": null
+    },
+    {
+      "provider": "traffic",
+      "status": "unavailable",
+      "reason": "upstream_unavailable",
+      "live_verified": false
+    },
+    {
+      "provider": "project3000",
+      "status": "unavailable",
+      "reason": "camera_location_required",
+      "live_verified": false
+    }
+  ]
+}

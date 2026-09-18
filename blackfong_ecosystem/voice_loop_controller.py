@@ -14,6 +14,7 @@ This is the "heartbeat" of the voice system.
 
 from __future__ import annotations
 
+import platform
 import time
 import threading
 import queue
@@ -462,7 +463,7 @@ class VoiceLoopController:
                 return 'macos'
 
             return 'unknown'
-        except:
+        except Exception:
             return 'unknown'
 
     def _detect_running_applications(self) -> Dict[str, bool]:

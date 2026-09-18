@@ -1,0 +1,142 @@
+{
+  "checked_at": "2026-09-10T16:34:19.799026+00:00",
+  "credentials_used": false,
+  "results": [
+    {
+      "provider": "adsb",
+      "status": "received",
+      "records": 85,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "observed"
+      ],
+      "attribution": "adsb.lol contributors (ODbL 1.0)"
+    },
+    {
+      "provider": "adsb_military",
+      "status": "empty_coverage",
+      "records": 0,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [],
+      "attribution": "adsb.lol contributors (ODbL 1.0)"
+    },
+    {
+      "provider": "aisstream",
+      "status": "unavailable",
+      "reason": "credential_not_configured",
+      "live_verified": false
+    },
+    {
+      "provider": "celestrak",
+      "status": "unavailable",
+      "reason": "timeout",
+      "live_verified": false
+    },
+    {
+      "provider": "usgs",
+      "status": "received",
+      "records": 259,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "observed"
+      ],
+      "attribution": "U.S. Geological Survey"
+    },
+    {
+      "provider": "firms",
+      "status": "unavailable",
+      "reason": "credential_not_configured",
+      "live_verified": false
+    },
+    {
+      "provider": "open_meteo_gfs",
+      "status": "received",
+      "records": 1,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "predicted"
+      ],
+      "attribution": "Weather data by Open-Meteo.com / NOAA GFS"
+    },
+    {
+      "provider": "open_meteo_temperature",
+      "status": "received",
+      "records": 1,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "predicted"
+      ],
+      "attribution": "Weather data by Open-Meteo.com / NOAA GFS"
+    },
+    {
+      "provider": "overpass",
+      "status": "unavailable",
+      "reason": "upstream_unavailable",
+      "live_verified": false
+    },
+    {
+      "provider": "launch_library",
+      "status": "unavailable",
+      "reason": "connection_error",
+      "live_verified": false
+    },
+    {
+      "provider": "citibike",
+      "status": "received",
+      "records": 2500,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "observed"
+      ],
+      "attribution": "Citi Bike / Lyft GBFS"
+    },
+    {
+      "provider": "traffic",
+      "status": "received",
+      "records": 5000,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "catalog"
+      ],
+      "attribution": "\u00a9 OpenStreetMap contributors / Traffic flow data \u00a9 TomTom when live"
+    },
+    {
+      "provider": "tfl",
+      "status": "received",
+      "records": 869,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "catalog"
+      ],
+      "attribution": "Powered by TfL Open Data. Contains OS data \u00a9 Crown copyright and database rights"
+    },
+    {
+      "provider": "caltrans_d3",
+      "status": "empty_coverage",
+      "records": 0,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [],
+      "attribution": "Caltrans \u2014 cwwp2.dot.ca.gov"
+    },
+    {
+      "provider": "caltrans_d4",
+      "status": "received",
+      "records": 233,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "catalog"
+      ],
+      "attribution": "Caltrans \u2014 cwwp2.dot.ca.gov"
+    }
+  ]
+}

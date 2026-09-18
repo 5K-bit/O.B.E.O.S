@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generator, Optional, Sequence
 
 import httpx
+from .cancellation import RequestCancelled, cancellation_resource, raise_if_cancelled
 
 from .config import chat_settings
-from .conversation_memory import conversation_memory_service
 from .ollama_models import filter_model_chain
 
 
@@ -73,7 +73,9 @@ class OllamaChatBackend(BaseChatBackend):
         keep_alive: str | None = None,
         num_ctx: int | None = None,
         num_predict: int | None = None,
+        trust_env: bool = True,
     ) -> None:
+        self.trust_env = trust_env
         self.base_url = (base_url or chat_settings.ollama_url).rstrip("/")
         self.model = model or chat_settings.ollama_model
         self.timeout = timeout if timeout is not None else chat_settings.ollama_timeout
@@ -103,6 +105,8 @@ class OllamaChatBackend(BaseChatBackend):
                 "num_predict": effective_num_predict,
             },
         }
+        if "think" in options:
+            payload["think"] = bool(options["think"])
 
         timeout = httpx.Timeout(connect=5.0, read=effective_timeout, write=30.0, pool=5.0)
         last_error: Exception | None = None
@@ -131,9 +135,10 @@ class OllamaChatBackend(BaseChatBackend):
             }
 
         for attempt in range(max_attempts):
+            raise_if_cancelled()
             attempt_started = time.perf_counter()
             try:
-                with httpx.Client(timeout=timeout) as client:
+                with httpx.Client(timeout=timeout, **({"trust_env": False} if not self.trust_env else {})) as client, cancellation_resource(getattr(client, "close", lambda: None)):
                     response = client.post(f"{self.base_url}/api/chat", json=payload)
                     response.raise_for_status()
                     data = response.json()
@@ -158,6 +163,7 @@ class OllamaChatBackend(BaseChatBackend):
                 if retry_read_timeout and attempt < max_attempts - 1:
                     time.sleep(0.5)
                     continue
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama request timed out after {effective_timeout:.0f}s for model {effective_model}",
                     metadata=failure_metadata("read_timeout", timeout_reason=f"read_timeout_after_{effective_timeout:.0f}s"),
@@ -174,6 +180,7 @@ class OllamaChatBackend(BaseChatBackend):
                     }
                 )
                 if status_code == 404:
+                    raise_if_cancelled()
                     raise ChatBackendError(
                         f"Ollama model not found: {effective_model}",
                         metadata=failure_metadata("model_not_found"),
@@ -181,6 +188,7 @@ class OllamaChatBackend(BaseChatBackend):
                 if attempt < max_attempts - 1 and status_code >= 500:
                     time.sleep(0.5)
                     continue
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama backend returned HTTP {status_code} for model {effective_model}: {detail[:240]}",
                     metadata=failure_metadata(f"http_{status_code}"),
@@ -198,10 +206,13 @@ class OllamaChatBackend(BaseChatBackend):
                 if attempt < max_attempts - 1:
                     time.sleep(0.5)
                     continue
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama backend unavailable: {exc}",
                     metadata=failure_metadata("http_error"),
                 ) from exc
+            except RequestCancelled:
+                raise
             except Exception as exc:  # pragma: no cover - network failure path
                 last_error = exc
                 attempt_log.append(
@@ -212,11 +223,13 @@ class OllamaChatBackend(BaseChatBackend):
                         "error": str(exc)[:240],
                     }
                 )
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama backend unavailable: {exc}",
                     metadata=failure_metadata("unexpected_error"),
                 ) from exc
         else:  # pragma: no cover - defensive fallback
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama backend unavailable: {last_error}",
                 metadata=failure_metadata("unavailable"),
@@ -225,6 +238,7 @@ class OllamaChatBackend(BaseChatBackend):
         data = data or {}
         content = (data.get("message") or {}).get("content", "").strip()
         if not content:
+            raise_if_cancelled()
             raise ChatBackendError(
                 "Ollama backend returned an empty response",
                 metadata=failure_metadata("empty_response"),
@@ -286,6 +300,8 @@ class OllamaChatBackend(BaseChatBackend):
                 "num_predict": effective_num_predict,
             },
         }
+        if "think" in options:
+            payload["think"] = bool(options["think"])
         timeout = httpx.Timeout(connect=5.0, read=effective_timeout, write=30.0, pool=5.0)
         wall_started = time.perf_counter()
         parts: list[str] = []
@@ -310,15 +326,17 @@ class OllamaChatBackend(BaseChatBackend):
             }
 
         try:
-            with httpx.Client(timeout=timeout) as client:
+            with httpx.Client(timeout=timeout, **({"trust_env": False} if not self.trust_env else {})) as client, cancellation_resource(getattr(client, "close", lambda: None)):
                 with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
                     if response.status_code == 404:
+                        raise_if_cancelled()
                         raise ChatBackendError(
                             f"Ollama model not found: {model_name}",
                             metadata=failure_metadata("model_not_found"),
                         )
                     response.raise_for_status()
                     for line in response.iter_lines():
+                        raise_if_cancelled()
                         if not line:
                             continue
                         try:
@@ -334,6 +352,7 @@ class OllamaChatBackend(BaseChatBackend):
                         if data.get("done"):
                             model_name = str(data.get("model") or model_name)
         except httpx.ReadTimeout as exc:  # pragma: no cover - network failure path
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama request timed out after {effective_timeout:.0f}s for model {model_name}",
                 metadata=failure_metadata("read_timeout", timeout_reason=f"read_timeout_after_{effective_timeout:.0f}s"),
@@ -342,22 +361,28 @@ class OllamaChatBackend(BaseChatBackend):
             detail = exc.response.text.strip()
             status_code = exc.response.status_code
             if status_code == 404:
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama model not found: {model_name}",
                     metadata=failure_metadata("model_not_found"),
                 ) from exc
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama backend returned HTTP {status_code} for model {model_name}: {detail[:240]}",
                 metadata=failure_metadata(f"http_{status_code}"),
             ) from exc
         except httpx.HTTPError as exc:  # pragma: no cover - network failure path
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama backend unavailable: {exc}",
                 metadata=failure_metadata("http_error"),
             ) from exc
         except ChatBackendError:
             raise
+        except RequestCancelled:
+            raise
         except Exception as exc:  # pragma: no cover - network failure path
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama backend unavailable: {exc}",
                 metadata=failure_metadata("unexpected_error"),
@@ -579,6 +604,8 @@ class HeuristicChatBackend(BaseChatBackend):
             last_context = " ".join(str((last_context_match.group("context") if last_context_match else "") or "").split()).strip(" ,.;:-")
             if last_context.lower().startswith("more specifically, i mean "):
                 last_context = last_context[len("more specifically, i mean ") :].strip(" ,.;:-")
+            from .conversation_memory import conversation_memory_service
+
             continuity_flags = conversation_memory_service._conversational_followup_flags(lowered)
             if thread and any(
                 token in lowered
