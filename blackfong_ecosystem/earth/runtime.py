@@ -17,6 +17,7 @@ class EarthRuntime:
         self.engine = self.control = self.backbone = self.server = self.thread = None
         self.started_seconds = None
         self.lease = None
+        self.model_server = None
         self._stopped = False
 
     def start(self):
@@ -114,6 +115,17 @@ class EarthRuntime:
             target=self._warm_places, name="earth-places-warmup", daemon=True
         )
         self.places_warmup.start()
+        # The Earth-first launcher is otherwise the only surface that never starts a
+        # local model, leaving D.A.I.S.E. with nothing to explain through. start() is
+        # non-blocking and reuses a server that is already listening.
+        if not self.isolated:
+            try:
+                from ..llamacpp_process import LlamaCppServerManager
+
+                self.model_server = LlamaCppServerManager()
+                self.model_server.start()
+            except Exception:
+                self.model_server = None
         self.started_seconds = time.perf_counter() - started
         return self.origin
 
@@ -173,6 +185,7 @@ class EarthRuntime:
             (getattr(getattr(getattr(self, "application", None), "state", None), "tiles", None), "close"),
             (getattr(getattr(getattr(self, "application", None), "state", None), "presence", None), "close"),
             (self.control, "close"),
+            (self.model_server, "stop"),
             (self.backbone, "close"),
             (getattr(self, "socket", None), "close"),
             (self.lease, "close"),

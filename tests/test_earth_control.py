@@ -493,6 +493,10 @@ def test_offline_explanation_uses_on_machine_model_without_proxy(earth, monkeypa
         SimpleNamespace(
             ollama_url="http://localhost:11434",
             model_for_agent=lambda _: "fixture-local",
+            earth_explanation_model="fixture-local",
+            earth_explanation_timeout=120.0,
+            earth_explanation_num_predict=300,
+            earth_evidence_chars=6000,
         ),
     )
     monkeypatch.setattr(backends.httpx, "Client", client)
@@ -970,3 +974,64 @@ def test_annotation_import_rejects_unusable_features(earth, tmp_path):
         assert client.get("/api/annotations/export", headers=headers).json()[
             "features"
         ][0]["properties"]["label"] == "Kept"
+
+
+def test_earth_explanation_uses_its_own_fast_profile(earth, monkeypatch):
+    import blackfong_ecosystem.config as config
+    from blackfong_ecosystem.earth.daise import EarthOrchestration
+
+    _, control = earth
+    monkeypatch.setattr(
+        config,
+        "chat_settings",
+        SimpleNamespace(
+            ollama_url="http://localhost:11434",
+            model_for_agent=lambda _: "the-big-slow-model",
+            earth_explanation_model="the-small-fast-model",
+            earth_explanation_timeout=120.0,
+            earth_explanation_num_predict=300,
+            earth_evidence_chars=6000,
+        ),
+    )
+    # Ollama answers; the dedicated llama.cpp endpoint does not.
+    monkeypatch.setattr(
+        EarthOrchestration,
+        "_reachable",
+        staticmethod(lambda base_url, timeout=1.0: "11434" in base_url),
+    )
+    backend = EarthOrchestration(control)._local_backend()
+    # Earth must not inherit the general DAISE chat model for this workload.
+    assert backend.model == "the-small-fast-model"
+    assert backend.timeout == 120.0
+    assert backend.num_predict == 300
+
+
+def test_dead_llamacpp_endpoint_does_not_shadow_a_running_ollama(earth, monkeypatch):
+    import blackfong_ecosystem.config as config
+    from blackfong_ecosystem.chat_backends import OllamaChatBackend
+    from blackfong_ecosystem.earth.daise import EarthOrchestration
+
+    _, control = earth
+    monkeypatch.setattr(
+        config,
+        "chat_settings",
+        SimpleNamespace(
+            ollama_url="http://localhost:11434",
+            model_for_agent=lambda _: "fixture-local",
+            earth_explanation_model="fixture-local",
+            earth_explanation_timeout=120.0,
+            earth_explanation_num_predict=300,
+            earth_evidence_chars=6000,
+        ),
+    )
+    probed = []
+
+    def reachable(base_url, timeout=1.0):
+        probed.append(base_url)
+        return "11434" in base_url  # only Ollama answers
+
+    monkeypatch.setattr(EarthOrchestration, "_reachable", staticmethod(reachable))
+    backend = EarthOrchestration(control)._local_backend()
+    assert isinstance(backend, OllamaChatBackend)
+    assert "11434" in backend.base_url
+    assert probed, "the endpoint must be probed rather than assumed live"

@@ -155,6 +155,12 @@ class ChatSettings:
     daise_backend: str = "llamacpp"
     daise_num_predict: int = 2048
     daise_num_ctx: int = 8192
+    # Earth's scene explanation has its own profile: a large evidence prompt on
+    # whatever CPU the operator has, so it favours a small fast model over depth.
+    earth_explanation_model: str = "gemma3:1b-it-qat"
+    earth_explanation_timeout: float = 120.0
+    earth_explanation_num_predict: int = 300
+    earth_evidence_chars: int = 6000
     ollama_timeout: float = 180.0
     ollama_keep_alive: str = "30m"
     ollama_num_ctx: int = 8192
@@ -352,6 +358,10 @@ class ChatSettings:
             daise_model=os.getenv("BLACKFONG_DAISE_MODEL", os.getenv("BLACKFONG_JARVIS_MODEL", "gemma4-heretic:latest")),
             daise_num_predict=int(os.getenv("BLACKFONG_DAISE_NUM_PREDICT", "2048")),
             daise_num_ctx=int(os.getenv("BLACKFONG_DAISE_NUM_CTX", "8192")),
+            earth_explanation_model=os.getenv("BLACKFONG_EARTH_EXPLANATION_MODEL", "gemma3:1b-it-qat"),
+            earth_explanation_timeout=float(os.getenv("BLACKFONG_EARTH_EXPLANATION_TIMEOUT", "120")),
+            earth_explanation_num_predict=int(os.getenv("BLACKFONG_EARTH_EXPLANATION_NUM_PREDICT", "300")),
+            earth_evidence_chars=int(os.getenv("BLACKFONG_EARTH_EVIDENCE_CHARS", "6000")),
             ollama_url=os.getenv("BLACKFONG_OLLAMA_URL", "http://localhost:11434"),
             ollama_model=default_model,
             ollama_timeout=default_timeout,

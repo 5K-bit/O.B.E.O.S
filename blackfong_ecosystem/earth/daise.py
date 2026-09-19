@@ -35,6 +35,52 @@ class EarthOrchestration:
     def stop(self):
         self._cancellation.cancel()
 
+    @staticmethod
+    def _reachable(base_url, timeout=1.0):
+        """Is this on-machine endpoint actually serving? Probing is cheap; a long
+        generation against a dead port is not."""
+        import httpx
+
+        for path in ("/health", "/v1/models"):
+            try:
+                with httpx.Client(timeout=timeout, trust_env=False) as client:
+                    if client.get(base_url + path).status_code == 200:
+                        return True
+            except Exception:
+                continue
+        return False
+
+    def _local_backend(self):
+        """Earth's explanation favours a small fast model over depth: the evidence
+        prompt is large and the operator's machine may have no GPU at all. Ollama can
+        serve that model directly, whereas the dedicated llama.cpp server only ever
+        holds its one resident GGUF, so here it is the fallback, not the preference.
+        A configured-yet-dead endpoint must never shadow one that is running."""
+        from ..chat_backends import OllamaChatBackend
+        from ..config import chat_settings
+
+        def ollama():
+            return OllamaChatBackend(
+                base_url=local_model_url(chat_settings.ollama_url),
+                trust_env=False,
+                model=chat_settings.earth_explanation_model,
+                timeout=chat_settings.earth_explanation_timeout,
+                num_predict=chat_settings.earth_explanation_num_predict,
+            )
+
+        if self._reachable(local_model_url(chat_settings.ollama_url)):
+            return ollama()
+        from ..model_routing import build_daise_llamacpp_backend
+
+        backend = build_daise_llamacpp_backend()
+        if backend is not None:
+            # Already loopback-only (llamacpp_settings.host); re-validate anyway
+            # so Earth's on-machine-only guarantee never depends on config alone.
+            local_model_url(backend.base_url)
+            if self._reachable(backend.base_url):
+                return backend
+        return ollama()
+
     def execute_proposal(self, payload):
         return self.control.execute(payload, origin="daise")
 
@@ -55,28 +101,14 @@ class EarthOrchestration:
                     "reason": type(exc).__name__,
                     "camera_action": None,
                 }
-            if self.backend_factory:
-                backend = self.backend_factory()
-            else:
-                from ..config import chat_settings
-                from ..model_routing import build_daise_llamacpp_backend
+            backend = (
+                self.backend_factory() if self.backend_factory else self._local_backend()
+            )
+            from ..config import chat_settings
 
-                backend = build_daise_llamacpp_backend()
-                if backend is not None:
-                    # Already loopback-only (llamacpp_settings.host); re-validate anyway
-                    # so Earth's on-machine-only guarantee never depends on config alone.
-                    local_model_url(backend.base_url)
-                else:
-                    from ..chat_backends import OllamaChatBackend
-
-                    backend = OllamaChatBackend(
-                        base_url=local_model_url(chat_settings.ollama_url),
-                        trust_env=False,
-                        model=chat_settings.model_for_agent("daise"),
-                        timeout=30,
-                        num_predict=450,
-                    )
-            evidence = json.dumps(facts, ensure_ascii=False)[:18000]
+            evidence = json.dumps(facts, ensure_ascii=False)[
+                : chat_settings.earth_evidence_chars
+            ]
             from ..cancellation import cancellation_scope
 
             with cancellation_scope(self._cancellation):
@@ -95,7 +127,7 @@ class EarthOrchestration:
                             + "\nEND EVIDENCE",
                         },
                     ],
-                    timeout=30,
+                    timeout=chat_settings.earth_explanation_timeout,
                     max_attempts=1,
                 )
             self._cancellation.raise_if_cancelled()
