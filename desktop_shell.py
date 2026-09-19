@@ -1747,25 +1747,34 @@ class MainWindow(QMainWindow):
         self._warmup_timer = QTimer(self)
         self._warmup_timer.setInterval(2000)
         self._warmup_timer.timeout.connect(self._update_warmup_chip)
-        self._warmup_timer.start()
         link_surface("desktop")
-        self._boot_splash = WorkspaceBootSplash(
-            self,
-            snapshot_provider=lambda: self.services.startup_coordinator.snapshot(),
-            warmup_status_provider=lambda: self._warmup_worker.result,
-        )
-        self._boot_splash.destroyed.connect(self._on_boot_splash_destroyed)
-        self._sync_boot_splash_geometry()
-        self._boot_splash.show()
-        self._boot_splash.raise_()
+        # OBEOS_START_WORKSPACE is set only when Earth spawns this window from its
+        # Classic Workspace action. Earth has already shown a boot surface by then, so a
+        # second splash is redundant and competes with Earth's renderer for the GPU.
+        self._boot_splash = None
+        if not os.getenv("OBEOS_START_WORKSPACE"):
+            self._boot_splash = WorkspaceBootSplash(
+                self,
+                snapshot_provider=lambda: self.services.startup_coordinator.snapshot(),
+                warmup_status_provider=lambda: self._warmup_worker.result,
+            )
+            self._boot_splash.destroyed.connect(self._on_boot_splash_destroyed)
+            self._sync_boot_splash_geometry()
+            self._boot_splash.show()
+            self._boot_splash.raise_()
 
         self._timer = QTimer(self)
         self._timer.setInterval(15000)
         self._timer.timeout.connect(lambda: self.request_refresh(reason="timer"))
         if start_timer:
             self._timer.start()
-        if initial_refresh:
-            self.request_refresh(reason="startup")
+        # While the splash animates, keep the GUI thread off the full refresh and the
+        # warmup chip. Both resume in _flush_deferred_startup once it has gone.
+        self._pending_startup_refresh = bool(initial_refresh)
+        if self._boot_splash is None:
+            self._flush_deferred_startup()
+        else:
+            QTimer.singleShot(12000, self._flush_deferred_startup)
         debug_session_log(hypothesis_id="B", location="desktop_shell.py:MainWindow.__init__", message="MainWindow init complete", data={"start_timer": start_timer, "initial_refresh": initial_refresh})
 
     def _logged_handler(self, action: str, handler: Callable[[], None]) -> Callable[[], None]:
@@ -1943,7 +1952,6 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.redamon_dock, self.integrations_dock)
         self.tabifyDockWidget(self.integrations_dock, self.system_dock)
         self.tabifyDockWidget(self.trace_dock, self.notifications_dock)
-        self.tiny_dock.raise_()
         self.trace_dock.raise_()
 
     def _make_dock(self, title: str, object_name: str, widget: QWidget, area: Qt.DockWidgetArea) -> ManagedDockWidget:
@@ -2456,6 +2464,21 @@ class MainWindow(QMainWindow):
 
     def _on_boot_splash_destroyed(self, *_args: Any) -> None:
         self._boot_splash = None
+        self._flush_deferred_startup()
+
+    def _flush_deferred_startup(self) -> None:
+        """Start the warmup chip and the first refresh once the splash is out of the way.
+
+        Safe to call more than once: the splash's destroyed signal and the safety-net
+        timer both land here, and whichever arrives first does the work.
+        """
+        if self._closing:
+            return
+        if not self._warmup_timer.isActive():
+            self._warmup_timer.start()
+        if getattr(self, "_pending_startup_refresh", False):
+            self._pending_startup_refresh = False
+            self.request_refresh(reason="startup")
 
     def _boot_splash_is_active(self) -> bool:
         splash = getattr(self, "_boot_splash", None)
