@@ -1671,6 +1671,15 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
             if fallback_used or backend_error:
                 if within_timeout_window:
                     recent_fallback_count += 1
+                skipped_live_lane = (
+                    backend_metadata.get("live_lane_attempted") is False
+                    or backend_metadata.get("preemptive_fallback") is True
+                    or backend_metadata.get("fallback_mode") == "preemptive"
+                )
+                # A skipped request repeats historical error text, not a new
+                # provider failure. Do not extend the outage with that echo.
+                if skipped_live_lane:
+                    continue
                 if within_timeout_window and ("timed out" in backend_error.lower() or "timed out" in fallback_reason.lower()):
                     recent_timeout_count += 1
                 provider = primary_provider or provider or ""

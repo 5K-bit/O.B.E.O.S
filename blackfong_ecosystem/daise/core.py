@@ -1148,6 +1148,9 @@ class DAISE(ReportOrchestration):
             str(backend_metadata.get("fallback_mode") or "").strip().lower().split()
         )
         used_fallback = bool(fallback_mode) and fallback_mode != "none"
+        # A failed live turn must not become a successful canned conversation.
+        if used_fallback or getattr(top_report, "backend_error", None):
+            return None
         if not used_fallback:
             if normalized_provider not in {"heuristic", ""}:
                 return None

@@ -582,6 +582,7 @@ def process_request_v1(
                 model=specialist_result.get("model"),
                 response=specialist_result.get("response"),
                 backend_metadata=specialist_result.get("backend_metadata"),
+                backend_error=specialist_result.get("backend_error"),
             ),
             selected_agent=selected_internal,
             synthesized=False,

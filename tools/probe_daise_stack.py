@@ -14,7 +14,9 @@ import uuid
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--native", action="store_true", help="Exercise the actual Qt ChatPane offscreen")
+    surfaces = parser.add_mutually_exclusive_group()
+    surfaces.add_argument("--native", action="store_true", help="Exercise the actual Qt ChatPane offscreen")
+    surfaces.add_argument("--hud", action="store_true", help="Exercise real Flask chat routes, not browser rendering")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     root = repo / "data" / "evaluations" / "daise-recovery" / ("stack-" + uuid.uuid4().hex)
@@ -36,6 +38,12 @@ def main():
     service = OperatorChatService(orchestrator=unified_orchestrator)
     session = str(uuid.uuid4())
     pane = None
+    client = None
+    if args.hud:
+        from blackfong_ecosystem.operational_interfaces import WebDashboard
+        dashboard = WebDashboard(memory_service=service.memory_service,
+                                 orchestrator_instance=unified_orchestrator)
+        client = dashboard.app.test_client()
     if args.native:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
         from PySide6.QtWidgets import QApplication
@@ -51,7 +59,7 @@ def main():
         "I missed the bus before it started raining. What happened first?",
         "Actually it was a train, not a bus. What did I miss?",
     ]
-    if args.native:
+    if args.native or args.hud:
         prompts += [
             "Why does rain sometimes smell pleasant? Answer in two sentences.",
             "What is that smell called?",
@@ -107,6 +115,27 @@ def main():
             ui_metrics = {"max_event_loop_gap_ms": max_gap * 1000,
                           "full_response_rendered": bool(response) and response in pane.transcript.toPlainText(),
                           "status_label": pane.status_label.text()}
+        elif client is not None:
+            request_id = str(uuid.uuid4())
+            accepted = client.post("/api/chat", json={
+                "message": prompt, "session_id": session, "request_id": request_id,
+                "background": True, "analysis_mode": "standard",
+            })
+            ui_metrics["acceptance_ms"] = (time.perf_counter() - started) * 1000
+            if accepted.status_code != 202:
+                raise RuntimeError(f"HUD did not accept request: {accepted.status_code}")
+            request_id = accepted.get_json()["request_id"]
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline:
+                snapshot = client.get(f"/api/request/{request_id}/trace").get_json()
+                if snapshot.get("status") in {"complete", "error", "cancelled", "failed"}:
+                    break
+                time.sleep(0.25)
+            else:
+                raise RuntimeError("HUD turn exceeded evaluation deadline")
+            result = {"status": snapshot["status"], "result": snapshot.get("result"),
+                      "request_id": request_id, "session_id": session, "trace": snapshot}
+            ui_metrics["browser_rendering_verified"] = False
         else:
             result = service.send_message(message=prompt, session_id=session,
                                       analysis_mode="standard", stream_callback=on_token,

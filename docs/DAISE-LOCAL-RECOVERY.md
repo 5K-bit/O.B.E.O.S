@@ -291,3 +291,32 @@ The supplied Spawn fixture is not evidence of installed-source retrieval.
 - Native long-run remains active; first four turns returned live responses.
   First turn rendered fully, with a measured 250 ms maximum event-loop gap.
   Full 20-turn results and quality assessment remain pending.
+
+## HUD regression verified and route harness prepared
+
+- HUD failure propagation regression completed: four passed in 28.63 seconds,
+  two existing Pydantic warnings. Backend-only failure now produces an error
+  payload and error request state rather than a completed action.
+- Added mutually exclusive `--hud` mode to the isolated probe. It submits the
+  same 20 prompts through `/api/chat`, polls `/api/request/<id>/trace`, and records
+  acceptance latency and final payloads. CLI validated; live HUD run not started
+  while the native evaluation is using the model. This is route-level testing,
+  explicitly not a browser rendering pass.
+- Native evaluation reached seven turns; every final reply rendered fully.
+  Observed event-loop gaps ranged 31-250 ms. The identity turn used labeled
+  local_runtime_truth, not a model response. File-access answer correctly denied
+  inspection but overgeneralized available capabilities; assess separately from
+  claiming an action was performed. Remaining turns are still running.
+
+## Native acceptance failed: fallback promotion
+
+- The 20-turn native run finished. It is NOT accepted: turn eight timed out and
+  substituted an unrelated OBEOS mission narrative for a fictional picnic.
+  Later turns entered preemptive fallback with irrelevant memory summaries.
+- Found conversation override code explicitly clearing backend_error after
+  substituting canned grounding. Added an early rejection of failed/fallback
+  reports and passed backend_error through the active pipeline report adapter.
+- Three override regression cases passed in 5.81 seconds (two existing Pydantic
+  warnings). Fresh live verification is still required; other fallback/error
+  promotion paths and backend-health counting must be audited before rerunning
+  acceptance. No model selection or completion claim is justified by this run.
