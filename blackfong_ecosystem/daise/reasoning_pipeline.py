@@ -96,8 +96,10 @@ def _select_agent(
     if modality == "voice" and "voice" in agents:
         return "voice"
     lower = user_input.lower()
+    from .core import DAISE
     scores = {
-        name: sum(1 for token in routing_keywords.get(name, ()) if str(token).lower() in lower)
+        name: (0 if name == "lilo" and not DAISE._is_training_intent(lower) else
+               sum(1 for token in routing_keywords.get(name, ()) if str(token).lower() in lower))
         for name in agents
     }
     if scores and max(scores.values()) > 0:
@@ -110,7 +112,7 @@ def _select_agent(
 def _normalize_conversation(bundle: Mapping[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for item in list(bundle.get("session_messages") or [])[-12:]:
-        if not isinstance(item, Mapping):
+        if not isinstance(item, Mapping) or item.get("prompt_eligible") is False:
             continue
         role = str(item.get("role") or item.get("speaker") or item.get("source") or "user").lower()
         if role in {"daise", "jarvis", "assistant", "agent"}:
@@ -496,8 +498,10 @@ def process_request_v1(
 
     def model_callable(text: str, reasoning_context: ReasoningContext) -> str:
         nonlocal backend_meta
+        from ..daise_identity import IDENTITY_AND_TRUTH_PROMPT
+        from ..cancellation import RequestCancelled
         system_prompt = (
-            "You are D.A.I.S.E., the visible intelligence layer for O.B.E.O.S. "
+            IDENTITY_AND_TRUTH_PROMPT +
             "Reason with the model first. Retrieved evidence is optional context, not an answer. "
             "Ignore irrelevant retrievals. Never copy a retrieved passage merely because it matched. "
             "For ordinary knowledge or arithmetic, answer from model reasoning when no external evidence is needed. "
@@ -509,6 +513,8 @@ def process_request_v1(
             for row in reasoning_context.conversation
             if row.get("content")
         )
+        if len(messages) > 1 and messages[-1] == {"role": "user", "content": text}:
+            messages.pop()  # The current user turn is appended after evidence.
         if reasoning_context.memory:
             messages.append({"role": "system", "content": "Retrieved evidence (may be irrelevant):\n" + _safe_json(reasoning_context.memory)})
         if reasoning_context.system_state:
@@ -520,7 +526,11 @@ def process_request_v1(
         backend = build_routed_chat_backend(selected_internal, mode)
         options = backend_options_for_context({"analysis_mode": mode, "response_mode": mode}, selected_internal)
         try:
-            generated = backend.generate(messages, **options)
+            stream_callback = context.get("stream_callback")
+            if stream_callback is not None and hasattr(backend, "generate_stream"):
+                generated = backend.generate_stream(messages, on_token=stream_callback, **options)
+            else:
+                generated = backend.generate(messages, **options)
             backend_meta = {
                 "provider": getattr(generated, "provider", getattr(backend, "provider_name", "ollama")),
                 "model": getattr(generated, "model", getattr(backend, "model", None)),
@@ -528,6 +538,8 @@ def process_request_v1(
                 "backend_error": None,
             }
             return str(getattr(generated, "text", generated))
+        except RequestCancelled:
+            raise
         except Exception as exc:
             backend_meta = {
                 "provider": getattr(backend, "provider_name", "ollama"),
@@ -619,7 +631,14 @@ def process_request_v1(
         )
 
     provider = str(backend_meta.get("provider") or "unknown")
-    confidence = 0.92 if provider == "ollama" else 0.64
+    completion_metadata = dict(backend_meta.get("metadata") or {})
+    if not backend_meta.get("backend_error") and (
+        completion_metadata.get("response_complete") is False
+        or completion_metadata.get("finish_reason") == "length"
+    ):
+        backend_meta["backend_error"] = "Model response is incomplete: output limit or interrupted completion"
+    response_success = not bool(backend_meta.get("backend_error"))
+    confidence = (0.92 if provider == "ollama" else 0.64) if response_success else 0.0
     execution_time_ms = (time.time() - request_started) * 1000
     response_event = daise.conversation_memory.persist_agent_response(
         session_id=session_id,
@@ -632,7 +651,7 @@ def process_request_v1(
         provider=provider,
         model=str(backend_meta.get("model") or "unknown"),
         execution_time_ms=execution_time_ms,
-        success=True,
+        success=response_success,
         extras={
             "selected_agent": visible_agent,
             "runtime_agent": selected_internal,
@@ -641,6 +660,7 @@ def process_request_v1(
             "analysis_mode": mode,
             "reasoning_architecture": "model-context-memory-tools",
             "retrieval_is_evidence_only": True,
+            "backend_error": backend_meta.get("backend_error"),
             "backend_metadata": backend_meta.get("metadata") or {},
         },
         request_id=request_id,
@@ -697,7 +717,7 @@ def process_request_v1(
             event_type="request_outcome",
             payload={
                 "schema_version": "1.0",
-                "success": True,
+                "success": response_success,
                 "selected_agent": visible_agent,
                 "runtime_agent": selected_internal,
                 "provider": provider,
@@ -740,6 +760,7 @@ def process_request_v1(
         "provider": provider,
         "model": backend_meta.get("model"),
         "backend_error": backend_meta.get("backend_error"),
+        "error": backend_meta.get("backend_error"),
         "backend_metadata": backend_meta.get("metadata") or {},
         "task_type": "model_reasoning",
         "analysis_mode": mode,

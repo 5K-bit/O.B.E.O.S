@@ -120,9 +120,9 @@ class EarthRuntime:
         # non-blocking and reuses a server that is already listening.
         if not self.isolated:
             try:
-                from ..llamacpp_process import LlamaCppServerManager
+                from ..backend_warmup import BackendWarmupWorker
 
-                self.model_server = LlamaCppServerManager()
+                self.model_server = BackendWarmupWorker()
                 self.model_server.start()
             except Exception:
                 self.model_server = None

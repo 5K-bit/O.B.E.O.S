@@ -54,6 +54,20 @@ def test_chat_pane_streaming_state_and_full_reply_render():
     assert pane.analysis_select.currentData() == "standard"
 
 
+def test_stream_burst_batches_updates_but_final_response_is_immediate():
+    pane = _build_chat_pane()
+    pane._append_stream_token("Start ")
+    for _ in range(100):
+        pane._append_stream_token("word ")
+    assert pane._stream_render_timer.isActive()
+    assert "word" not in pane.transcript.toPlainText()
+    final = "Start " + "word " * 100 + "finished"
+    pane._handle_result({"status": "complete", "result": {"response": final}, "messages": []})
+    assert final in pane.transcript.toPlainText()
+    assert not pane._stream_render_timer.isActive()
+    pane.close()
+
+
 def test_chat_pane_history_renders_full_assistant_message():
     pane = _build_chat_pane()
     long_reply = "memory-context-" * 120

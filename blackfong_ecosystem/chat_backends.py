@@ -65,6 +65,19 @@ class OllamaChatBackend(BaseChatBackend):
 
     provider_name = "ollama"
 
+    @staticmethod
+    def _verify_response_model(expected: str, reported: Any) -> None:
+        if not reported:
+            return
+        def normalized(name: str) -> str:
+            return name if ":" in name.rsplit("/", 1)[-1] else name + ":latest"
+        if normalized(str(reported)) != normalized(expected):
+            raise ChatBackendError(
+                "Ollama returned a different model than requested",
+                metadata={"error_type": "model_identity_mismatch", "provider": "ollama",
+                          "model": expected, "reported_model": str(reported)},
+            )
+
     def __init__(
         self,
         base_url: str | None = None,
@@ -107,6 +120,8 @@ class OllamaChatBackend(BaseChatBackend):
         }
         if "think" in options:
             payload["think"] = bool(options["think"])
+        if "temperature" in options:
+            payload["options"]["temperature"] = float(options["temperature"])
 
         timeout = httpx.Timeout(connect=5.0, read=effective_timeout, write=30.0, pool=5.0)
         last_error: Exception | None = None
@@ -236,6 +251,7 @@ class OllamaChatBackend(BaseChatBackend):
             )
 
         data = data or {}
+        self._verify_response_model(effective_model, data.get("model"))
         content = (data.get("message") or {}).get("content", "").strip()
         if not content:
             raise_if_cancelled()
@@ -250,13 +266,18 @@ class OllamaChatBackend(BaseChatBackend):
         return ChatBackendResult(
             text=content,
             provider=self.provider_name,
-            model=data.get("model", self.model),
+            model=data.get("model") or effective_model,
             metadata={
                 "done": data.get("done"),
+                "finish_reason": data.get("done_reason"),
+                "response_complete": data.get("done") is True and data.get("done_reason") == "stop",
+                "termination": "output_limit" if data.get("done_reason") == "length" else data.get("done_reason"),
                 "total_duration": data.get("total_duration"),
                 "load_duration": data.get("load_duration"),
                 "ollama_total_duration_ms": round(float(total_duration) / 1_000_000, 2) if total_duration else None,
                 "load_duration_ms": round(float(load_duration) / 1_000_000, 2) if load_duration else None,
+                "prompt_eval_ms": round(float(data["prompt_eval_duration"]) / 1_000_000, 2) if data.get("prompt_eval_duration") is not None else None,
+                "generation_ms": round(float(data["eval_duration"]) / 1_000_000, 2) if data.get("eval_duration") is not None else None,
                 "eval_count": data.get("eval_count"),
                 "prompt_eval_count": data.get("prompt_eval_count"),
                 "keep_alive": effective_keep_alive,
@@ -302,9 +323,12 @@ class OllamaChatBackend(BaseChatBackend):
         }
         if "think" in options:
             payload["think"] = bool(options["think"])
+        if "temperature" in options:
+            payload["options"]["temperature"] = float(options["temperature"])
         timeout = httpx.Timeout(connect=5.0, read=effective_timeout, write=30.0, pool=5.0)
         wall_started = time.perf_counter()
         parts: list[str] = []
+        first_token_ms: float | None = None
         model_name = str(payload["model"])
         final_data: Dict[str, Any] = {}
         def failure_metadata(error_type: str, *, timeout_reason: str | None = None) -> Dict[str, Any]:
@@ -343,9 +367,12 @@ class OllamaChatBackend(BaseChatBackend):
                             data = json.loads(line)
                         except ValueError:
                             continue
+                        self._verify_response_model(str(payload["model"]), data.get("model"))
                         final_data = data
                         token = str((data.get("message") or {}).get("content") or "")
                         if token:
+                            if first_token_ms is None:
+                                first_token_ms = round((time.perf_counter() - wall_started) * 1000, 2)
                             parts.append(token)
                             if on_token is not None:
                                 on_token(token)
@@ -387,6 +414,12 @@ class OllamaChatBackend(BaseChatBackend):
                 f"Ollama backend unavailable: {exc}",
                 metadata=failure_metadata("unexpected_error"),
             ) from exc
+        raise_if_cancelled()
+        if not final_data.get("done"):
+            raise ChatBackendError(
+                "Ollama stream ended before provider completion",
+                metadata=failure_metadata("incomplete_stream"),
+            )
         content = "".join(parts).strip()
         if not content:
             # Some local Ollama builds accept the stream route but return no deltas.
@@ -410,11 +443,19 @@ class OllamaChatBackend(BaseChatBackend):
             metadata={
                 "mode": invocation_mode,
                 "streamed": True,
+                "first_token_ms": first_token_ms,
                 "done": final_data.get("done"),
+                "finish_reason": final_data.get("done_reason"),
+                "response_complete": final_data.get("done_reason") == "stop",
+                "termination": "output_limit" if final_data.get("done_reason") == "length" else final_data.get("done_reason"),
                 "total_duration": final_data.get("total_duration"),
                 "load_duration": final_data.get("load_duration"),
                 "ollama_total_duration_ms": round(float(final_data.get("total_duration")) / 1_000_000, 2) if final_data.get("total_duration") else None,
                 "load_duration_ms": round(float(final_data.get("load_duration")) / 1_000_000, 2) if final_data.get("load_duration") else None,
+                "prompt_eval_ms": round(float(final_data["prompt_eval_duration"]) / 1_000_000, 2) if final_data.get("prompt_eval_duration") is not None else None,
+                "generation_ms": round(float(final_data["eval_duration"]) / 1_000_000, 2) if final_data.get("eval_duration") is not None else None,
+                "num_ctx": effective_num_ctx,
+                "num_predict": effective_num_predict,
                 "eval_count": final_data.get("eval_count"),
                 "prompt_eval_count": final_data.get("prompt_eval_count"),
                 "wall_time_ms": round((time.perf_counter() - wall_started) * 1000, 2),

@@ -209,6 +209,25 @@ def build_dashboard(tmp_path: Path) -> WebDashboard:
     )
 
 
+def test_backend_error_without_top_level_error_is_failed(tmp_path, monkeypatch):
+    dashboard = build_dashboard(tmp_path)
+    original = dashboard.orchestrator.process_input
+    def failed(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result["backend_error"] = "Provider stream did not complete"
+        result.pop("error", None)
+        return result
+    monkeypatch.setattr(dashboard.orchestrator, "process_input", failed)
+    payload = dashboard.app.test_client().post("/api/chat", json={
+        "message": "hello", "background": False, "request_id": "backend-failure-contract",
+        "analysis_mode": "standard",
+    }).get_json()
+    assert payload["status"] == "error"
+    assert payload["result"]["error"] == "Provider stream did not complete"
+    state = dashboard.request_states[payload["request_id"]]
+    assert state["status"] == "error"
+
+
 def test_background_chat_returns_immediate_acceptance_and_completes(tmp_path: Path):
     dashboard = build_dashboard(tmp_path)
     client = dashboard.app.test_client()

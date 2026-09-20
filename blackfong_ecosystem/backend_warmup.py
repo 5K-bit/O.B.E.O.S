@@ -22,8 +22,7 @@ def warm_ollama_model(
     timeout: float = 45.0,
 ) -> Dict[str, Any]:
     """Ping Ollama to load a model into memory."""
-    fast_chain = chat_settings.fast_model_chain()
-    target_model = model or (fast_chain[0] if fast_chain else chat_settings.model_for_agent("daise"))
+    target_model = model or chat_settings.model_for_agent("daise")
     target_keep_alive = keep_alive or chat_settings.fast_keep_alive
     base_url = chat_settings.ollama_url.rstrip("/")
     payload = {
@@ -31,14 +30,16 @@ def warm_ollama_model(
         "messages": [{"role": "user", "content": "ping"}],
         "stream": False,
         "keep_alive": target_keep_alive,
-        "options": {"num_predict": 8, "num_ctx": 2048},
+        "options": {"num_predict": 8, "num_ctx": chat_settings.daise_num_ctx},
     }
     started = time.perf_counter()
     try:
-        with httpx.Client(timeout=httpx.Timeout(connect=5.0, read=timeout, write=10.0, pool=5.0)) as client, cancellation_resource(client.close):
+        with httpx.Client(timeout=httpx.Timeout(connect=5.0, read=timeout, write=10.0, pool=5.0), trust_env=False) as client, cancellation_resource(client.close):
             raise_if_cancelled()
             response = client.post(f"{base_url}/api/chat", json=payload)
             response.raise_for_status()
+            if response.json().get("model") != target_model:
+                raise RuntimeError("Warmup endpoint returned a different model")
         elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
         return {
             "status": "ready",
@@ -46,6 +47,8 @@ def warm_ollama_model(
             "elapsed_ms": elapsed_ms,
             "keep_alive": target_keep_alive,
         }
+    except RequestCancelled:
+        raise
     except Exception as exc:
         logger.debug("Ollama warmup failed for %s: %s", target_model, exc)
         return {
@@ -85,6 +88,15 @@ def warm_model_chain(
     return results[-1] if results else {"status": "error", "error": "no models configured"}
 
 
+def warm_selected_model() -> Dict[str, Any]:
+    """Warm exactly the configured conversation lane, never a fallback chain."""
+    if chat_settings.daise_backend == "llamacpp":
+        from .llamacpp_process import wait_for_local_model
+        return wait_for_local_model()
+    return warm_ollama_model(model=chat_settings.model_for_agent("daise"),
+                             timeout=chat_settings.ollama_timeout)
+
+
 class BackendWarmupWorker:
     """Background Ollama warmup with status callback."""
 
@@ -101,7 +113,7 @@ class BackendWarmupWorker:
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
-        self._result = {"status": "warming", "message": "Warming fast chat model…"}
+        self._result = {"status": "warming", "message": "Loading the selected D.A.I.S.E. model"}
         if self._on_status is not None:
             self._on_status(self._result)
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -110,9 +122,11 @@ class BackendWarmupWorker:
     def _run(self) -> None:
         try:
             with cancellation_scope(self._cancel):
-                outcome = warm_model_chain()
+                outcome = warm_selected_model()
         except RequestCancelled:
             return
+        except Exception as exc:
+            outcome = {"status": "error", "error": str(exc)}
         if self._cancel.cancelled:
             return
         self._result = outcome

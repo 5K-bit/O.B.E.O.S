@@ -16,6 +16,7 @@ import httpx
 from .cancellation import RequestCancelled, cancellation_resource, raise_if_cancelled
 from .chat_backends import BaseChatBackend, ChatBackendError, ChatBackendResult
 from .config import llamacpp_settings
+from .model_readiness import verify_llamacpp
 
 
 class LlamaCppChatBackend(BaseChatBackend):
@@ -39,6 +40,19 @@ class LlamaCppChatBackend(BaseChatBackend):
 
     def _client(self, timeout: httpx.Timeout) -> httpx.Client:
         return httpx.Client(timeout=timeout, **({"trust_env": False} if not self.trust_env else {}))
+
+    def _ensure_ready(self, client, model):
+        try:
+            verify_llamacpp(client, self.base_url, model)
+        except ChatBackendError as exc:
+            if (exc.metadata.get("error_type") != "endpoint_not_ready"
+                    or self.base_url != llamacpp_settings.base_url.rstrip("/")
+                    or model != llamacpp_settings.model_alias):
+                raise
+            from .llamacpp_process import wait_for_local_model
+            wait_for_local_model()
+            raise_if_cancelled()
+            verify_llamacpp(client, self.base_url, model)
 
     def generate(self, messages: Sequence[Dict[str, str]], **options: Any) -> ChatBackendResult:
         effective_timeout = float(options.get("timeout") or self.timeout)
@@ -69,6 +83,7 @@ class LlamaCppChatBackend(BaseChatBackend):
         try:
             with self._client(timeout) as client, cancellation_resource(getattr(client, "close", lambda: None)):
                 raise_if_cancelled()
+                self._ensure_ready(client, effective_model)
                 response = client.post(f"{self.base_url}/v1/chat/completions", json=payload)
                 response.raise_for_status()
                 data = response.json()
@@ -92,6 +107,8 @@ class LlamaCppChatBackend(BaseChatBackend):
                 f"llama.cpp backend unavailable: {exc}",
                 metadata=failure_metadata("http_error"),
             ) from exc
+        except ChatBackendError:
+            raise
         except RequestCancelled:
             raise
         except Exception as exc:  # pragma: no cover - defensive
@@ -128,6 +145,7 @@ class LlamaCppChatBackend(BaseChatBackend):
         parts: list[str] = []
         reasoning_parts: list[str] = []
         finish_reason: Optional[str] = None
+        first_token_ms: Optional[float] = None
 
         def failure_metadata(error_type: str) -> Dict[str, Any]:
             return {
@@ -141,6 +159,8 @@ class LlamaCppChatBackend(BaseChatBackend):
 
         try:
             with self._client(timeout) as client, cancellation_resource(getattr(client, "close", lambda: None)):
+                raise_if_cancelled()
+                self._ensure_ready(client, effective_model)
                 with client.stream("POST", f"{self.base_url}/v1/chat/completions", json=payload) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():
@@ -161,6 +181,8 @@ class LlamaCppChatBackend(BaseChatBackend):
                         finish_reason = choices[0].get("finish_reason") or finish_reason
                         token = str(delta.get("content") or "")
                         if token:
+                            if first_token_ms is None:
+                                first_token_ms = round((time.perf_counter() - wall_started) * 1000, 2)
                             parts.append(token)
                             if on_token is not None:
                                 on_token(token)
@@ -197,6 +219,12 @@ class LlamaCppChatBackend(BaseChatBackend):
                 metadata=failure_metadata("unexpected_error"),
             ) from exc
 
+        raise_if_cancelled()
+        if finish_reason is None:
+            raise ChatBackendError(
+                "llama.cpp stream ended without a provider finish reason; response is incomplete",
+                metadata=failure_metadata("incomplete_stream"),
+            )
         content = "".join(parts).strip()
         if not content:
             raise_if_cancelled()
@@ -213,6 +241,9 @@ class LlamaCppChatBackend(BaseChatBackend):
                 "streamed": True,
                 "reasoning_content": "".join(reasoning_parts) or None,
                 "finish_reason": finish_reason,
+                "response_complete": finish_reason == "stop",
+                "termination": "output_limit" if finish_reason == "length" else finish_reason,
+                "first_token_ms": first_token_ms,
                 "wall_time_ms": wall_time_ms,
             },
         )
@@ -249,6 +280,8 @@ class LlamaCppChatBackend(BaseChatBackend):
             metadata={
                 "reasoning_content": reasoning_content,
                 "finish_reason": choices[0].get("finish_reason"),
+                "response_complete": choices[0].get("finish_reason") == "stop",
+                "termination": "output_limit" if choices[0].get("finish_reason") == "length" else choices[0].get("finish_reason"),
                 "prompt_eval_count": usage.get("prompt_tokens"),
                 "eval_count": usage.get("completion_tokens"),
                 "wall_time_ms": wall_time_ms,

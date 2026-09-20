@@ -164,6 +164,9 @@ def create_app(
     from earthglass.spatial.local_maps import map_router
 
     app.include_router(map_router(data_dir / "maps" / "nyc"))
+    from earthglass.spatial.reference_maps import reference_router
+
+    app.include_router(reference_router(data_dir / "maps" / "reference"))
     from .daise import EarthOrchestration
 
     daise = EarthOrchestration(control)

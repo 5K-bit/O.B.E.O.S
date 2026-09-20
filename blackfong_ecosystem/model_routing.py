@@ -303,7 +303,7 @@ def _is_daise_agent(agent_name: str) -> bool:
 
 
 def build_daise_llamacpp_backend() -> Optional[BaseChatBackend]:
-    """Return a ready llama.cpp backend for D.A.I.S.E., or None if unavailable.
+    """Return the selected llama.cpp backend; readiness is checked at invocation.
 
     Only used for the daise/jarvis agent slot: llama-server is a dedicated,
     single-model process for the edited Gemma model, kept separate from the
@@ -316,8 +316,6 @@ def build_daise_llamacpp_backend() -> Optional[BaseChatBackend]:
     from .llamacpp_backend import LlamaCppChatBackend
 
     if getattr(_current_chat_settings, "daise_backend", "ollama").strip().lower() != "llamacpp":
-        return None
-    if not llamacpp_settings.enabled or not llamacpp_settings.is_configured():
         return None
     return LlamaCppChatBackend(
         base_url=llamacpp_settings.base_url,
@@ -336,12 +334,10 @@ def build_routed_chat_backend(agent_name: str, response_mode: str) -> BaseChatBa
         llamacpp_backend = build_daise_llamacpp_backend()
         if llamacpp_backend is not None:
             return llamacpp_backend
-        # llama.cpp not up/configured on this machine yet — fall back to the
-        # existing Ollama-routed path rather than losing D.A.I.S.E. entirely.
 
     chain = model_chain_for_agent(agent_name, response_mode)
     primary = chain[0]
-    fallbacks = chain[1:]
+    fallbacks = [] if _is_daise_agent(agent_name) else chain[1:]
     options = backend_options_for_context({"analysis_mode": response_mode}, agent_name)
     return OllamaRoutingChatBackend(
         model=primary,

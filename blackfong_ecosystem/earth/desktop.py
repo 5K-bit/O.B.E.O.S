@@ -201,6 +201,8 @@ def main(argv=None):
             self.drawer.setWidget(self.details)
             self.addDockWidget(Qt.BottomDockWidgetArea, self.drawer)
             self.drawer.hide()
+            from blackfong_ecosystem.floating_panel_focus import FloatingPanelFocus
+            self.panel_focus = FloatingPanelFocus(self)
             QTimer.singleShot(0, self.start_runtime)
 
         def start_runtime(self):

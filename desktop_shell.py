@@ -439,6 +439,10 @@ class ChatPane(QWidget):
         self.session_id: Optional[str] = None
         self._worker: Optional[ChatWorker] = None
         self._streaming_buffer = ""
+        self._stream_render_timer = QTimer(self)
+        self._stream_render_timer.setSingleShot(True)
+        self._stream_render_timer.setInterval(50)
+        self._stream_render_timer.timeout.connect(self._render_stream_buffer)
         self._stream_inserted = False
         self._stream_start = 0
         self._last_analysis_mode = "standard"
@@ -648,6 +652,18 @@ class ChatPane(QWidget):
         if self._chat_state in {"cancelled", "failed", "complete"}:
             return
         self._streaming_buffer += str(token)
+        self._set_chat_state("streaming", "receiving reply")
+        if not self._stream_inserted:
+            self._render_stream_buffer()
+        elif not self._stream_render_timer.isActive():
+            self._stream_render_timer.start()
+
+    def _render_stream_buffer(self) -> None:
+        if self._chat_state in {"cancelled", "failed", "complete"}:
+            return
+        scrollbar = self.transcript.verticalScrollBar()
+        previous_scroll = scrollbar.value()
+        follow = scrollbar.maximum() - previous_scroll <= 40
         cursor = self.transcript.textCursor()
         if not self._stream_inserted:
             cursor.movePosition(QTextCursor.End)
@@ -659,11 +675,15 @@ class ChatPane(QWidget):
         cursor.removeSelectedText()
         cursor.insertHtml(self._message_card_html(role="assistant", text=self._streaming_buffer, agent="daise"))
         cursor.movePosition(QTextCursor.End)
-        self.transcript.setTextCursor(cursor)
-        self._scroll_transcript_to_end()
+        if follow:
+            self.transcript.setTextCursor(cursor)
+            self._scroll_transcript_to_end()
+        else:
+            scrollbar.setValue(previous_scroll)
         self._set_chat_state("streaming", "receiving reply")
 
     def _handle_result(self, payload: Dict[str, Any]) -> None:
+        self._stream_render_timer.stop()
         self.send_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.chat_finished.emit(payload)
@@ -1735,7 +1755,7 @@ class MainWindow(QMainWindow):
         self._llamacpp_worker = LlamaCppServerManager()
         if start_background:
             self._warmup_worker.start()
-            self._llamacpp_worker.start()
+            # BackendWarmupWorker starts only the selected shared model lane.
         self._live_connected = False
         self._live_refresh_pending = False
         self._live_stream = DesktopLiveStreamWorker(parent=self)

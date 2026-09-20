@@ -439,6 +439,8 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
             prompt_budget_tokens = prompt_budget_tokens or chat_settings.deep_prompt_budget_tokens
 
         session_messages = self.get_session_messages(session_id, limit=transcript_limit * 2)
+        session_messages = [message for message in session_messages
+                            if message.get("prompt_eligible", True)]
         session_summaries = self._get_session_summaries(session_id, limit=summary_limit)
         memory_query = "" if (skip_vector_search or recall_kind is not None) else query
         global_memories = self.list_global_memories(
@@ -1306,11 +1308,11 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
         events = self.event_store.list_events_for_session(
             session_id,
             types=["agent_query", "agent_response", "operator_action_result"],
-            ascending=True,
+            ascending=False,
             limit=limit,
         )
         messages = []
-        for event in events:
+        for event in reversed(events):
             text = str(event.payload.get("text") or event.payload.get("response") or "")
             if event.type == "agent_response":
                 role = "assistant"
@@ -1327,9 +1329,28 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
                     "agent": event.payload.get("agent") or event.payload.get("owned_by") or event.source,
                     "timestamp": event.timestamp / 1000.0,
                     "metadata": event.metadata,
+                    "prompt_eligible": self._response_prompt_eligible(event.type, event.payload),
                 }
             )
         return messages[-limit:]
+
+    @staticmethod
+    def _response_prompt_eligible(event_type: str, payload: Dict[str, Any]) -> bool:
+        if event_type != "agent_response":
+            return True
+        metadata = payload.get("backend_metadata") or payload.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return not (
+            payload.get("error") or payload.get("backend_error")
+            or payload.get("success") is False
+            or payload.get("status") in {"error", "failed", "cancelled"}
+            or payload.get("demonstrably_incorrect") is True
+            or payload.get("response_complete") is False
+            or metadata.get("response_complete") is False
+            or metadata.get("finish_reason") == "length"
+            or metadata.get("fallback_mode") in {"reactive", "preemptive"}
+        )
 
     def list_sessions(self, limit: int = 100) -> List[Dict[str, Any]]:
         sessions = self.event_store.list_recent_sessions(limit=limit)
@@ -5209,6 +5230,7 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
         return list(reversed(summaries))
 
     def _summarize_messages(self, messages: List[Dict[str, Any]]) -> str:
+        messages = [message for message in messages if message.get("prompt_eligible", True)]
         if not messages:
             return ""
         user_messages = [message["text"] for message in messages if message["role"] == "user"]

@@ -846,7 +846,7 @@ class DAISE(ReportOrchestration):
                 provider=top_report.provider,
                 model=top_report.model,
                 execution_time_ms=execution_time_ms,
-                success=True,
+                success=not bool(top_report.backend_error),
                 extras={
                     "selected_agent": selected_agent,
                     "consulted_agents": candidate_agents,
@@ -945,7 +945,7 @@ class DAISE(ReportOrchestration):
                 event_type="request_outcome",
                 payload={
                     "schema_version": "1.0",
-                    "success": True,
+                    "success": not bool(top_report.backend_error),
                     "decision_state": "approve",
                     "selected_agent": selected_agent,
                     "output_agent": output_agent,
@@ -989,7 +989,7 @@ class DAISE(ReportOrchestration):
 
             decision_quality_controller.record_execution_result(
                 correlation_id=correlation_id,
-                execution_success=True,
+                execution_success=not bool(top_report.backend_error),
                 execution_duration=execution_time_ms / 1000.0,
             )
 
@@ -1018,6 +1018,7 @@ class DAISE(ReportOrchestration):
                 "model": top_report.model,
                 "backend_error": top_report.backend_error,
                 "backend_metadata": top_report.backend_metadata,
+                "error": top_report.backend_error,
                 "task_type": top_report.task_type,
                 "analysis_mode": analysis_mode,
                 "routing_confidence": routing_confidence,
@@ -1484,13 +1485,19 @@ class DAISE(ReportOrchestration):
             "study for",
             "study plan",
             "exam prep",
-            "certification",
             "test me on",
+            "quiz me",
+            "help me study",
+            "practice questions",
+            "practice exam",
         )
         if any(phrase in lower_input for phrase in clear_phrases):
             return True
-        training_markers = ("study", "exam", "quiz", "certification", "progress", "topic", "pcep")
-        return sum(1 for marker in training_markers if marker in lower_input) >= 1
+        # A topic mention or runtime "progress" question is not consent to a
+        # training session. Explicit agent overrides are handled separately.
+        return bool(re.search(
+            r"\b(?:start|begin|resume|continue)\s+(?:(?:a|the|my)\s+)?"
+            r"(?:quiz|training|study session|exam practice)\b", lower_input))
 
     @staticmethod
     def _is_learning_intent(lower_input: str) -> bool:

@@ -389,15 +389,17 @@ class WebDashboard:
 
     def _warm_backend_services(self) -> None:
         try:
-            from .backend_warmup import warm_model_chain
+            from .backend_warmup import warm_selected_model
 
-            warm_model_chain()
+            model_outcome = warm_selected_model()
             ready = self._ensure_orchestrator()
+            ready = ready and model_outcome.get("status") == "ready"
             self.backend_bootstrap.update(
                 {
                     "status": "ready" if ready else "error",
                     "completed_at": time.time(),
-                    "error": None if ready else "Unified orchestrator is unavailable",
+                    "error": None if ready else (model_outcome.get("error") or "Model or orchestrator is unavailable"),
+                    "model_lifecycle": model_outcome,
                 }
             )
         except Exception as exc:  # pragma: no cover - defensive startup path
@@ -2489,9 +2491,17 @@ class WebDashboard:
                 },
             )
 
-        result = self.orchestrator.process_input(
-            message,
-            input_modality,
+        from .operator_chat import OperatorChatService
+
+        chat_payload = OperatorChatService(memory_service=self.memory_service, orchestrator=self.orchestrator).send_message(
+            message=message,
+            session_id=session_id,
+            request_id=request_id,
+            agent_override=agent_override,
+            analysis_mode=analysis_mode,
+            include_messages=False,
+            include_trace=False,
+            include_memory=False,
             context={
                 "session_id": session_id,
                 "request_id": request_id,
@@ -2505,6 +2515,11 @@ class WebDashboard:
                 "stream_callback": stream_callback,
             },
         )
+        if "result" not in chat_payload:
+            raise RuntimeError(chat_payload.get("error") or "Chat request was not admitted")
+        result = chat_payload["result"]
+        if result.get("backend_error") and not result.get("error"):
+            result = {**result, "error": result["backend_error"]}
         if result.get("fast_path"):
             self._publish_live_event(
                 "chat_phase",
@@ -2659,7 +2674,7 @@ class WebDashboard:
         except Exception:
             logger.exception("Failed to publish memory_retrieval live event")
         return {
-            "status": "error" if result.get("error") else "complete",
+            "status": "error" if result.get("error") or result.get("backend_error") else "complete",
             "session_id": session_id,
             "request_id": request_id,
             "transport": transport,
