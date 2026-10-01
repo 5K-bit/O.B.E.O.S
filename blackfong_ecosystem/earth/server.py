@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from earthglass.spatial.api import build_router
 from earthglass.spatial.models import Viewport
 
+from ..json_utils import make_json_compatible
 from .contracts import Annotation, Goto
 
 GEOJSON_GEOMETRY = {"Point": "point", "LineString": "line", "Polygon": "polygon"}
@@ -101,6 +102,17 @@ class ExplanationRequest(BaseModel):
         min_length=1,
         max_length=2000,
     )
+
+
+class ChatRequest(BaseModel):
+    """Operator chat from the Earth overlay. Mirrors ExplanationRequest's shape, but
+    unlike daise.explain this carries session identity, so turns accumulate in the
+    operator's shared conversation rather than standing alone."""
+
+    model_config = ConfigDict(extra="forbid")
+    message: str = Field(min_length=1, max_length=4000)
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
+    analysis_mode: Literal["fast", "standard", "deep"] = "standard"
 
 
 class RenderMetrics(BaseModel):
@@ -298,6 +310,36 @@ def create_app(
     @app.post("/api/daise/explain")
     def explain(payload: ExplanationRequest):
         return daise.explain(payload.question)
+
+    @app.post("/api/chat")
+    def chat(payload: ChatRequest):
+        service = getattr(app.state, "operator_chat", None)
+        if service is None:
+            # Deferred to first message, not import or create_app: importing
+            # operator_chat constructs a ConversationMemoryService at module scope,
+            # and send_message loads the unified orchestrator on its first call.
+            # Earth is documented as booting with no model warmup, so neither may
+            # land in the startup path.
+            try:
+                from ..operator_chat import OperatorChatService
+            except Exception as exc:
+                return {
+                    "status": "error",
+                    "error": "Operator chat is unavailable in this build.",
+                    "reason": type(exc).__name__,
+                }
+            service = OperatorChatService()
+            app.state.operator_chat = service
+        result = service.send_message(
+            message=payload.message,
+            session_id=payload.session_id,
+            analysis_mode=payload.analysis_mode,
+            include_trace=False,
+            context={"input_origin": "earth", "transport": "earth_overlay"},
+        )
+        # The orchestrator reply carries arbitrary objects; FastAPI's encoder would
+        # raise on them, which would lose the whole turn rather than one field.
+        return make_json_compatible(result)
 
     @app.post("/api/viewport")
     def viewport(payload: ViewUpdate):
