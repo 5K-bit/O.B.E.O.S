@@ -141,10 +141,22 @@ def _memory_evidence(bundle: Mapping[str, Any]) -> list[dict[str, Any]]:
                 evidence.append({"kind": key, **dict(value)})
             else:
                 evidence.append({"kind": key, "value": str(value)})
+    for key in ("grounded_memory_answer", "grounded_knowledge_answer", "grounded_conversation_answer"):
+        grounded = bundle.get(key)
+        if isinstance(grounded, Mapping) and str(grounded.get("answer") or "").strip():
+            evidence.append({"kind": key, "frame": grounded.get("kind"), "answer": str(grounded["answer"])})
     graph = bundle.get("cognition_graph")
     if isinstance(graph, Mapping) and graph:
         evidence.append({"kind": "cognition_graph", "value": dict(graph)})
     return evidence
+
+
+def _backend_error_type(backend_meta: Mapping[str, Any]) -> str | None:
+    """The backend's own failure class (e.g. ``endpoint_not_ready``), not its message."""
+    metadata = backend_meta.get("metadata") or {}
+    primary = metadata.get("primary_backend_metadata") or {}
+    value = primary.get("error_type") or metadata.get("error_type")
+    return str(value) if value else None
 
 
 def _safe_json(value: Any, *, max_chars: int = 14000) -> str:
@@ -240,11 +252,18 @@ def process_request_v1(
         prior_session_context = False
         prompt_tokens = set(str(user_input or "").lower().split())
     explicit_identity_query = bool(prompt_tokens.intersection({"identity", "name", "daise", "assistant", "stand", "call", "called"}))
+    # Deterministic runtime facts (clock, status, work ledger) are evidence for the
+    # model, never the reply. ``allow_deterministic_evidence=False`` skips them.
+    grounded_evidence_allowed = context.get("allow_deterministic_evidence", True) is not False
     truth_probe = getattr(daise, "_grounded_truth_response", None)
+    probed_truth: dict[str, Any] | None = None
     try:
-        probed_truth = truth_probe(user_input, session_id=session_id) if callable(truth_probe) else None
+        if callable(truth_probe) and grounded_evidence_allowed:
+            probed = truth_probe(user_input, session_id=session_id)
+            probed_truth = dict(probed) if isinstance(probed, Mapping) else None
         probed_truth_kind = str((probed_truth or {}).get("kind") or "")
     except Exception:
+        probed_truth = None
         probed_truth_kind = ""
     defer_memory_system_to_recall = bool(
         memory_query_kind
@@ -257,23 +276,7 @@ def process_request_v1(
         and (probed_truth_kind == "identity" or defer_memory_system_to_recall)
     )
 
-    grounded_truth_handler = getattr(daise, "_handle_grounded_truth_request", None)
-    grounded_evidence_allowed = bool(context.get("allow_deterministic_evidence", True))
-    if callable(grounded_truth_handler) and mode != "deep" and not defer_truth_to_memory and grounded_evidence_allowed:
-        grounded_result = grounded_truth_handler(
-            user_input=user_input,
-            modality=modality,
-            context={**context, "analysis_mode": mode},
-            policy_decision=policy_decision,
-            session_id=session_id,
-            correlation_id=correlation_id,
-            request_id=request_id,
-            request_started=request_started,
-            progress_callback=context.get("progress_callback"),
-        )
-        if grounded_result is not None:
-            grounded_result.setdefault("runtime_agent", "jarvis")
-            return grounded_result
+    runtime_truth = None if defer_truth_to_memory else probed_truth
 
     continuity_routing_hint = None
     continuity_hint_builder = getattr(daise, "_continuity_routing_hint", None)
@@ -404,6 +407,8 @@ def process_request_v1(
 
     conversation = _normalize_conversation(bundle)
     evidence = _memory_evidence(bundle)
+    if not grounded_evidence_allowed:
+        evidence = [item for item in evidence if not str(item.get("kind", "")).startswith("grounded_")]
 
     graph_bundle = bundle.get("cognition_graph") or {}
     retrieval_profile = bundle.get("retrieval_profile") or context.get("retrieval_profile") or mode
@@ -460,29 +465,6 @@ def process_request_v1(
     except Exception:
         pass
 
-    grounded_memory_handler = getattr(daise, "_handle_grounded_memory_bundle", None)
-    if callable(grounded_memory_handler) and grounded_evidence_allowed:
-        grounded_memory_result = grounded_memory_handler(
-            user_input=user_input,
-            modality=modality,
-            context={**context, "analysis_mode": mode},
-            policy_decision=policy_decision,
-            session_id=session_id,
-            correlation_id=correlation_id,
-            request_id=request_id,
-            request_started=request_started,
-            progress_callback=context.get("progress_callback"),
-            query_event=query_event,
-            retrieval_profile=str(retrieval_profile),
-            analysis_mode=mode,
-            memory_bundles={selected_internal: bundle},
-            suggested_agent=selected_internal,
-            candidate_agents=[selected_internal],
-        )
-        if grounded_memory_result is not None:
-            grounded_memory_result.setdefault("runtime_agent", selected_internal)
-            return grounded_memory_result
-
     system_state: dict[str, Any] = {}
     if isinstance(context.get("system_state"), Mapping):
         system_state.update(dict(context["system_state"]))
@@ -498,7 +480,7 @@ def process_request_v1(
 
     def model_callable(text: str, reasoning_context: ReasoningContext) -> str:
         nonlocal backend_meta
-        from ..daise_identity import IDENTITY_AND_TRUTH_PROMPT
+        from ..daise_identity import IDENTITY_AND_TRUTH_PROMPT, runtime_truth_message
         from ..cancellation import RequestCancelled
         system_prompt = (
             IDENTITY_AND_TRUTH_PROMPT +
@@ -521,6 +503,9 @@ def process_request_v1(
             messages.append({"role": "system", "content": "Current OBEOS state when relevant:\n" + _safe_json(reasoning_context.system_state, max_chars=8000)})
         if reasoning_context.tool_results:
             messages.append({"role": "system", "content": "Tool results:\n" + _safe_json(reasoning_context.tool_results, max_chars=8000)})
+        truth_message = runtime_truth_message(runtime_truth)
+        if truth_message is not None:
+            messages.append(truth_message)
         messages.append({"role": "user", "content": text})
 
         backend = build_routed_chat_backend(selected_internal, mode)
@@ -567,6 +552,7 @@ def process_request_v1(
                     "correlation_id": correlation_id,
                     "request_id": request_id,
                     "memory_context": bundle,
+                    "runtime_truth": runtime_truth,
                     "daise_selected_candidates": [selected_internal],
                 },
             )
@@ -702,6 +688,19 @@ def process_request_v1(
     }
 
     try:
+        observe_truth = getattr(daise, "_persist_runtime_truth_observation", None)
+        if runtime_truth and callable(observe_truth):
+            observe_truth(
+                runtime_truth,
+                session_id=session_id,
+                correlation_id=correlation_id,
+                request_id=request_id,
+                parent_event_id=query_event.id,
+            )
+    except Exception:
+        pass
+
+    try:
         daise.conversation_memory.persist_workflow_event(
             source="daise",
             event_type="latency_observation",
@@ -737,6 +736,7 @@ def process_request_v1(
                 "selected_model": latency_payload["selected_model"],
                 "model_chain": latency_payload["model_chain"],
                 "effective_timeout_s": latency_payload["effective_timeout_s"],
+                "grounded_truth_kind": (runtime_truth or {}).get("kind"),
             },
             confidence=confidence,
             session_id=session_id,
@@ -762,7 +762,12 @@ def process_request_v1(
         "model": backend_meta.get("model"),
         "backend_error": backend_meta.get("backend_error"),
         "error": backend_meta.get("backend_error"),
+        "error_type": _backend_error_type(backend_meta) if backend_meta.get("backend_error") else None,
         "backend_metadata": backend_meta.get("metadata") or {},
+        "runtime_truth": (
+            {key: runtime_truth.get(key) for key in ("kind", "source", "observation")}
+            if runtime_truth else None
+        ),
         "task_type": "model_reasoning",
         "analysis_mode": mode,
         "reasoning_architecture": "model-context-memory-tools",

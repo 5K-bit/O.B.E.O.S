@@ -777,6 +777,13 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
         if frame is None:
             return None
 
+        # Project-specific narrative templates are not general conversation
+        # evidence. Ordinary plans and questions must use their actual history.
+        if frame != "followup":
+            topic = str(query or "").lower().replace(".", "")
+            if not re.search(r"\b(?:obeos|daise|blackfong)\b", topic):
+                return None
+
         started = time.perf_counter()
         resolved_retrieval_profile = normalize_retrieval_profile(retrieval_profile, analysis_mode)
         summaries = list(session_summaries or self._get_session_summaries(session_id, limit=3))

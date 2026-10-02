@@ -695,9 +695,18 @@ class ChatPane(QWidget):
             self._stream_inserted = False
             return
         if payload.get("status") == "error":
-            self._set_chat_state("failed", payload.get("error") or "chat failed")
+            failed_result = payload.get("result") or {}
+            reason = str(payload.get("error") or failed_result.get("error")
+                         or failed_result.get("backend_error") or "Chat failed")
+            partial = bool(self._streaming_buffer.strip())
+            if partial:
+                self._render_stream_buffer()
+            self._stream_inserted = False
+            self._streaming_buffer = ""
+            self._set_chat_state("failed", reason)
+            detail = ("Incomplete reply. " if partial else "") + reason
             self.transcript.append(
-                f"<div style='color:#d9be87'><strong>System</strong><br/>{_html(payload.get('error') or 'Chat failed')}</div>"
+                f"<div style='color:#d9be87'><strong>System</strong><br/>{_html(detail)}</div>"
             )
             self._scroll_transcript_to_end()
             return

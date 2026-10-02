@@ -320,3 +320,47 @@ The supplied Spawn fixture is not evidence of installed-source retrieval.
   warnings). Fresh live verification is still required; other fallback/error
   promotion paths and backend-health counting must be audited before rerunning
   acceptance. No model selection or completion claim is justified by this run.
+
+## Removed self-renewing timeout evidence
+
+- Health aggregation was counting copied timeout text from preemptive fallback
+  as a new provider timeout and advancing latest_failure_at. This could renew
+  the degraded window even when no live call happened.
+- Skipped live turns now count only as fallback usage, not fresh failures.
+  Two new regressions passed in 4.62 seconds: one real timeout plus eight skipped
+  calls remains one timeout; skipped calls cannot refresh expired evidence.
+- Five existing transport-health/repeated-failure tests passed in 10.28 seconds,
+  with two existing Pydantic warnings. Real sustained failures still retain the
+  threshold behavior. Live recovery after these changes is not yet verified.
+
+## HUD final-payload race reproduced
+
+- Started isolated HUD route run `stack-06d8ebd676124b2194a29e67aa0a8334`.
+  First two polls reported complete with result=null. This invalidates final
+  payload acceptance even though model processing had produced completion events.
+- Trace snapshots now remain pending/finalizing until request state has a
+  completed_at timestamp, which is written alongside the final response payload.
+  The harness also refuses complete-with-null-result. Added boundary regression;
+  HUD tests are currently running. Existing live process predates this patch
+  and must not be treated as verification of the fix.
+
+## Project narrative scope
+
+- HUD finalizing regression completed: five passed in 52.58 seconds, two
+  existing Pydantic warnings.
+- Restricted non-followup project narrative generation to explicit OBEOS,
+  DAISE or Blackfong questions. Generic plans/questions previously matched broad
+  mission/value frames and received irrelevant project claims as prompt evidence.
+  Added three general-topic regressions; that test process is still running.
+- HUD live run reached eight turns on its original loaded code; null-result
+  snapshots remain evidence of the pre-patch race, not an accepted UI result.
+
+## September 30 desktop error delivery
+
+- Shared chat error payloads now expose the actual nested backend failure at the
+  top level. Desktop also reads nested errors for compatibility with older payloads.
+- Buffered streamed text is rendered before failure is displayed, explicitly
+  marked incomplete, and late tokens cannot turn the failed reply into success.
+- Native offscreen rendering regressions: 10 passed in 36.00 seconds, two existing
+  Pydantic warnings. Diff whitespace check passed. These are mocked UI regressions,
+  not renewed live-model acceptance. No cloud deployment performed.

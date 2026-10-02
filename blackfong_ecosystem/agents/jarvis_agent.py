@@ -21,7 +21,12 @@ from blackfong_ecosystem.chat_backends import (
     build_agent_chat_backend,
 )
 from blackfong_ecosystem.config import chat_settings
-from blackfong_ecosystem.daise_identity import IDENTITY_AND_TRUTH_PROMPT
+from blackfong_ecosystem.daise_identity import (
+    IDENTITY_AND_TRUTH_PROMPT,
+    grounded_answer_message,
+    runtime_truth_message,
+)
+from blackfong_ecosystem.history_budget import estimated_tokens, recent_history
 from blackfong_ecosystem.conversation_memory import conversation_memory_service
 from blackfong_ecosystem.model_routing import (
     backend_options_for_context,
@@ -31,6 +36,10 @@ from blackfong_ecosystem.model_routing import (
 )
 from blackfong_ecosystem.event_client import EventClient
 from blackfong_ecosystem.tool_dispatcher import ToolDispatcher
+
+
+# Raw transcript messages kept for quick-mode turns (still token-budgeted).
+QUICK_TRANSCRIPT_FLOOR = 6
 
 
 class JARVISAgent(Agent):
@@ -221,33 +230,6 @@ class JARVISAgent(Agent):
     
     def _generate_response(self, user_input: str, context: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         """Generate a response with the configured local backend and safe fallback."""
-        grounded = self._grounded_memory_response(context) or self._grounded_knowledge_response(
-            context,
-            user_input=user_input,
-        )
-        if grounded is not None:
-            prompt_metrics = dict(((context.get("memory_context") or {}).get("prompt_metrics") or {}))
-            metadata = dict(grounded["metadata"])
-            metadata["prompt_metrics"] = prompt_metrics
-            metadata.setdefault("prompt_message_count", 0)
-            metadata.setdefault("prompt_chars", 0)
-            metadata.setdefault("approx_prompt_tokens", 0)
-            metadata.setdefault("streamed", False)
-            metadata.setdefault("health_forced_fallback", False)
-            metadata.setdefault("backend_health_state_at_request", (context.get("backend_health") or {}).get("state"))
-            metadata.setdefault("recovery_probe_attempted", False)
-            metadata.setdefault("recovery_probe_succeeded", False)
-            metadata.setdefault("degraded_reason", None)
-            metadata.setdefault("recovery_reason", None)
-            metadata.setdefault("timeout_window_seconds", None)
-            metadata.setdefault("live_lane_attempted", False)
-            metadata.setdefault("fallback_mode", "none")
-            return grounded["answer"], {
-                "provider": grounded["provider"],
-                "model": grounded["model"],
-                "metadata": metadata,
-                "backend_error": None,
-            }
         messages, prompt_metrics = self._build_chat_messages(user_input, context)
         generation_mode = self._effective_generation_mode(user_input, context)
         backend_context = dict(context)
@@ -998,12 +980,9 @@ class JARVISAgent(Agent):
         grounded_conversation = memory_context.get("grounded_conversation_answer") or {}
         prompt_mode = str(memory_context.get("prompt_mode") or memory_context.get("memory_profile", {}).get("prompt_mode") or "standard")
         agent_override = context.get("agent_override")
-        transcript_limit = 0 if prompt_mode.startswith("quick") else min(
-            len(session_messages),
-            4 if prompt_mode == "standard" else chat_settings.transcript_window,
-        )
+        # Quick turns still need the last few exchanges to resolve terse follow-ups.
         transcript_messages = self._sanitize_session_messages(
-            session_messages[-transcript_limit:] if transcript_limit else [],
+            session_messages[-QUICK_TRANSCRIPT_FLOOR:] if prompt_mode.startswith("quick") else session_messages,
             current_input=user_input,
         )
 
@@ -1085,21 +1064,43 @@ class JARVISAgent(Agent):
                         }
                     )
 
-        if not str(prompt_mode).startswith("quick"):
-            history = []
-            for message in transcript_messages:
-                role = message.get("role", "user")
-                content = str(message.get("text", "")).strip()
-                if not content:
-                    continue
-                if role not in {"user", "assistant", "system"}:
-                    role = "user"
-                history.append({"role": role, "content": content})
-            if history and history[-1] == {"role": "user", "content": user_input}:
-                history.pop()
-            # Keep stable history ahead of changing retrieval evidence so local
-            # providers can reuse the conversation prefix between turns.
-            messages[1:1] = history
+        # Deterministic answers and runtime facts are evidence for the model's own reply.
+        if context.get("allow_deterministic_evidence", True) is not False:
+            for label, grounded in (
+                ("Memory-backed answer", self._grounded_memory_response(context)),
+                ("Knowledge-collection answer", self._grounded_knowledge_response(context, user_input=user_input)),
+            ):
+                evidence_message = grounded_answer_message(label, grounded)
+                if evidence_message is not None:
+                    messages.append(evidence_message)
+            truth_message = runtime_truth_message(context.get("runtime_truth"))
+            if truth_message is not None:
+                messages.append(truth_message)
+
+        context_capacity = int(getattr(chat_settings, "daise_num_ctx", 8192) or 8192)
+        output_reserve = int(getattr(chat_settings, "daise_num_predict", 2048) or 2048)
+        reserved = sum(estimated_tokens(item["content"]) for item in messages)
+        history_budget = max(0, min(
+            context_capacity // 3,
+            context_capacity - output_reserve - reserved - estimated_tokens(user_input) - 256,
+        ))
+        if transcript_messages and str(transcript_messages[-1].get("text", "")).strip() == user_input and transcript_messages[-1].get("role") == "user":
+            transcript_messages = transcript_messages[:-1]
+        transcript_messages = recent_history(transcript_messages, history_budget)
+        history = []
+        for message in transcript_messages:
+            role = message.get("role", "user")
+            content = str(message.get("text", "")).strip()
+            if not content:
+                continue
+            if role not in {"user", "assistant", "system"}:
+                role = "user"
+            history.append({"role": role, "content": content})
+        if history and history[-1] == {"role": "user", "content": user_input}:
+            history.pop()
+        # Keep stable history ahead of changing retrieval evidence so local
+        # providers can reuse the conversation prefix between turns.
+        messages[1:1] = history
 
         if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != user_input:
             messages.append({"role": "user", "content": user_input})

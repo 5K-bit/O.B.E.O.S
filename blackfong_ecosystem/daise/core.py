@@ -375,20 +375,7 @@ class DAISE(ReportOrchestration):
                     "execution_time_ms": execution_time_ms,
                 }
 
-            grounded_result = self._handle_grounded_truth_request(
-                user_input=user_input,
-                modality=modality,
-                context=context,
-                policy_decision=policy_decision,
-                session_id=session_id,
-                correlation_id=correlation_id,
-                request_id=request_id,
-                request_started=request_started,
-                progress_callback=progress_callback,
-            )
-            if grounded_result is not None:
-                return grounded_result
-
+            # Runtime truth is model evidence on the v1 lane, never a canned reply here.
             file_intent = parse_file_chat_intent(user_input) if self.file_workflow is not None else None
             if file_intent is not None and self.file_workflow is not None:
                 return self._handle_file_workflow_request(
@@ -1685,6 +1672,40 @@ class DAISE(ReportOrchestration):
                 return normalized[len(banner) :].lstrip("- \n")
         return normalized
 
+    def _persist_runtime_truth_observation(
+        self,
+        truth: Dict[str, Any],
+        *,
+        session_id: str,
+        correlation_id: str,
+        request_id: str,
+        parent_event_id: Optional[str],
+    ) -> Any:
+        """Record the deterministic facts handed to the model for this turn."""
+        event_type = (
+            "backend_health_observation"
+            if truth["kind"] in {"status", "tinyprogrammer_status"}
+            else "environment_snapshot"
+        )
+        return self.conversation_memory.persist_workflow_event(
+            source="daise",
+            event_type=event_type,
+            payload={
+                "schema_version": "1.0",
+                "grounded_truth": {
+                    "kind": truth["kind"],
+                    "source": truth.get("source"),
+                    "observation": truth.get("observation"),
+                },
+            },
+            confidence=0.94,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            parent_event_id=parent_event_id,
+            tags=["grounded_truth", truth["kind"]],
+        )
+
     def _handle_grounded_truth_request(
         self,
         *,
@@ -1714,28 +1735,12 @@ class DAISE(ReportOrchestration):
             agent_override=context.get("agent_override"),
             request_id=request_id,
         )
-        event_type = (
-            "backend_health_observation"
-            if truth["kind"] in {"status", "tinyprogrammer_status"}
-            else "environment_snapshot"
-        )
-        trace_event = self.conversation_memory.persist_workflow_event(
-            source="daise",
-            event_type=event_type,
-            payload={
-                "schema_version": "1.0",
-                "grounded_truth": {
-                    "kind": truth["kind"],
-                    "source": truth["source"],
-                    "observation": truth["observation"],
-                },
-            },
-            confidence=0.94,
+        trace_event = self._persist_runtime_truth_observation(
+            truth,
             session_id=session_id,
             correlation_id=correlation_id,
             request_id=request_id,
             parent_event_id=query_event.id,
-            tags=["grounded_truth", truth["kind"]],
         )
         execution_time_ms = (time.time() - request_started) * 1000
         response_event = self.conversation_memory.persist_agent_response(

@@ -128,7 +128,7 @@ def main():
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
                 snapshot = client.get(f"/api/request/{request_id}/trace").get_json()
-                if snapshot.get("status") in {"complete", "error", "cancelled", "failed"}:
+                if (snapshot.get("status") == "complete" and snapshot.get("result") is not None) or snapshot.get("status") in {"error", "cancelled", "failed"}:
                     break
                 time.sleep(0.25)
             else:

@@ -54,6 +54,19 @@ def test_chat_pane_streaming_state_and_full_reply_render():
     assert pane.analysis_select.currentData() == "standard"
 
 
+def test_nested_backend_failure_is_visible_and_partial_is_incomplete():
+    pane = _build_chat_pane()
+    pane._append_stream_token("Only the first part arrived")
+    pane._handle_result({"status": "error", "result": {"backend_error": "Model output limit reached"}})
+    text = pane.transcript.toPlainText()
+    assert "Only the first part arrived" in text
+    assert "Incomplete reply. Model output limit reached" in text
+    assert pane.status_label.text().startswith("FAILED")
+    pane._append_stream_token("late token")
+    assert pane.transcript.toPlainText() == text
+    pane.close()
+
+
 def test_stream_burst_batches_updates_but_final_response_is_immediate():
     pane = _build_chat_pane()
     pane._append_stream_token("Start ")

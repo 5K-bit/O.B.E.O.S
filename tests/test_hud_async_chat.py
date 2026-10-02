@@ -228,6 +228,18 @@ def test_backend_error_without_top_level_error_is_failed(tmp_path, monkeypatch):
     assert state["status"] == "error"
 
 
+def test_trace_waits_for_final_response_payload(tmp_path, monkeypatch):
+    dashboard = build_dashboard(tmp_path)
+    monkeypatch.setattr(dashboard.memory_service, "get_request_trace", lambda request_id: {
+        "events": [], "status": "complete", "phase": "complete"})
+    dashboard.request_states["finishing"] = {"status": "complete", "phase": "complete"}
+    snapshot = dashboard._get_request_snapshot("finishing")
+    assert snapshot["status"] == "pending"
+    assert snapshot["phase"] == "finalizing"
+    dashboard.request_states["finishing"].update(completed_at=time.time(), result={"response": "Ready"})
+    assert dashboard._get_request_snapshot("finishing")["status"] == "complete"
+
+
 def test_background_chat_returns_immediate_acceptance_and_completes(tmp_path: Path):
     dashboard = build_dashboard(tmp_path)
     client = dashboard.app.test_client()

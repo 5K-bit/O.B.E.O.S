@@ -2725,6 +2725,10 @@ class WebDashboard:
                     "result": state.get("result"),
                 }
             )
+        if state and snapshot.get("status") == "complete" and not state.get("completed_at"):
+            snapshot["status"] = "pending"
+            snapshot["phase"] = "finalizing"
+            snapshot["phase_message"] = "Preparing final response payload."
         snapshot["queue_pressure"] = snapshot.get("queue_pressure") or self.awareness_service.observe_queue_pressure(
             request_states=self.request_states,
             request_threads=self.request_threads,

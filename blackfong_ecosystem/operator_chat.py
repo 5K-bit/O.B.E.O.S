@@ -99,6 +99,10 @@ class OperatorChatService:
             "reports": reports,
             "selection": selections[-1] if selections else None,
         }
+        if payload["status"] == "error":
+            payload["error"] = str(result.get("error") or result.get("backend_error"))
+            if result.get("error_type"):
+                payload["error_type"] = str(result["error_type"])
         if include_messages:
             payload["messages"] = self.memory_service.get_session_messages(session_id, limit=80)
         if include_trace:
