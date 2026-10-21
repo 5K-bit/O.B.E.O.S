@@ -15,9 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import httpx
-
 from .ecosystem_manifest import iter_ecosystem_projects
+from .http_clients import client_for
 
 
 def _subprocess_env() -> Dict[str, str]:
@@ -67,7 +66,7 @@ def _run_http_check(check: Dict[str, Any]) -> Optional[bool]:
         return False
     timeout = float(check.get("timeout_seconds") or 2)
     try:
-        with httpx.Client(timeout=timeout, trust_env=False) as client:
+        with client_for(url, timeout=timeout, trust_env=False) as client:
             response = client.get(url)
             return response.status_code < 500
     except Exception:

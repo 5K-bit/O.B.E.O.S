@@ -11,6 +11,7 @@ import httpx
 from .cancellation import RequestCancelled, cancellation_resource, raise_if_cancelled
 
 from .config import chat_settings
+from .http_clients import client_for
 from .ollama_models import filter_model_chain
 
 
@@ -153,7 +154,7 @@ class OllamaChatBackend(BaseChatBackend):
             raise_if_cancelled()
             attempt_started = time.perf_counter()
             try:
-                with httpx.Client(timeout=timeout, **({"trust_env": False} if not self.trust_env else {})) as client, cancellation_resource(getattr(client, "close", lambda: None)):
+                with client_for(self.base_url, timeout=timeout, **({"trust_env": False} if not self.trust_env else {})) as client, cancellation_resource(getattr(client, "close", lambda: None)):
                     response = client.post(f"{self.base_url}/api/chat", json=payload)
                     response.raise_for_status()
                     data = response.json()
@@ -350,7 +351,7 @@ class OllamaChatBackend(BaseChatBackend):
             }
 
         try:
-            with httpx.Client(timeout=timeout, **({"trust_env": False} if not self.trust_env else {})) as client, cancellation_resource(getattr(client, "close", lambda: None)):
+            with client_for(self.base_url, timeout=timeout, **({"trust_env": False} if not self.trust_env else {})) as client, cancellation_resource(getattr(client, "close", lambda: None)):
                 with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
                     if response.status_code == 404:
                         raise_if_cancelled()

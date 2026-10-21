@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional, Sequence
 import httpx
 
 from .config import chat_settings
+from .http_clients import client_for
 from .cancellation import CancellationToken, cancellation_scope, cancellation_resource, raise_if_cancelled, RequestCancelled
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def warm_ollama_model(
     }
     started = time.perf_counter()
     try:
-        with httpx.Client(timeout=httpx.Timeout(connect=5.0, read=timeout, write=10.0, pool=5.0), trust_env=False) as client, cancellation_resource(client.close):
+        with client_for(base_url, timeout=httpx.Timeout(connect=5.0, read=timeout, write=10.0, pool=5.0), trust_env=False) as client, cancellation_resource(client.close):
             raise_if_cancelled()
             response = client.post(f"{base_url}/api/chat", json=payload)
             response.raise_for_status()

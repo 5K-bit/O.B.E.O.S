@@ -16,6 +16,7 @@ import httpx
 from .cancellation import RequestCancelled, cancellation_resource, raise_if_cancelled
 from .chat_backends import BaseChatBackend, ChatBackendError, ChatBackendResult
 from .config import llamacpp_settings
+from .http_clients import client_for
 from .model_readiness import verify_llamacpp
 
 
@@ -39,7 +40,7 @@ class LlamaCppChatBackend(BaseChatBackend):
         self.num_predict = num_predict
 
     def _client(self, timeout: httpx.Timeout) -> httpx.Client:
-        return httpx.Client(timeout=timeout, **({"trust_env": False} if not self.trust_env else {}))
+        return client_for(self.base_url, timeout=timeout, **({"trust_env": False} if not self.trust_env else {}))
 
     def _ensure_ready(self, client, model):
         try:

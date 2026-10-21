@@ -9,9 +9,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-import httpx
-
 from .config import llamacpp_settings, paths
+from .http_clients import client_for
 from .model_readiness import verify_llamacpp
 from .chat_backends import ChatBackendError
 
@@ -47,7 +46,7 @@ def wait_for_local_model() -> Dict[str, Any]:
 
 def _is_server_already_listening(base_url: str, timeout: float = 1.0) -> bool:
     try:
-        with httpx.Client(timeout=timeout, trust_env=False) as client:
+        with client_for(base_url, timeout=timeout, trust_env=False) as client:
             verify_llamacpp(client, base_url, llamacpp_settings.model_alias)
             return True
     except ChatBackendError as exc:

@@ -39,11 +39,11 @@ class EarthOrchestration:
     def _reachable(base_url, timeout=1.0):
         """Is this on-machine endpoint actually serving? Probing is cheap; a long
         generation against a dead port is not."""
-        import httpx
+        from ..http_clients import client_for
 
         for path in ("/health", "/v1/models"):
             try:
-                with httpx.Client(timeout=timeout, trust_env=False) as client:
+                with client_for(base_url, timeout=timeout, trust_env=False) as client:
                     if client.get(base_url + path).status_code == 200:
                         return True
             except Exception:
