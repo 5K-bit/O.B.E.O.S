@@ -72,6 +72,8 @@ from blackfong_ecosystem.thoughtglass_scene_3d import Thoughtglass3DHost
 from blackfong_ecosystem.tiny_stream_view import TinyStreamView
 from blackfong_ecosystem.ui_commands import CommandContext, CommandRegistry, get_command_registry
 from blackfong_ecosystem.workspace_boot_splash import WorkspaceBootSplash
+from blackfong_ecosystem.workspace_theme import build_stylesheet
+from blackfong_ecosystem.workspace_command_center import CommandCenterPane
 from blackfong_ecosystem.workspace_shortcuts import (
     install_desktop_shortcuts,
     load_shortcut_overrides,
@@ -100,126 +102,7 @@ def _html(text: Any) -> str:
 
 
 def apply_workspace_theme(app: QApplication) -> None:
-    app.setStyleSheet(
-        """
-        QWidget {
-            background: #0a0f14;
-            color: #ece7dd;
-            font-family: "Segoe UI", "Aptos", sans-serif;
-            font-size: 13px;
-        }
-        QMainWindow, QTabWidget::pane, QDockWidget, QTextEdit, QLineEdit, QComboBox {
-            background: #0d141b;
-        }
-        QToolBar {
-            spacing: 8px;
-            padding: 8px;
-            border: 0;
-            background: #121b24;
-        }
-        QTabBar::tab {
-            background: #131d27;
-            border: 1px solid #273647;
-            border-bottom: 0;
-            border-top-left-radius: 10px;
-            border-top-right-radius: 10px;
-            padding: 10px 14px;
-            margin-right: 4px;
-            color: #cfd8df;
-        }
-        QTabBar::tab:selected {
-            background: #1c2733;
-            color: #f0d49a;
-            border-color: #8f7743;
-        }
-        QTabWidget::pane {
-            border: 1px solid #273647;
-            border-radius: 12px;
-            padding: 6px;
-        }
-        QTextEdit, QLineEdit, QComboBox {
-            border: 1px solid #2a3949;
-            border-radius: 10px;
-            padding: 8px;
-            selection-background-color: #3d5f78;
-        }
-        QPushButton, QToolButton {
-            background: #15212d;
-            border: 1px solid #2e4053;
-            border-radius: 10px;
-            padding: 9px 14px;
-            color: #ece7dd;
-        }
-        QPushButton:hover, QToolButton:hover {
-            border-color: #8f7743;
-            background: #1b2a37;
-        }
-        QPushButton:disabled, QToolButton:disabled {
-            color: #7a8591;
-            border-color: #24303b;
-        }
-        QPushButton[toolbarRole="primary"], QToolButton[toolbarRole="primary"] {
-            background: #1b2733;
-            border: 1px solid #8f7743;
-            color: #f5ead6;
-            font-weight: 600;
-            padding: 10px 16px;
-        }
-        QPushButton[toolbarRole="primary"]:hover, QToolButton[toolbarRole="primary"]:hover {
-            background: #223243;
-            border-color: #caa867;
-        }
-        QPushButton[toolbarRole="menu"], QToolButton[toolbarRole="menu"] {
-            background: #121b24;
-            border: 1px solid #334657;
-            color: #dce6ee;
-            font-weight: 500;
-        }
-        QLabel[toolbarRole="section"] {
-            background: transparent;
-            color: #7c93a8;
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 0.18em;
-            padding: 0 4px;
-        }
-        QWidget[toolbarRole="statusCluster"] {
-            background: #0f1821;
-            border: 1px solid #243647;
-            border-radius: 14px;
-        }
-        QLabel[toolbarRole="statusHero"] {
-            background: #162433;
-            border: 1px solid #35506a;
-            border-radius: 10px;
-            color: #f2d79b;
-            font-weight: 700;
-            padding: 6px 10px;
-        }
-        QLabel[toolbarRole="statusMinor"] {
-            background: #10171f;
-            border: 1px solid #243544;
-            border-radius: 8px;
-            color: #d7e0e8;
-            padding: 4px 8px;
-        }
-        QDockWidget::title {
-            text-align: left;
-            background: #121b24;
-            padding: 8px 10px;
-            border-bottom: 1px solid #273647;
-        }
-        QLabel[variant="kicker"] {
-            color: #7ba6c9;
-            font-size: 11px;
-            letter-spacing: 0.16em;
-            text-transform: uppercase;
-        }
-        QLabel[variant="status"] {
-            color: #d9be87;
-        }
-        """
-    )
+    app.setStyleSheet(build_stylesheet())
 
 
 from blackfong_ecosystem.ui.desktop_workers import ChatWorker, TinyProgrammerAutoStartWorker, WarmupStatusBridge
@@ -615,8 +498,8 @@ class ChatPane(QWidget):
         self._stream_inserted = False
         self._stream_start = 0
         self.transcript.append(
-            "<div style='margin-bottom:10px;padding:12px;border:1px solid #273647;border-radius:12px;"
-            f"background:#132028;white-space:pre-wrap'><strong>You</strong><br/>{_html(text)}</div>"
+            "<div style='margin-bottom:10px;padding:12px;border:1px solid #223344;border-radius:12px;"
+            f"background:#0f1b24;white-space:pre-wrap'><strong>You</strong><br/>{_html(text)}</div>"
         )
         self._scroll_transcript_to_end()
         self._worker = ChatWorker(
@@ -633,14 +516,14 @@ class ChatPane(QWidget):
     def _run_slash_command(self, command: str) -> None:
         self.input.clear()
         self.transcript.append(
-            "<div style='margin-bottom:10px;padding:12px;border:1px solid #273647;border-radius:12px;"
-            f"background:#132028;white-space:pre-wrap'><strong>You</strong><br/>{_html(command)}</div>"
+            "<div style='margin-bottom:10px;padding:12px;border:1px solid #223344;border-radius:12px;"
+            f"background:#0f1b24;white-space:pre-wrap'><strong>You</strong><br/>{_html(command)}</div>"
         )
         try:
             result = self.command_registry.execute(command, self.command_context())
             self.transcript.append(
-                "<div style='margin-bottom:10px;padding:12px;border:1px solid #32505e;border-radius:12px;"
-                f"background:#111923;white-space:pre-wrap'><strong>System</strong><br/>{_html(_pretty(result))}</div>"
+                "<div style='margin-bottom:10px;padding:12px;border:1px solid #27505e;border-radius:12px;"
+                f"background:#0d1720;white-space:pre-wrap'><strong>System</strong><br/>{_html(_pretty(result))}</div>"
             )
             self._set_chat_state("complete", f"command completed: {command.split()[0]}")
         except Exception as exc:
@@ -706,7 +589,7 @@ class ChatPane(QWidget):
             self._set_chat_state("failed", reason)
             detail = ("Incomplete reply. " if partial else "") + reason
             self.transcript.append(
-                f"<div style='color:#d9be87'><strong>System</strong><br/>{_html(detail)}</div>"
+                f"<div style='color:#9fe9f5'><strong>System</strong><br/>{_html(detail)}</div>"
             )
             self._scroll_transcript_to_end()
             return
@@ -805,14 +688,14 @@ class ChatPane(QWidget):
     def _session_intro_html(self, *, history_count: int = 0) -> str:
         if self._session_scope == "local":
             return (
-                "<div style='padding:12px;border:1px solid #273647;border-radius:12px;background:#121b24'>"
+                "<div style='padding:12px;border:1px solid #223344;border-radius:12px;background:#101a23'>"
                 "<strong>Fresh local session ready.</strong><br/>"
                 "This thread stays local to the workspace until you switch back to a shared operator session."
                 "</div>"
             )
         if self._session_mode == "new_shared":
             return (
-                "<div style='padding:12px;border:1px solid #273647;border-radius:12px;background:#121b24'>"
+                "<div style='padding:12px;border:1px solid #223344;border-radius:12px;background:#101a23'>"
                 "<strong>New shared operator session ready.</strong><br/>"
                 "Desktop and HUD can now converge on this fresh shared task state."
                 "</div>"
@@ -823,7 +706,7 @@ class ChatPane(QWidget):
             else ""
         )
         return (
-            "<div style='padding:12px;border:1px solid #273647;border-radius:12px;background:#121b24'>"
+            "<div style='padding:12px;border:1px solid #223344;border-radius:12px;background:#101a23'>"
             "<strong>Shared operator session ready.</strong><br/>"
             f"{detail}"
             "This desktop chat shares memory and orchestration with the HUD cockpit."
@@ -832,7 +715,7 @@ class ChatPane(QWidget):
 
     def _resume_session_html(self, history_count: int) -> str:
         return (
-            "<div style='padding:12px;border:1px solid #32505e;border-radius:12px;background:#111923'>"
+            "<div style='padding:12px;border:1px solid #27505e;border-radius:12px;background:#0d1720'>"
             "<strong>Shared session resumed.</strong><br/>"
             f"{history_count} recent messages are available for this task. "
             "Use Load History to reopen the transcript, or switch modes to start clean."
@@ -852,15 +735,15 @@ class ChatPane(QWidget):
     def _message_card_html(self, *, role: str, text: str, agent: Optional[str] = None) -> str:
         normalized_role = str(role or "system").strip().lower()
         tone = {
-            "assistant": "#1a2430",
-            "user": "#132028",
-            "system": "#111923",
-        }.get(normalized_role, "#111923")
+            "assistant": "#12202b",
+            "user": "#0f1b24",
+            "system": "#0d1720",
+        }.get(normalized_role, "#0d1720")
         border = {
-            "assistant": "#8f7743",
-            "user": "#273647",
-            "system": "#32505e",
-        }.get(normalized_role, "#273647")
+            "assistant": "#1fb5cc",
+            "user": "#223344",
+            "system": "#27505e",
+        }.get(normalized_role, "#223344")
         if normalized_role == "assistant":
             label = display_agent_name(agent or "daise")
         elif normalized_role == "user":
@@ -1746,6 +1629,13 @@ class MainWindow(QMainWindow):
         self.trace_pane = TracePane(memory_service=self.services.memory_service)
         self.workbench_tabs = QTabWidget(self)
         self.workbench_tabs.setDocumentMode(True)
+        self.command_center_pane = CommandCenterPane(
+            launchers=[
+                ("Open HUD", lambda: webbrowser.open("http://127.0.0.1:8080/")),
+                ("Terminal", self._open_windows_terminal),
+            ]
+        )
+        self.workbench_tabs.addTab(self.command_center_pane, "Command Center")
         self.workbench_tabs.addTab(self.brain_pane, "Thoughtglass Home")
         self.workbench_tabs.addTab(self.memory_chamber_pane, "Memory Chamber")
         self.workbench_tabs.addTab(self.chat_pane, "Chat")
@@ -2251,6 +2141,21 @@ class MainWindow(QMainWindow):
         self._refresh_worker.finished.connect(self._apply_workspace_snapshot)
         self._refresh_worker.start()
 
+    def _open_windows_terminal(self) -> None:
+        """Open an external terminal at the project root; prefers Windows Terminal, falls back to PowerShell."""
+        import shutil
+        import subprocess
+
+        root = os.path.dirname(os.path.abspath(__file__))
+        try:
+            if shutil.which("wt.exe"):
+                subprocess.Popen(["wt.exe", "-d", root])
+            else:
+                subprocess.Popen(["powershell.exe", "-NoExit", "-Command", f"Set-Location -LiteralPath '{root}'"],
+                                 creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+        except OSError as exc:
+            logging.getLogger(__name__).warning("Could not open terminal: %s", exc)
+
     def _apply_workspace_snapshot(self, payload: Dict[str, Any]) -> None:
         debug_session_log(
             hypothesis_id="C",
@@ -2271,6 +2176,7 @@ class MainWindow(QMainWindow):
             self.brain_pane.write({"status": "error", "error": error})
         else:
             self.overview_pane.apply_summary(payload.get("summary", {}))
+            self.command_center_pane.apply_snapshot(payload)
             memory_payload = payload.get("memory_chamber", {})
             self.brain_pane.apply_runtime(
                 cognition_snapshot=payload.get("cognition", {}),
@@ -2610,7 +2516,8 @@ def workspace_probe() -> Dict[str, Any]:
             "center_tabs": [window.workbench_tabs.tabText(index) for index in range(window.workbench_tabs.count())],
             "left_tabs": [window.left_nav_tabs.tabText(index) for index in range(window.left_nav_tabs.count())],
             "chat_available": True,
-            "thoughtglass_home_default": window.workbench_tabs.tabText(0) == "Thoughtglass Home",
+            "thoughtglass_home_default": window.workbench_tabs.tabText(1) == "Thoughtglass Home",
+            "command_center_default": window.workbench_tabs.tabText(0) == "Command Center",
             "thoughtglass_default_mode": str(window.brain_pane.mode_select.currentData() or ""),
             "memory_chamber_available": any(window.workbench_tabs.tabText(index) == "Memory Chamber" for index in range(window.workbench_tabs.count())),
             "memory_chamber_default_mode": str(window.memory_chamber_pane.mode_select.currentData() or ""),
