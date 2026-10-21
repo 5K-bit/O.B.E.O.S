@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -299,6 +300,10 @@ class EventModel(Base):
     hash = Column(String, index=True)
 
 
+_INIT_LOCK = threading.RLock()
+_INITIALIZED_DBS: set[str] = set()
+
+
 class EventStore:
     """
     SQLite-backed event store.
@@ -327,7 +332,19 @@ class EventStore:
     def init_db(self) -> None:
         """
         Initialize schema and enforce immutability at the database level.
+
+        Runs the full migration once per process per database file. It drops and recreates the
+        immutability trigger and rescans events for trace backfill, so repeating it on every status
+        read (dozens of callers construct stores) is both slow and briefly lifts the immutability guard.
         """
+        key = str(self.db_path.resolve())
+        with _INIT_LOCK:
+            if key in _INITIALIZED_DBS and self.db_path.exists():
+                return
+            self._init_db_full()
+            _INITIALIZED_DBS.add(key)
+
+    def _init_db_full(self) -> None:
         with self.engine.connect() as conn:
             conn.execute(text("PRAGMA busy_timeout=30000"))
             try:
@@ -535,8 +552,16 @@ class EventStore:
             )
             for row in rows:
                 session_id = str(row.session_id)
+                # Only three payload fields are read, so extract them in SQL instead of hydrating and
+                # JSON-parsing up to 1000 full event rows for every listed session.
                 recent_rows = (
-                    s.query(EventModel)
+                    s.query(
+                        EventModel.type,
+                        EventModel.source,
+                        func.json_extract(EventModel.payload, "$.text").label("text"),
+                        func.json_extract(EventModel.payload, "$.response").label("response"),
+                        func.json_extract(EventModel.payload, "$.agent").label("agent"),
+                    )
                     .filter(EventModel.session_id == session_id)
                     .order_by(EventModel.timestamp.desc())
                     .limit(1000)
@@ -545,18 +570,15 @@ class EventStore:
                 agents: set[str] = set()
                 preview = ""
                 message_count = 0
-                for event_row in recent_rows:
-                    event = self._row_to_event(event_row)
-                    if event.type in {"agent_query", "agent_response"}:
+                for event_type, event_source, text_value, response_value, agent_value in recent_rows:
+                    if event_type in {"agent_query", "agent_response"}:
                         message_count += 1
                         if not preview:
-                            preview = str(event.payload.get("text") or event.payload.get("response") or "")[:120]
-                    if event.type == "agent_response":
-                        agents.add(event.source)
-                    else:
-                        agent_name = event.payload.get("agent")
-                        if agent_name:
-                            agents.add(str(agent_name))
+                            preview = str(text_value or response_value or "")[:120]
+                    if event_type == "agent_response":
+                        agents.add(event_source)
+                    elif agent_value:
+                        agents.add(str(agent_value))
                 sessions.append(
                     {
                         "session_id": session_id,
