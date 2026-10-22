@@ -278,3 +278,127 @@ def test_closing_the_window_leaves_unrelated_processes_running() -> None:
     finally:
         child.kill()
         child.wait()
+
+
+# --- feed (B14) and diagnostics (B15) -------------------------------------------------------
+
+import textwrap
+from pathlib import Path
+
+from blackfong_ecosystem.workspace_diagnostics import collect_diagnostics, find_port_conflicts
+from blackfong_ecosystem.workspace_feed import (
+    FEED_LIMIT,
+    format_feed,
+    normalize_severity,
+    raw_detail,
+    summarize_counts,
+)
+
+NOTE = {"id": "abcdef1234", "title": "Backend down", "message": "Ollama unreachable", "level": "warning",
+        "category": "backend", "read": False, "timestamp": 100.0}
+
+
+def test_feed_shows_severity_time_id_and_unread_marker() -> None:
+    text = format_feed({"notifications": [NOTE], "unread_count": 1}, now=110.0)
+    assert "[WARNING" in text and "10s ago" in text and "#abcdef12" in text and text.count("*") >= 1
+    assert "Ollama unreachable" in text
+
+
+def test_feed_orders_critical_before_info() -> None:
+    items = [{**NOTE, "id": "i1", "title": "fyi", "level": "info"}, {**NOTE, "id": "c1", "title": "boom", "level": "critical"}]
+    text = format_feed({"notifications": items}, now=110.0)
+    assert text.index("boom") < text.index("fyi")
+
+
+def test_feed_warns_when_truncated_and_not_otherwise() -> None:
+    many = [{**NOTE, "id": f"id{i}"} for i in range(FEED_LIMIT)]
+    assert "Older notifications exist" in format_feed({"notifications": many}, now=110.0)
+    assert "Older notifications exist" not in format_feed({"notifications": many[:3]}, now=110.0)
+
+
+@pytest.mark.parametrize("payload", [None, "x", 5, [], {"notifications": "oops"}, {"notifications": [None, 3]}])
+def test_feed_survives_malformed_payloads(payload) -> None:
+    assert isinstance(format_feed(payload, now=1.0), str)
+
+
+def test_unknown_severity_defaults_to_info_never_hidden() -> None:
+    assert normalize_severity("weird") == "info" and normalize_severity("WARN") == "warning"
+    assert summarize_counts({"notifications": [{"level": "weird"}]})["info"] == 1
+
+
+def test_raw_detail_is_lossless_json() -> None:
+    import json
+
+    assert json.loads(raw_detail({"notifications": [NOTE]}))["notifications"][0]["id"] == "abcdef1234"
+
+
+class _ExplodingService:
+    """Any call on the notification service from the feed UI fails the test (A7: feed is read-only)."""
+
+    def __getattr__(self, name):
+        raise AssertionError(f"feed touched notification service: {name}")
+
+
+def test_feed_pane_rendering_never_calls_the_service(window) -> None:
+    import desktop_shell
+
+    pane = desktop_shell.NotificationPane(notification_service=_ExplodingService())
+    pane.apply_notifications({"notifications": [NOTE], "unread_count": 1})
+    assert "Backend down" in pane.output.toPlainText()
+    pane.toggle_raw()
+    assert "abcdef1234" in pane.output.toPlainText()
+    pane.toggle_raw()
+    assert "Backend down" in pane.output.toPlainText()
+
+
+def test_port_conflict_detected_between_manifest_and_core(tmp_path: Path) -> None:
+    manifest = tmp_path / "eco.toml"
+    manifest.write_text(textwrap.dedent('''
+        [[projects]]
+        id = "earthglass"
+        ports = [ { name = "web", port = 8000 } ]
+        [[projects]]
+        id = "quietdrop"
+        ports = [ { name = "web", port = 8844 } ]
+    '''))
+    conflicts = find_port_conflicts(manifest)
+    assert [c["port"] for c in conflicts] == [8000]
+    assert "earthglass" in conflicts[0]["claimed_by"]
+
+
+def test_real_manifest_reports_the_known_8000_collision() -> None:
+    manifest = Path(__file__).resolve().parents[1] / "obeos_ecosystem.toml"
+    assert 8000 in [c["port"] for c in find_port_conflicts(manifest)]
+
+
+def test_diagnostics_never_raises_and_reports_missing_manifest(tmp_path: Path) -> None:
+    result = collect_diagnostics(tiles=[{"key": "a", "state": "offline"}], manifest_path=tmp_path / "nope.toml", environ={})
+    assert result["last_health"][0]["state"] == "offline"
+    assert any("not found" in note for note in result["notes"])
+
+
+def test_diagnostics_pane_button(window) -> None:
+    window.health_pane.apply_tiles([{"key": "a", "label": "A", "state": "offline", "checked_at": 1.0, "detail": ""}])
+    window.health_pane.show_diagnostics()
+    text = window.health_pane.output.toPlainText()
+    assert "port_conflicts" in text and "8000" in text
+
+
+# --- A8: the real ImportError cause is preserved --------------------------------------------
+
+
+def test_pyside6_import_error_keeps_underlying_cause(tmp_path: Path) -> None:
+    fake = tmp_path / "PySide6"
+    fake.mkdir()
+    (fake / "__init__.py").write_text("raise ImportError('libEGL.so.1: cannot open shared object file')\n")
+    repo = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        [sys.executable, "-c", "import desktop_shell"],
+        cwd=str(repo),
+        env={**os.environ, "PYTHONPATH": f"{tmp_path}{os.pathsep}{repo}", "QT_QPA_PLATFORM": "offscreen"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode != 0
+    assert "libEGL.so.1" in proc.stderr

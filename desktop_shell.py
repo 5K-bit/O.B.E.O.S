@@ -66,6 +66,8 @@ from blackfong_ecosystem.thoughtglass_scene_3d import Thoughtglass3DHost
 from blackfong_ecosystem.tiny_stream_view import TinyStreamView
 from blackfong_ecosystem.ui_commands import CommandContext, CommandRegistry, get_command_registry
 from blackfong_ecosystem.terminal_launcher import open_terminal
+from blackfong_ecosystem.workspace_diagnostics import collect_diagnostics
+from blackfong_ecosystem.workspace_feed import format_feed, raw_detail
 from blackfong_ecosystem.workspace_boot_splash import WorkspaceBootSplash
 from blackfong_ecosystem.workspace_health import (
     default_http_checks,
@@ -1479,13 +1481,27 @@ class NotificationPane(WorkspacePane):
         self.notification_service = notification_service
         self.add_button("Refresh", self.refresh)
         self.add_button("Mark All Read", self.mark_all_read)
-        self.write({"status": "warming", "notifications": []})
+        self.add_button("Raw Detail", self.toggle_raw)
+        self._last_payload: Any = {"status": "warming", "notifications": []}
+        self._show_raw = False
+        self.write("Waiting for the first refresh.")
 
     def refresh(self) -> None:
         self.apply_notifications(self.notification_service.list_notifications(limit=50))
 
     def apply_notifications(self, payload: Dict[str, Any]) -> None:
-        self.write(payload)
+        self._last_payload = payload
+        self._render()
+
+    def toggle_raw(self) -> None:
+        self._show_raw = not self._show_raw
+        self._render()
+
+    def _render(self) -> None:
+        if self._show_raw:
+            self.write(raw_detail(self._last_payload))
+        else:
+            self.write(format_feed(self._last_payload, now=time.time()))
 
     def mark_all_read(self) -> None:
         self.write(self.notification_service.mark_all_read())
@@ -1502,11 +1518,18 @@ class ServiceHealthPane(WorkspacePane):
         )
         self.kicker.setText("Status")
         self.add_button("Open Terminal", self.open_terminal)
+        self.add_button("Diagnostics", self.show_diagnostics)
+        self._last_tiles: List[Dict[str, Any]] = []
         self.write("[UNKNOWN ] No health data yet. Waiting for the first refresh.")
+
+    def show_diagnostics(self) -> None:
+        manifest = Path(__file__).resolve().parent / "obeos_ecosystem.toml"
+        self.write(collect_diagnostics(tiles=self._last_tiles, manifest_path=manifest))
 
     def apply_tiles(self, tiles: List[Dict[str, Any]]) -> None:
         from blackfong_ecosystem.workspace_health import HealthTile
 
+        self._last_tiles = [dict(tile) for tile in tiles if isinstance(tile, dict)]
         now = time.time()
         lines = []
         for entry in tiles:

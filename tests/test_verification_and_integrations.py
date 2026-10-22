@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
+import pytest
 from types import SimpleNamespace
 
+from blackfong_ecosystem.installer_plan import DEFAULT_INSTALLER_ROOT
 from blackfong_ecosystem.external_integrations import ExternalIntegrationRegistry
 from blackfong_ecosystem.operational_interfaces import WebDashboard
 from blackfong_ecosystem.redamon_mode import RedAmonWorkflowService
@@ -100,6 +103,11 @@ def test_verification_full_writes_structured_report(tmp_path: Path) -> None:
     assert json.loads(latest.read_text(encoding="utf-8"))["status"] == "passed"
 
 
+@pytest.mark.skipif(
+    not DEFAULT_INSTALLER_ROOT.exists(),
+    reason="Needs the external Blackfong-Installer checkout at DEFAULT_INSTALLER_ROOT; without it installer validation fails "
+    "and release evidence is 'blocked' rather than 'in_progress'.",
+)
 def test_release_evidence_writes_json_and_markdown_reports(tmp_path: Path) -> None:
     services = SimpleNamespace(integration_registry=ExternalIntegrationRegistry(workspace_root=tmp_path, tacklebox_root=tmp_path))
     verification = VerificationService(workspace_root=tmp_path, services=services)
