@@ -10,6 +10,7 @@ dependencies = [
     "pydantic==2.6.4",
     "SQLAlchemy==2.0.25",
     "chromadb>=0.4.22,<0.5",
+    "numpy<2",
     "Flask>=3.0.0",
     "Flask-SocketIO>=5.3.0",
     "httpx>=0.24.0",
@@ -22,7 +23,7 @@ dependencies = [
     "pytest>=7.4.0",
     "winotify>=1.1.0; platform_system == 'Windows'",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 
 [project.optional-dependencies]
 desktop = ["PySide6>=6.7.0"]
