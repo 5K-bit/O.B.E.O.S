@@ -7,6 +7,7 @@ import shutil
 import time
 import uuid
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -754,6 +755,91 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
             },
         }
 
+    # Shared with _detect_conversational_recall_frame: the vocabulary that makes a
+    # turn read as being about the ongoing work. Keeping one copy stops the detector
+    # and the scope gate below from drifting apart.
+    _FRAME_ANCHOR_TERMS = frozenset({
+        "obeos", "o b e o s", "daise", "blackfong", "system", "project", "memory",
+        "work", "working", "progress", "direction", "future", "next", "risk",
+        "fragile", "creator", "mission", "success", "improve", "latency", "hud",
+        "telegram", "tinyprogrammer", "tiny", "recall", "response", "operator",
+        "surface", "thinking", "headed", "becoming", "stable", "stabilize",
+        "stabilizing", "grounded", "coherence", "cohesion", "pressure", "weakest",
+        "solid", "alive", "shape",
+        "everything", "overall", "together", "us", "our", "we", "you", "me",
+    })
+
+    # Expressions that point at something already in play, or at D.A.I.S.E itself.
+    # A turn carrying one of these is asking about the existing thread rather than
+    # opening a new topic, however it is phrased.
+    _REFERRING_TOKENS = frozenset({
+        "this", "that", "these", "those", "it", "its", "here", "there",
+        "we", "us", "our", "ours", "you", "your", "yours", "yourself",
+    })
+
+    def _unseen_proper_nouns(self, query: str, established: set) -> set:
+        """Capitalized mid-sentence words the session has never mentioned.
+
+        A turn naming new entities ("a picnic on Tuesday at Cedar Park") is raising
+        its own subject, not asking about the current one. Sentence-initial words
+        are skipped because their capitalization carries no information.
+        """
+        found = set()
+        for sentence in re.split(r"(?<=[.!?])\s+", str(query or "").strip()):
+            for word in sentence.split()[1:]:
+                bare = word.strip(".,!?;:'\"")
+                lowered = bare.lower()
+                if (
+                    len(bare) > 2
+                    and bare[:1].isupper()
+                    and lowered not in established
+                    # The project's own name is never outside subject matter.
+                    and lowered not in self._FRAME_ANCHOR_TERMS
+                ):
+                    found.add(bare)
+        return found
+
+    def _introduces_outside_subject(
+        self,
+        query: str,
+        *,
+        session_messages: Optional[Sequence[Dict[str, Any]]] = None,
+        session_summaries: Optional[Sequence[Any]] = None,
+    ) -> bool:
+        """True when a turn raises subject matter the session has not been discussing.
+
+        Keeps project narrative off an unrelated question ("what matters most when
+        making bread?") without demanding the operator name the project, so ordinary
+        reflective follow-ups still ground. The current turn is excluded from the
+        session side: introducing a topic must not make it count as established
+        context for the very turn that introduces it.
+        """
+        query_tokens = set(self._tokenize(query))
+        if not query_tokens:
+            return False
+
+        compact_query = " ".join(str(query or "").strip().lower().split())
+        established: set = set()
+        for message in list(session_messages or []):
+            if not isinstance(message, Mapping):
+                continue
+            text = str(message.get("text") or message.get("content") or "")
+            if " ".join(text.strip().lower().split()) == compact_query:
+                continue
+            established.update(self._tokenize(text))
+        for summary in list(session_summaries or []):
+            if isinstance(summary, Mapping):
+                summary = summary.get("summary") or summary.get("text") or ""
+            established.update(self._tokenize(str(summary)))
+
+        if self._unseen_proper_nouns(query, established):
+            return True
+        if query_tokens & self._FRAME_ANCHOR_TERMS:
+            return False
+        if query_tokens & self._REFERRING_TOKENS:
+            return False
+        return not bool(query_tokens & established)
+
     def grounded_conversational_answer(
         self,
         *,
@@ -777,12 +863,19 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
         if frame is None:
             return None
 
-        # Project-specific narrative templates are not general conversation
-        # evidence. Ordinary plans and questions must use their actual history.
-        if frame != "followup":
-            topic = str(query or "").lower().replace(".", "")
-            if not re.search(r"\b(?:obeos|daise|blackfong)\b", topic):
-                return None
+        # Project narrative must not answer an unrelated question ("what matters most
+        # when making bread?"), but requiring the query to name the project silenced
+        # ordinary reflective follow-ups too -- "what still seems messy to you?" is
+        # about the work without ever saying "obeos", and that is the conversation
+        # this grounding exists to support. Discriminate on subject matter instead:
+        # withhold only when the turn introduces something the session has not been
+        # discussing. Follow-ups are anaphoric by definition and always pass.
+        if frame != "followup" and self._introduces_outside_subject(
+            query,
+            session_messages=messages,
+            session_summaries=session_summaries,
+        ):
+            return None
 
         started = time.perf_counter()
         resolved_retrieval_profile = normalize_retrieval_profile(retrieval_profile, analysis_mode)
@@ -2365,14 +2458,7 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
             return None
         if any(token in compact for token in ("def ", "class ", "import ", "traceback", "/api/", "http://", "https://")):
             return None
-        anchor_terms = {
-            "obeos", "o b e o s", "daise", "system", "project", "memory", "work", "working",
-            "progress", "direction", "future", "next", "risk", "fragile", "creator", "mission",
-            "success", "improve", "latency", "hud", "telegram", "tinyprogrammer", "tiny",
-            "recall", "response", "operator", "surface", "thinking", "headed", "becoming",
-            "stable", "stabilize", "stabilizing", "grounded",
-            "everything", "overall", "together", "us", "our", "we", "you", "me",
-        }
+        anchor_terms = self._FRAME_ANCHOR_TERMS
         if not any(term in compact for term in anchor_terms):
             conversational_bridge_tokens = {
                 "this",
@@ -5341,14 +5427,13 @@ class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
                     for event in recent_events[:6]
                 )
             )
-        # Standard chat already carries transcript turns as actual chat messages.
-        if session_messages and prompt_mode.startswith("quick"):
-            sections.append(
-                "Recent transcript:\n" + "\n".join(
-                    f"- {message['role']}: {message['text'][:220]}"
-                    for message in session_messages[-transcript_window:]
-                )
-            )
+        # Both generation paths now carry transcript turns as real chat messages --
+        # jarvis_agent keeps QUICK_TRANSCRIPT_FLOOR of them in quick mode, and
+        # reasoning_pipeline._normalize_conversation slices the last 12 -- so a
+        # flattened copy here would duplicate them. It did: a quick turn carried the
+        # same exchange seven times and overran the 600-token quick budget. Real
+        # role-tagged turns resolve terse follow-ups better than a truncated
+        # text block, so the turns stay and the block goes.
         return self._apply_prompt_budget(sections, prompt_budget_tokens).strip()
 
     def _build_specialist_continuity(self, *, session_id: str) -> str:

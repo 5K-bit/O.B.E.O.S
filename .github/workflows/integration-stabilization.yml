@@ -40,6 +40,12 @@ jobs:
         run: python -m pytest -q tests/test_daise_cutover_event_v1.py tests/test_integration_stabilization.py
       - name: Existing DAISE regression suite
         run: python -m pytest -q tests/test_agent_model_and_memory_profiles.py tests/test_daise_file_chat_and_cognition.py tests/test_identity_safety_semantics.py
+      - name: Conversational grounding suite
+        # Holds the model-first cutover in place: that every reply is generated
+        # rather than returned from a deterministic template, and that grounding is
+        # scoped by subject matter. Without these in CI the templates can come back
+        # green.
+        run: python -m pytest -q tests/test_unified_retrieval_profiles.py tests/test_conversation_project_scope.py tests/test_daise_runtime_truth_evidence.py
       - name: Thoughtglass regression suite
         run: python -m pytest -q tests/test_blackfong_cortex_thoughtglass.py
       - name: Telegram gateway regression suite
@@ -66,6 +72,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Shared test-client backend
+        # starlette >=1.7 made the testclient HTTP backend optional, so a child whose
+        # extras never declared one now dies at collection on
+        # `from fastapi.testclient import TestClient`. The children share this job's
+        # interpreter, so install it once here rather than per child. httpx2 is the
+        # backend starlette names; httpx still works but is deprecated.
+        run: python -m pip install httpx2
       - name: MaxPayne
         working-directory: Max-Payne
         run: python -m pip install -e '.[dev,web]' && python -m pytest -q
