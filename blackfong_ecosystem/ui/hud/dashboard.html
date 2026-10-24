@@ -39,6 +39,12 @@
                 <button class="button button-subtle" id="floatRightRailButton" type="button">Overlay Utilities</button>
                 <button class="button button-subtle" id="dockLeftRailButton" type="button">Dock Navigator</button>
                 <button class="button button-subtle" id="dockRightRailButton" type="button">Dock Utilities</button>
+                <label for="panelOpacity">Inactive overlapping panels</label>
+                <select id="panelOpacity" aria-label="Inactive overlapping panel opacity">
+                  <option value="1">Opaque (off)</option>
+                  <option value="0.85" selected>Subtle transparency (85%)</option>
+                  <option value="0.7">More transparent (70%)</option>
+                </select>
               </div>
             </details>
           </div>
@@ -467,5 +473,6 @@
   <div id="toastStack" class="toast-stack" aria-live="polite"></div>
 
   <script src="/hud-static/dashboard.js?v=20260812-hud-mission-control-v2"></script>
+  <script src="/hud-static/panel-focus.js?v=1"></script>
 </body>
 </html>

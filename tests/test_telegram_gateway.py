@@ -64,12 +64,20 @@ class FakeTelegramClient:
 
 
 class StubOperatorChat:
-    def __init__(self, *, sleep_map: Optional[Dict[str, float]] = None) -> None:
+    def __init__(
+        self,
+        *,
+        sleep_map: Optional[Dict[str, float]] = None,
+        start_events: Optional[Dict[str, threading.Event]] = None,
+        wait_for_start: Optional[Dict[str, threading.Event]] = None,
+    ) -> None:
         self.calls: list[Dict[str, Any]] = []
         self.lock = threading.Lock()
         self.started: Dict[str, float] = {}
         self.finished: Dict[str, float] = {}
         self.sleep_map = dict(sleep_map or {})
+        self.start_events = dict(start_events or {})
+        self.wait_for_start = dict(wait_for_start or {})
 
     def send_message(
         self,
@@ -86,7 +94,7 @@ class StubOperatorChat:
         modality: str = "text",
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        started = time.time()
+        started = time.monotonic()
         with self.lock:
             self.calls.append(
                 {
@@ -103,8 +111,14 @@ class StubOperatorChat:
                 }
             )
             self.started[message] = started
+        start_event = self.start_events.get(message)
+        if start_event is not None:
+            start_event.set()
+        wait_event = self.wait_for_start.get(message)
+        if wait_event is not None:
+            wait_event.wait(timeout=2.0)
         time.sleep(float(self.sleep_map.get(message, 0.0)))
-        finished = time.time()
+        finished = time.monotonic()
         with self.lock:
             self.finished[message] = finished
         return {
@@ -613,7 +627,12 @@ def test_telegram_gateway_voice_notes_route_through_transcription_and_chat(tmp_p
 def test_telegram_gateway_orders_each_thread_but_allows_parallel_identities(tmp_path: Path) -> None:
     memory = build_memory(tmp_path)
     client = FakeTelegramClient()
-    operator_chat = StubOperatorChat(sleep_map={"A1": 0.25, "A2": 0.01, "B1": 0.08})
+    b1_started = threading.Event()
+    operator_chat = StubOperatorChat(
+        sleep_map={"A1": 0.02, "A2": 0.01, "B1": 0.08},
+        start_events={"B1": b1_started},
+        wait_for_start={"A1": b1_started},
+    )
     service = TelegramGatewayService(
         settings=build_settings(allowlist=(("100", "200"), ("101", "201"))),
         memory_service=memory,

@@ -1,0 +1,43 @@
+{
+  "date": "2026-09-11",
+  "environment": ".venv-earth / Python 3.11 / hash-locked Windows dependencies",
+  "backend": {
+    "passed": 117,
+    "failed": 0,
+    "duration_seconds": 42.51,
+    "scope": [
+      "EarthGlass/tests",
+      "tests/test_earth_control.py",
+      "tests/test_event_outbox.py",
+      "tests/test_background_delivery.py",
+      "tests/test_desktop_cancellation.py"
+    ]
+  },
+  "frontend": {
+    "passed": 12,
+    "failed": 0,
+    "typescript": "passed",
+    "production_build": "passed"
+  },
+  "assistant": {
+    "passed": 3,
+    "failed": 0,
+    "scope": "tests/test_runtime_safety.py; preserved prior edits"
+  },
+  "packaging": {
+    "clean_wheel_imports": "passed",
+    "bundled_assets": "passed",
+    "offline_city_search": "passed",
+    "provider_registrations": 16
+  },
+  "other": {
+    "canonical_paths": "passed",
+    "contract_generation": "passed",
+    "working_tree_whitespace": "passed",
+    "undefined_name_and_syntax_checks": "passed"
+  },
+  "notes": [
+    "Pydantic deprecation warnings remain in pinned legacy dependencies.",
+    "Live-feed status and platform checks are separate from these fixture-based results."
+  ]
+}

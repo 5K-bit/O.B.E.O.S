@@ -266,42 +266,6 @@ class CognitionTelemetryService:
         snapshot = self.build_snapshot(session_id=session_id, request_id=request_id, layer=layer, **kwargs)
         return snapshot["ascii_summary"]
 
-    def render_ascii_from_parts(
-        self,
-        *,
-        layer: str,
-        trace_ribbon: List[Dict[str, Any]],
-        overlays: Dict[str, Any],
-        summaries: Dict[str, Any],
-        faults: List[Dict[str, Any]],
-        nodes: List[Dict[str, Any]],
-    ) -> str:
-        header = "THOUGHTGLASS"
-        divider = "────────────────────────────────────────"
-        route_text = " -> ".join(step["label"] for step in trace_ribbon if step["status"] != "pending") or "IDLE"
-        active_nodes = [node for node in nodes if node.get("state") in {"active", "warning", "fault"}][:6]
-        node_lines = [f"{node['label']:<18} {node['state'].upper()}" for node in active_nodes] or ["SYSTEM             IDLE"]
-        faults_text = ", ".join(fault["message"] for fault in faults[:2]) if faults else "none"
-        return "\n".join(
-            [
-                header,
-                divider,
-                f"LAYER       {layer.upper()}",
-                f"QUEUE       {self._gauge(overlays['queue'].get('pending_requests', 0), max_value=6)}",
-                f"LATENCY     {self._gauge(overlays['latency'].get('average_response_time_s', 0), max_value=12)}",
-                f"CONFIDENCE  {self._gauge(overlays.get('confidence', 0.0), max_value=1.0, width=5)}",
-                "",
-                "ROUTE FLOW",
-                route_text,
-                "",
-                "ACTIVE NODES",
-                *node_lines,
-                "",
-                f"FOCUS       {summaries.get('focus_label', 'None')}",
-                f"FAULTS      {faults_text}",
-            ]
-        )
-
     def _resolve_trace(self, *, request_id: Optional[str], request_states: Optional[Dict[str, Dict[str, Any]]]) -> Dict[str, Any]:
         selected_request = request_id
         if not selected_request and request_states:

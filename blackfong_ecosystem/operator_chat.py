@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import sys
 from typing import Any, Dict, List, Optional
 
 from .conversation_memory import ConversationMemoryService, conversation_memory_service
 from .operator_session import get_shared_session_id, link_surface
 from .model_routing import normalize_response_mode, resolve_response_mode
 from .orchestrator_loader import OrchestratorUnavailable, load_unified_orchestrator
+from .session_turn import SessionBusy, session_turn
 
 
 class OperatorChatService:
@@ -35,19 +37,16 @@ class OperatorChatService:
             return {"status": "error", "error": "Message is required"}
         session_id = session_id or get_shared_session_id(surface="operator_chat")
         link_surface("operator_chat")
-        request_id = request_id or self.memory_service.create_correlation_id()[:8]
+        request_id = request_id or self.memory_service.create_correlation_id()
         analysis_mode = normalize_response_mode(
             resolve_response_mode(text, analysis_mode, agent_override=agent_override)
         )
         if self.orchestrator is not None:
             orchestrator = self.orchestrator
-            input_modality = self._resolve_input_modality(modality, None)
-            try:
-                from blackfong_ecosystem.unified_orchestrator import InputModality
-
-                input_modality = self._resolve_input_modality(modality, InputModality)
-            except ImportError:
-                pass
+            # An injected runtime is already loaded. Importing the global
+            # orchestrator here can initialize unrelated services on first send.
+            module = sys.modules.get(type(orchestrator).__module__)
+            input_modality = self._resolve_input_modality(modality, getattr(module, "InputModality", None))
         else:
             try:
                 loaded = load_unified_orchestrator(required=True, instance=True)
@@ -79,14 +78,19 @@ class OperatorChatService:
         orchestrator_context["input_modality"] = str(modality or "text").strip().lower() or "text"
         if stream_callback is not None:
             orchestrator_context["stream_callback"] = stream_callback
-        result = orchestrator.process_input(
-            text,
-            input_modality,
-            context=orchestrator_context,
-        )
+        try:
+            with session_turn(session_id):
+                result = orchestrator.process_input(
+                    text,
+                    input_modality,
+                    context=orchestrator_context,
+                )
+        except SessionBusy as exc:
+            return {"status": "error", "error": str(exc), "error_type": "session_busy",
+                    "session_id": session_id, "request_id": request_id}
         selected_agent = str(result.get("selected_agent") or result.get("agent") or agent_override or "daise")
         payload: Dict[str, Any] = {
-            "status": "error" if result.get("error") else "complete",
+            "status": "error" if result.get("error") or result.get("backend_error") else "complete",
             "session_id": session_id,
             "request_id": request_id,
             "result": result,
@@ -95,6 +99,10 @@ class OperatorChatService:
             "reports": reports,
             "selection": selections[-1] if selections else None,
         }
+        if payload["status"] == "error":
+            payload["error"] = str(result.get("error") or result.get("backend_error"))
+            if result.get("error_type"):
+                payload["error_type"] = str(result["error_type"])
         if include_messages:
             payload["messages"] = self.memory_service.get_session_messages(session_id, limit=80)
         if include_trace:

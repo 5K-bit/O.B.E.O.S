@@ -13,3 +13,12 @@
 [submodule "3000-main"]
 	path = 3000-main
 	url = https://github.com/5K-bit/3000.git
+[submodule "QuietDrop"]
+	path = QuietDrop
+	url = https://github.com/5K-bit/QuietDrop.git
+[submodule "Blackrelay"]
+	path = Blackrelay
+	url = https://github.com/5K-bit/Blackrelay.git
+[submodule "PYBUS"]
+	path = PYBUS
+	url = https://github.com/5K-bit/PYBUS.git

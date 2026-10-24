@@ -1,0 +1,1370 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Earth Control v1",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.watch.add"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "west": {
+              "maximum": 180,
+              "minimum": -180,
+              "title": "West",
+              "type": "number"
+            },
+            "south": {
+              "maximum": 90,
+              "minimum": -90,
+              "title": "South",
+              "type": "number"
+            },
+            "east": {
+              "maximum": 180,
+              "minimum": -180,
+              "title": "East",
+              "type": "number"
+            },
+            "north": {
+              "maximum": 90,
+              "minimum": -90,
+              "title": "North",
+              "type": "number"
+            }
+          },
+          "required": [
+            "name",
+            "west",
+            "south",
+            "east",
+            "north"
+          ],
+          "title": "Watch",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.watch.remove"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "title": "RemoveWatch",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.watches.list"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "Empty",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.goto"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "latitude": {
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Latitude",
+              "type": "number"
+            },
+            "longitude": {
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Longitude",
+              "type": "number"
+            },
+            "altitude_m": {
+              "default": 500000,
+              "maximum": 50000000,
+              "minimum": 100,
+              "title": "Altitude M",
+              "type": "number"
+            }
+          },
+          "required": [
+            "latitude",
+            "longitude"
+          ],
+          "title": "Goto",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.map.set"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": [
+                "auto",
+                "offline",
+                "satellite",
+                "streets"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "title": "Basemap",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.network.set"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": [
+                "auto",
+                "offline"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "title": "Network",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.imagery.set"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "enum": [
+                "true_color",
+                "goes_clouds",
+                "infrared",
+                "water_vapor",
+                "aerosols",
+                "snow_ice",
+                "vegetation",
+                "sea_surface"
+              ],
+              "title": "Product",
+              "type": "string"
+            },
+            "enabled": {
+              "title": "Enabled",
+              "type": "boolean"
+            },
+            "opacity": {
+              "default": 0.7,
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Opacity",
+              "type": "number"
+            }
+          },
+          "required": [
+            "product",
+            "enabled"
+          ],
+          "title": "Imagery",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.search"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "title": "Search",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.layers.list"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "Empty",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.layer.enable"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "layer": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Layer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "layer"
+          ],
+          "title": "Layer",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.layer.disable"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "layer": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Layer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "layer"
+          ],
+          "title": "Layer",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.entities.nearby"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "latitude": {
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Latitude",
+              "type": "number"
+            },
+            "longitude": {
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Longitude",
+              "type": "number"
+            },
+            "altitude_m": {
+              "default": 500000,
+              "maximum": 50000000,
+              "minimum": 100,
+              "title": "Altitude M",
+              "type": "number"
+            },
+            "radius_m": {
+              "default": 50000,
+              "maximum": 2000000,
+              "minimum": 1,
+              "title": "Radius M",
+              "type": "number"
+            },
+            "limit": {
+              "default": 50,
+              "maximum": 250,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "latitude",
+            "longitude"
+          ],
+          "title": "Nearby",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.entity.inspect"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "entity_id": {
+              "maxLength": 250,
+              "minLength": 1,
+              "title": "Entity Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "entity_id"
+          ],
+          "title": "Entity",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.entity.track"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "entity_id": {
+              "maxLength": 250,
+              "minLength": 1,
+              "title": "Entity Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "entity_id"
+          ],
+          "title": "Entity",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.entity.untrack"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "Empty",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.camera.follow"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "entity_id": {
+              "maxLength": 250,
+              "minLength": 1,
+              "title": "Entity Id",
+              "type": "string"
+            },
+            "distance_m": {
+              "default": 5000,
+              "maximum": 5000000,
+              "minimum": 50,
+              "title": "Distance M",
+              "type": "number"
+            }
+          },
+          "required": [
+            "entity_id"
+          ],
+          "title": "Camera",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.camera.orbit"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "entity_id": {
+              "maxLength": 250,
+              "minLength": 1,
+              "title": "Entity Id",
+              "type": "string"
+            },
+            "distance_m": {
+              "default": 5000,
+              "maximum": 5000000,
+              "minimum": 50,
+              "title": "Distance M",
+              "type": "number"
+            }
+          },
+          "required": [
+            "entity_id"
+          ],
+          "title": "Camera",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.camera.overhead"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "entity_id": {
+              "maxLength": 250,
+              "minLength": 1,
+              "title": "Entity Id",
+              "type": "string"
+            },
+            "distance_m": {
+              "default": 5000,
+              "maximum": 5000000,
+              "minimum": 50,
+              "title": "Distance M",
+              "type": "number"
+            }
+          },
+          "required": [
+            "entity_id"
+          ],
+          "title": "Camera",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.camera.reset"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "Empty",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.scene.describe"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {},
+          "title": "Empty",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.scene.snapshot"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "default": "Scene",
+              "maxLength": 200,
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          "title": "Snapshot",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.scene.restore"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "investigation_id": {
+              "pattern": "^[a-f0-9]{24}$",
+              "title": "Investigation Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "investigation_id"
+          ],
+          "title": "Restore",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.annotation.add"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "annotation_id": {
+              "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+              "title": "Annotation Id",
+              "type": "string"
+            },
+            "label": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "geometry": {
+              "default": "point",
+              "enum": [
+                "point",
+                "line",
+                "polygon"
+              ],
+              "title": "Geometry",
+              "type": "string"
+            },
+            "coordinates": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "maxItems": 200,
+              "minItems": 1,
+              "title": "Coordinates",
+              "type": "array"
+            },
+            "color": {
+              "default": "gold",
+              "enum": [
+                "cyan",
+                "gold",
+                "red",
+                "white"
+              ],
+              "title": "Color",
+              "type": "string"
+            }
+          },
+          "required": [
+            "annotation_id",
+            "label",
+            "coordinates"
+          ],
+          "title": "Annotation",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.annotation.remove"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "annotation_id": {
+              "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+              "title": "Annotation Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "annotation_id"
+          ],
+          "title": "RemoveAnnotation",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.timeline.set"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "At"
+            },
+            "advance": {
+              "default": false,
+              "title": "Advance",
+              "type": "boolean"
+            }
+          },
+          "title": "Timeline",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,100}$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "command": {
+          "const": "earth.timeline.play"
+        },
+        "arguments": {
+          "additionalProperties": false,
+          "properties": {
+            "playing": {
+              "title": "Playing",
+              "type": "boolean"
+            },
+            "speed": {
+              "default": 60,
+              "maximum": 3600,
+              "minimum": 0.1,
+              "title": "Speed",
+              "type": "number"
+            }
+          },
+          "required": [
+            "playing"
+          ],
+          "title": "Play",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "scene_id",
+        "command",
+        "arguments"
+      ],
+      "title": "Command",
+      "type": "object"
+    }
+  ]
+}

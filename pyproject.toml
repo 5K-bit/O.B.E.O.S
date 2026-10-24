@@ -7,8 +7,9 @@ name = "blackfong_ecosystem"
 version = "0.1.0"
 dependencies = [
     "click==8.1.7",
-    "pydantic==2.6.4",
+    "pydantic>=2.10,<3",
     "SQLAlchemy==2.0.25",
+    "numpy>=1.24,<2",
     "chromadb>=0.4.22,<0.5",
     "Flask>=3.0.0",
     "Flask-SocketIO>=5.3.0",
@@ -17,6 +18,9 @@ dependencies = [
     "textual>=0.28.0,<0.31.0",
     "PySide6>=6.7.0",
     "networkx>=2.8.0",
+    "keyring==25.7.0",
+    "fastapi>=0.116.0",
+    "uvicorn>=0.35.0",
     "watchdog>=4.0.0",
     "structlog>=24.0.0",
     "pytest>=7.4.0",
@@ -25,52 +29,29 @@ dependencies = [
 requires-python = ">=3.11"
 
 [project.optional-dependencies]
+earth = ["earthglass==0.4.0"]
 desktop = ["PySide6>=6.7.0"]
 desktop-3d = ["PyOpenGL>=3.1.6", "PyOpenGL-accelerate>=3.1.6"]
 hud = ["Flask>=3.0.0", "Flask-SocketIO>=5.3.0"]
 ingestion = ["pypdf>=4", "ebooklib>=0.18", "beautifulsoup4>=4.12"]
-frame = [
-    "frame-msg>=5.2.1",
-    "frame-ble>=1.1.1",
-    "brilliant-sdk>=1.0.0",
-    "brilliant-msg>=7.0.0",
-    "brilliant-ble>=3.1.1",
-]
+frame = ["frame-msg>=5.2.1", "frame-ble>=1.1.1", "brilliant-sdk>=1.0.0", "brilliant-msg>=7.0.0", "brilliant-ble>=3.1.1"]
 
 [project.scripts]
 blackfong = "blackfong_ecosystem.cli:cli"
+obeos-desktop = "blackfong_ecosystem.earth.desktop:main"
 
 [tool.setuptools]
-packages = [
-    "blackfong_ecosystem",
-    "blackfong_ecosystem.agents",
-    "blackfong_ecosystem.cognition",
-    "blackfong_ecosystem.daise",
-    "blackfong_ecosystem.ingestion",
-    "blackfong_ecosystem.knowledge_intel",
-    "blackfong_ecosystem.ui",
-]
+py-modules = ["desktop_shell"]
+
+[tool.setuptools.packages.find]
+include = ["blackfong_ecosystem*"]
 
 [tool.setuptools.package-data]
-blackfong_ecosystem = [
-    "ui/hud/*.html",
-    "ui/hud/*.css",
-    "ui/hud/*.js",
-    "ui/legion/*.html",
-    "ui/legion/*.css",
-    "ui/legion/*.js",
-    "ui/legion/*.webmanifest",
-    "frame_lua/*.lua",
-]
+blackfong_ecosystem = ["contracts/*.json", "ui/hud/*.html", "ui/hud/*.css", "ui/hud/*.js", "ui/legion/*.html", "ui/legion/*.css", "ui/legion/*.js", "ui/legion/*.webmanifest", "frame_lua/*.lua"]
 
 [tool.pytest.ini_options]
-testpaths = [
-    "tests",
-    "blackfong_ecosystem",
-]
-python_files = [
-    "test_*.py",
-]
+testpaths = ["tests", "blackfong_ecosystem"]
+python_files = ["test_*.py"]
 markers = [
     "quick: fast unit and smoke tests for local development",
     "integration: cross-service or API integration tests",

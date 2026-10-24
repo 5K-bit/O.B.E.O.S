@@ -1,0 +1,90 @@
+{
+  "recorded_at": "2026-09-11T17:00:09.639Z",
+  "status": "release_acceptance_open",
+  "scope": [
+    "Earth V2",
+    "Mobility V1",
+    "Presence local implementation"
+  ],
+  "decisions": {
+    "offline_startup_requires_keys": false,
+    "optional_free_public_keys_allowed": true,
+    "paid_integrations_enabled": false,
+    "presence_host_setup": "deferred_by_user",
+    "real_tracking_activated": false
+  },
+  "tests": {
+    "backend": {
+      "passed": 169
+    },
+    "backend_final_api_followup": {
+      "passed": 79,
+      "overlaps_backend_suite": true
+    },
+    "frontend": {
+      "passed": 23,
+      "files": 8
+    },
+    "production_build": "passed",
+    "final_api_ruff_f": "passed",
+    "dependency_integrity": "passed",
+    "generated_contracts": "passed"
+  },
+  "wheel_smoke": {
+    "status": "passed",
+    "provider_count": 50,
+    "startup_seconds": 4.4364261999726295,
+    "assets_bundled": true,
+    "offline_city_search": true,
+    "optional_free_keys_only": true,
+    "offline_remote_assets_blocked": true
+  },
+  "wheels": [
+    {
+      "name": "blackfong_ecosystem-0.1.0-py3-none-any.whl",
+      "sha256": "ba81bba57a8cbaf0d513cf84141245986ae845faf0f0c04482adf9be0ec98113"
+    },
+    {
+      "name": "earthglass-0.4.0-py3-none-any.whl",
+      "sha256": "e15402eff577310e505725de3b7000b1abfdd7710b7b3a662e3bb73ceeb35d6d"
+    }
+  ],
+  "browser": {
+    "surface": "in_app_browser",
+    "offline": true,
+    "city_loaded_objects": 2153,
+    "final_close_zoom_objects": 31,
+    "selection": "CENTRE ST/GRAND ST",
+    "selection_retained_after_reload": true,
+    "route_geometry_visible": true,
+    "attributed_snapshot_saved_and_viewed": true,
+    "snapshot": "earth-v2-offline-scene.png",
+    "metrics": "earth-v2-browser-metrics.json"
+  },
+  "performance": {
+    "cached_query_10000_tracks": {
+      "p50_ms": 43.33,
+      "p95_ms": 93.38,
+      "scope": "direct backend query",
+      "target_p95_ms": 250,
+      "passed": true
+    },
+    "render_1080p_30fps": "not_established"
+  },
+  "native": {
+    "windows": "pending_locked_desktop",
+    "kubuntu": "not_run"
+  },
+  "live_probes": "live-v2-2026-09-11.json",
+  "open_gates": [
+    "Native Windows UI and Intel UHD performance",
+    "Kubuntu desktop acceptance",
+    "Optional keyed provider live verification",
+    "NYC traffic units and expected-speed baseline",
+    "Detailed offline map dataset if street imagery is required",
+    "User-deferred Traccar/Tailscale/phone/viewer end-to-end setup",
+    "Automatic cloud-to-native Presence synchronization not configured"
+  ],
+  "release_committed": false,
+  "deployed": false
+}

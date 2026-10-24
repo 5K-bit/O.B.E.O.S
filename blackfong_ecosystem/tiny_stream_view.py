@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 import httpx
 
+from .http_clients import client_for
+
 try:
     from PySide6.QtCore import QByteArray, Qt, QThread, Signal
     from PySide6.QtGui import QImage, QPixmap
@@ -42,7 +44,7 @@ class TinyStreamWorker(QThread):
         buffer = bytearray()
         try:
             timeout = httpx.Timeout(connect=3.0, read=30.0, write=5.0, pool=3.0)
-            with httpx.Client(timeout=timeout) as client:
+            with client_for(self._stream_url, timeout=timeout) as client:
                 with client.stream("GET", self._stream_url) as response:
                     response.raise_for_status()
                     self.status_changed.emit("connected")

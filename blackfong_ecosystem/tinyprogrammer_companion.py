@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from datetime import datetime
@@ -20,6 +22,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 from .config import paths, tinyprogrammer_settings
 from .conversation_memory import ConversationMemoryService, conversation_memory_service
+from .http_clients import client_for
 from .notification_service import NotificationService, notification_service
 from .policy_engine import PolicyEngine
 from .storage import EventStore
@@ -94,6 +97,22 @@ class TinyProgrammerCompanion:
         self._last_error_code: Optional[str] = None
         self._last_error_summary: Optional[str] = None
         self._next_retry_at: Optional[float] = None
+        # A refused loopback connect takes ~2s on Windows and one workspace snapshot probes ~10 times, so
+        # probe results (including "offline") are reused briefly. Launch/stop paths bypass or reset this.
+        self.live_probe_ttl_s = 15.0
+        self._live_probe_lock = threading.Lock()
+        self._live_probe_cache: Optional[tuple[float, Optional[Dict[str, Any]]]] = None
+        self._http_client: Optional[httpx.Client] = None
+
+    def _client(self) -> httpx.Client:
+        # One shared client: building a client per request reloads the CA bundle (~0.6s each).
+        if self._http_client is None:
+            self._http_client = client_for(self.base_url, timeout=self.timeout)
+        return self._http_client
+
+    def _invalidate_live_probe(self) -> None:
+        with self._live_probe_lock:
+            self._live_probe_cache = None
 
     def get_status(self, *, probe_live: bool = True, require_stream: Optional[bool] = None) -> Dict[str, Any]:
         status = self._fetch_live_status() if probe_live else None
@@ -253,7 +272,7 @@ class TinyProgrammerCompanion:
         consent: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         allow_external = self.adopt_external if adopt_external is None else adopt_external
-        live_status = self._fetch_live_status()
+        live_status = self._fetch_live_status_fresh()
         if live_status is not None:
             status = self._decorate_status(live_status, live=True, require_stream=require_stream)
             self.record_startup_success()
@@ -323,7 +342,7 @@ class TinyProgrammerCompanion:
             result = {"success": False, "status": "requires_consent", "consent": consent_decision}
             self._notify("TinyProgrammer launch needs consent", "Launch was blocked until level-1 consent is provided.", "warning")
             return result
-        live_status = self._fetch_live_status()
+        live_status = self._fetch_live_status_fresh()
         if live_status is not None:
             status = self._decorate_status(live_status, live=True, require_stream=enable_stream)
             self.record_startup_success()
@@ -401,7 +420,7 @@ class TinyProgrammerCompanion:
         while time.time() < deadline:
             if self._process.poll() is not None:
                 break
-            if self._fetch_live_status() is not None:
+            if self._fetch_live_status_fresh() is not None:
                 live = True
                 break
             time.sleep(0.5)
@@ -506,6 +525,7 @@ class TinyProgrammerCompanion:
             result = {"success": True, "status": "already_stopped", "process": self.process_status()}
             self._emit_process_state("stopped", result)
             return result
+        self._invalidate_live_probe()
         self._process.terminate()
         try:
             self._process.wait(timeout=8)
@@ -686,13 +706,22 @@ class TinyProgrammerCompanion:
         live_result["event_id"] = event.id
         return live_result
 
+    def _fetch_live_status_fresh(self) -> Optional[Dict[str, Any]]:
+        """Probe now, ignoring any cached result. Use where the answer decides whether to launch or keep waiting."""
+        self._invalidate_live_probe()
+        return self._fetch_live_status()
+
     def _fetch_live_status(self) -> Optional[Dict[str, Any]]:
-        response = self._get_json("/api/status")
-        if response is None:
-            return None
-        response["mode"] = "live"
-        response["online"] = True
-        return response
+        with self._live_probe_lock:
+            cached = self._live_probe_cache
+            if cached is not None and (time.monotonic() - cached[0]) < self.live_probe_ttl_s:
+                return copy.deepcopy(cached[1])
+            response = self._get_json("/api/status")
+            if response is not None:
+                response["mode"] = "live"
+                response["online"] = True
+            self._live_probe_cache = (time.monotonic(), response)
+            return copy.deepcopy(response)
 
     def _build_offline_status(self) -> Dict[str, Any]:
         overrides = self._load_overrides()
@@ -1132,10 +1161,9 @@ class TinyProgrammerCompanion:
 
     def _get_json(self, path: str) -> Optional[Dict[str, Any]]:
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.get(f"{self.base_url}{path}")
-                response.raise_for_status()
-                payload = response.json()
+            response = self._client().get(f"{self.base_url}{path}")
+            response.raise_for_status()
+            payload = response.json()
             if isinstance(payload, dict):
                 return payload
             return None
@@ -1144,10 +1172,10 @@ class TinyProgrammerCompanion:
 
     def _post_json(self, path: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(f"{self.base_url}{path}", json=payload)
-                response.raise_for_status()
-                data = response.json()
+            response = self._client().post(f"{self.base_url}{path}", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            self._invalidate_live_probe()
             if isinstance(data, dict):
                 return data
             return None

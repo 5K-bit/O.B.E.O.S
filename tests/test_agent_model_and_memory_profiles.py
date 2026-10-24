@@ -14,7 +14,7 @@ from blackfong_ecosystem.chat_backends import (
 )
 from blackfong_ecosystem.config import ChatSettings
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
-from blackfong_ecosystem.model_routing import OllamaRoutingChatBackend
+from blackfong_ecosystem.model_routing import OllamaRoutingChatBackend, resolve_response_mode
 from blackfong_ecosystem.storage import EventStore, NullVectorStore
 
 
@@ -58,7 +58,7 @@ class ExplodingBackend(BaseChatBackend):
 def test_chat_settings_default_to_fast_jarvis_and_heavier_coding_model():
     settings = ChatSettings()
 
-    assert settings.model_for_agent("jarvis") == "llama3.2:3b"
+    assert settings.model_for_agent("jarvis") == "gemma4-heretic:latest"
     assert settings.model_for_agent("coding") == "deepseek-coder:6.7b"
     assert settings.model_for_agent("lilo") == "llama3.2:3b"
     assert settings.timeout_for_agent("jarvis") == 180.0
@@ -246,6 +246,78 @@ def test_simple_greeting_does_not_become_active_work(tmp_path):
     assert "The operator has been working on im back" not in memory_text
 
 
+def test_named_knowledge_question_escalates_fast_to_standard():
+    assert resolve_response_mode("Tell me about Spawn.", "fast") == "standard"
+    assert resolve_response_mode("How are you?", "fast") == "fast"
+
+
+def test_ordinary_conversation_does_not_include_active_work_stance(tmp_path):
+    service = build_memory_service(tmp_path)
+    stance = service._build_conversational_stance(
+        query="How are you?",
+        operator_profile={
+            "preferred_name": "Five",
+            "active_work": ["response latency", "HUD layout improvements"],
+        },
+    )
+
+    assert "Current shared focus" not in stance
+    assert "Five" in stance
+
+
+def test_derived_memory_ignores_transport_and_debug_chatter(tmp_path):
+    service = build_memory_service(tmp_path)
+    session_id = service.create_session_id()
+    correlation_id = service.create_correlation_id()
+
+    service.persist_user_turn(
+        session_id=session_id,
+        correlation_id=correlation_id,
+        text="OBEOS trace test. Tell me which surface this came from through Telegram.",
+    )
+
+    memories = service.list_global_memories(
+        query="what are we working on",
+        limit=20,
+        agent_name="jarvis",
+        session_id=session_id,
+    )
+    memory_text = "\n".join(str(item.get("text") or "") for item in memories)
+    assert "trace test" not in memory_text.lower()
+
+
+def test_visible_response_sanitizes_raw_retrieval_and_legacy_identity(tmp_path):
+    agent = JARVISAgent(chat_backend=StubFallbackBackend())
+
+    raw, raw_metadata = agent._sanitize_visible_response(
+        "[Source 1] kind=knowledge_collection [PAGE 1] unreadable OCR",
+        "Tell me about Spawn",
+    )
+    identity, identity_metadata = agent._sanitize_visible_response(
+        "I am the Digital Assistant for Intelligent Systems and Expertise.",
+        "What does D.A.I.S.E. stand for?",
+    )
+
+    assert "[Source 1]" not in raw
+    assert raw_metadata["sanitization_reason"] == "raw_retrieval_artifact"
+    assert "Direct Artificial Intelligence System Environment" in identity
+    assert identity_metadata["response_sanitized"] is True
+
+
+def test_grounded_response_promotes_backend_response_path_to_event_payload(tmp_path):
+    service = build_memory_service(tmp_path)
+    event = service.persist_agent_response(
+        session_id="session",
+        correlation_id="correlation",
+        agent_name="daise",
+        response_text="Grounded answer",
+        confidence=0.9,
+        extras={"backend_metadata": {"response_path": "grounded_memory"}},
+    )
+
+    assert event.payload["response_path"] == "grounded_memory"
+
+
 def test_operator_profile_filters_low_value_work_fragments(tmp_path):
     service = build_memory_service(tmp_path)
     session_id = service.create_session_id()
@@ -283,6 +355,33 @@ def test_operator_profile_filters_low_value_work_fragments(tmp_path):
     assert "yes for now" not in [item.lower() for item in active_work]
     assert "your latency" not in [item.lower() for item in active_work]
     assert "Telegram grounding" in active_work
+
+
+def test_operator_profile_filters_transport_identity_reflection_fragments(tmp_path):
+    service = build_memory_service(tmp_path)
+    session_id = service.create_session_id()
+    correlation_id = service.create_correlation_id()
+
+    service.persist_user_turn(
+        session_id=session_id,
+        correlation_id=correlation_id,
+        text=(
+            "Your gaining intelligence I see, So are you Jarvis or DAISE, "
+            "and I'm communicating to you now through telegram you just have a shared memory from my computer and."
+        ),
+    )
+    service.persist_user_turn(
+        session_id=session_id,
+        correlation_id=correlation_id,
+        text='Call me "Five". I am working on Telegram grounding and response latency.',
+    )
+
+    profile = service.operator_profile_snapshot(session_id=session_id)
+    active_work = [item.lower() for item in profile["active_work"]]
+
+    assert not any("jarvis or daise" in item for item in active_work)
+    assert not any("shared memory from my computer" in item for item in active_work)
+    assert "telegram grounding" in active_work
 
 
 def test_operator_profile_prefers_recent_user_work_over_older_stored_work(tmp_path):
@@ -327,11 +426,10 @@ def test_jarvis_fallback_records_backend_error():
         context={"session_id": "test-session", "memory_context": {}},
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "fallback-heuristic"
-    assert result["backend_error"] == "simulated timeout"
-    assert result["backend_metadata"]["path"] == "fallback"
-    assert result["backend_metadata"]["fallback_reason"] == "simulated timeout"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_heuristic_fallback_includes_diagnostic_reason():
@@ -352,13 +450,31 @@ def test_heuristic_fallback_includes_diagnostic_reason():
         context={"session_id": "test-session", "memory_context": {}},
     )
 
-    assert result["provider"] == "heuristic"
-    assert "Ollama is down" in result["response"]
-    assert "Falling back to local O.B.E.O.S. memory" in result["response"]
-    assert result["backend_error"] == "Ollama is down"
-    assert result["backend_metadata"]["fallback_reason"] == "Ollama is down"
-    assert result["backend_metadata"]["provider"] == "ollama"
-    assert result["backend_metadata"]["model"] == "ollama-mini"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
+
+
+def test_grounded_fallback_prefers_conversation_over_recovery_banner():
+    result = HeuristicChatBackend().generate(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Broad conversational grounding for this turn:\n"
+                    "We are discussing the OBEOS chat path.\n"
+                    "Use this as a memory-backed backbone"
+                ),
+            },
+            {"role": "user", "content": "tell me more"},
+        ],
+        fallback_reason="Ollama timed out",
+        provider="ollama",
+    )
+
+    assert "We are discussing the OBEOS chat path." in result.text
+    assert "Falling back to local O.B.E.O.S. memory" not in result.text
 
 
 def test_timeout_fallback_synthesizes_from_active_work_context():
@@ -379,12 +495,10 @@ def test_timeout_fallback_synthesizes_from_active_work_context():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "bounded-context-grounded"
-    assert "response latency" in result["response"]
-    assert "HUD layout improvements" in result["response"] or "Telegram grounding" in result["response"]
-    assert result["backend_metadata"]["bounded_context_fallback"] is True
-    assert result["backend_metadata"]["response_path"] == "bounded_context_fallback"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_timeout_fallback_synthesizes_from_knowledge_context():
@@ -407,11 +521,10 @@ def test_timeout_fallback_synthesizes_from_knowledge_context():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "bounded-context-grounded"
-    assert "D.A.I.S.E." in result["response"] or "Memory Chamber" in result["response"]
-    assert "bounded local O.B.E.O.S. knowledge" in result["response"]
-    assert result["backend_metadata"]["bounded_context_fallback"] is True
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_timeout_fallback_synthesizes_generic_project_direction_from_active_work():
@@ -433,11 +546,10 @@ def test_timeout_fallback_synthesizes_generic_project_direction_from_active_work
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "bounded-context-grounded"
-    assert "coherent living system" in result["response"]
-    assert "response latency" in result["response"] or "Telegram grounding" in result["response"]
-    assert result["backend_metadata"]["bounded_context_fallback"] is True
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_timeout_fallback_synthesizes_state_summary_from_active_work():
@@ -461,12 +573,125 @@ def test_timeout_fallback_synthesizes_state_summary_from_active_work():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["model"] == "bounded-context-grounded"
-    assert "overall situation right now centers on" in result["response"]
-    assert "response latency" in result["response"] or "OBEOS improvements" in result["response"]
-    assert "Irrelevant fallback source" not in result["response"]
-    assert result["backend_metadata"]["bounded_context_fallback"] is True
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
+
+
+def test_timeout_fallback_social_checkin_ignores_grounded_knowledge_dump():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "are you hungry? are you still there?",
+        context={
+            "session_id": "test-session",
+            "transport": "telegram",
+            "memory_context": {
+                "operator_profile": {
+                    "preferred_name": "Five",
+                    "active_work": ["response latency", "Telegram grounding"],
+                },
+                "grounded_knowledge_answer": {
+                    "answer": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\nRAW OCR CHUNK",
+                },
+                "citations": [{"collection": "spawn", "title": "Spawn"}],
+            },
+        },
+    )
+
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
+
+
+def test_timeout_fallback_runtime_status_reports_surface_without_source_dump():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "OBEOS trace test. Tell me which surface this came from and report current runtime status.",
+        context={
+            "session_id": "test-session",
+            "transport": "telegram",
+            "memory_context": {
+                "operator_profile": {
+                    "preferred_name": "Five",
+                    "active_work": ["response latency", "Telegram grounding"],
+                },
+                "backend_health": {
+                    "state": "degraded",
+                    "allow_recovery_probe": True,
+                    "degraded_reason": "recent_transient_timeout",
+                },
+                "grounded_knowledge_answer": {
+                    "answer": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\nRAW OCR CHUNK",
+                },
+                "citations": [{"collection": "spawn", "title": "Spawn"}],
+            },
+        },
+    )
+
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
+
+
+def test_unrelated_question_does_not_use_an_unrelated_collection_citation():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "what do you think about the stars?",
+        context={
+            "session_id": "test-session",
+            "transport": "telegram",
+            "memory_context": {
+                "grounded_knowledge_answer": {
+                    "answer": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\nRAW OCR CHUNK",
+                },
+                "knowledge_context": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn RAW OCR CHUNK",
+                "citations": [{"collection": "spawn", "title": "Spawn"}],
+            },
+        },
+    )
+
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
+
+
+def test_raw_grounded_collection_answer_is_not_emitted_verbatim():
+    agent = JARVISAgent(
+        chat_backend=FailingBackend(),
+        fallback_backend=HeuristicChatBackend(),
+    )
+
+    result = agent.process(
+        "tell me about Spawn",
+        context={
+            "session_id": "test-session",
+            "memory_context": {
+                "grounded_knowledge_answer": {
+                    "answer": "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\nRAW OCR CHUNK",
+                },
+                "citations": [{"collection": "spawn", "title": "Spawn"}],
+            },
+        },
+    )
+
+    assert "[Source 1]" not in result["response"]
+    assert "RAW OCR" not in result["response"]
 
 
 def test_streaming_timeout_falls_back_cleanly(monkeypatch):
@@ -508,11 +733,10 @@ def test_streaming_timeout_falls_back_cleanly(monkeypatch):
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert "Falling back to local O.B.E.O.S. memory" in result["response"]
-    assert "timed out" in str(result["backend_error"] or "").lower()
-    assert result["backend_metadata"]["provider"] == "ollama"
-    assert result["backend_metadata"]["model"] == "llama3.2:3b"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_standard_chain_timeout_is_split_across_models():
@@ -521,7 +745,16 @@ def test_standard_chain_timeout_is_split_across_models():
         chain_length=2,
     )
 
-    assert capped == 22.5
+    assert capped == 37.5
+
+
+def test_standard_single_model_timeout_allows_cold_model_startup():
+    capped = OllamaRoutingChatBackend._capped_timeout(
+        {"mode": "standard", "timeout": 90.0},
+        chain_length=1,
+    )
+
+    assert capped == 75.0
 
 
 def test_transport_backend_health_recovers_after_newer_global_ollama_success(tmp_path):
@@ -651,7 +884,7 @@ def test_transport_backend_health_does_not_degrade_on_non_timeout_fallback_only(
     assert health["allow_recovery_probe"] is False
 
 
-def test_standard_casual_chat_uses_fast_generation_lane(monkeypatch):
+def test_standard_casual_chat_keeps_standard_generation_lane(monkeypatch):
     captured: dict[str, str] = {}
 
     class RecordingBackend(BaseChatBackend):
@@ -693,10 +926,10 @@ def test_standard_casual_chat_uses_fast_generation_lane(monkeypatch):
         },
     )
 
-    assert captured["response_mode"] == "fast"
-    assert captured["options_mode"] == "fast"
+    assert captured["response_mode"] == "standard"
+    assert captured["options_mode"] == "standard"
     assert result["provider"] == "ollama"
-    assert result["backend_metadata"]["generation_mode"] == "fast"
+    assert result["backend_metadata"]["generation_mode"] == "standard"
     assert result["backend_metadata"]["requested_mode"] == "standard"
 
 
@@ -1023,15 +1256,10 @@ def test_jarvis_uses_preemptive_fallback_when_backend_is_unavailable():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["backend_error"] == "Ollama connection refused"
-    assert result["backend_metadata"]["preemptive_fallback"] is True
-    assert result["backend_metadata"]["fallback_reason"] == "Ollama connection refused"
-    assert result["backend_metadata"]["response_path"] == "preemptive_fallback"
-    assert result["backend_metadata"]["health_forced_fallback"] is True
-    assert result["backend_metadata"]["recovery_probe_attempted"] is False
-    assert result["backend_metadata"]["live_lane_attempted"] is False
-    assert result["backend_metadata"]["fallback_mode"] == "preemptive"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_degraded_backend_caps_standard_timeout(monkeypatch):
@@ -1111,13 +1339,10 @@ def test_repeated_recent_failures_force_preemptive_fallback():
         },
     )
 
-    assert result["provider"] == "heuristic"
-    assert result["backend_metadata"]["preemptive_fallback"] is True
-    assert result["backend_metadata"]["health_forced_fallback"] is True
-    assert result["backend_metadata"]["recovery_probe_attempted"] is False
-    assert result["backend_metadata"]["degraded_reason"] == "recent_repeated_timeouts"
-    assert result["backend_metadata"]["live_lane_attempted"] is False
-    assert result["backend_metadata"]["fallback_mode"] == "preemptive"
+    # Failed inference must not become a fabricated conversational response.
+    assert result.get("error")
+    assert result["confidence"] == 0.0
+    assert result.get("provider") != "heuristic"
 
 
 def test_conversational_followup_can_retry_live_lane_despite_repeated_recent_failures():

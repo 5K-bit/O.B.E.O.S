@@ -54,6 +54,33 @@ def test_chat_pane_streaming_state_and_full_reply_render():
     assert pane.analysis_select.currentData() == "standard"
 
 
+def test_nested_backend_failure_is_visible_and_partial_is_incomplete():
+    pane = _build_chat_pane()
+    pane._append_stream_token("Only the first part arrived")
+    pane._handle_result({"status": "error", "result": {"backend_error": "Model output limit reached"}})
+    text = pane.transcript.toPlainText()
+    assert "Only the first part arrived" in text
+    assert "Incomplete reply. Model output limit reached" in text
+    assert pane.status_label.text().startswith("FAILED")
+    pane._append_stream_token("late token")
+    assert pane.transcript.toPlainText() == text
+    pane.close()
+
+
+def test_stream_burst_batches_updates_but_final_response_is_immediate():
+    pane = _build_chat_pane()
+    pane._append_stream_token("Start ")
+    for _ in range(100):
+        pane._append_stream_token("word ")
+    assert pane._stream_render_timer.isActive()
+    assert "word" not in pane.transcript.toPlainText()
+    final = "Start " + "word " * 100 + "finished"
+    pane._handle_result({"status": "complete", "result": {"response": final}, "messages": []})
+    assert final in pane.transcript.toPlainText()
+    assert not pane._stream_render_timer.isActive()
+    pane.close()
+
+
 def test_chat_pane_history_renders_full_assistant_message():
     pane = _build_chat_pane()
     long_reply = "memory-context-" * 120
@@ -65,6 +92,25 @@ def test_chat_pane_history_renders_full_assistant_message():
     )
 
     assert long_reply in html
+
+
+def test_stream_has_separate_speaker_and_final_response_wins():
+    pane = _build_chat_pane()
+    pane.transcript.setHtml(pane._message_card_html(role="user", text="Hello"))
+    pane._append_stream_token("Partial")
+    assert "Hello\nD.A.I.S.E" in pane.transcript.toPlainText()
+    pane._handle_result({"status": "complete", "result": {"response": "Final answer"}})
+    assert "Final answer" in pane.transcript.toPlainText()
+    assert "Partial" not in pane.transcript.toPlainText()
+
+
+def test_blank_reply_is_not_success_and_late_tokens_are_ignored():
+    pane = _build_chat_pane()
+    pane._handle_result({"status": "complete", "result": {"response": " "}})
+    assert pane.status_label.text().startswith("FAILED")
+    before = pane.transcript.toPlainText()
+    pane._append_stream_token("Late token")
+    assert pane.transcript.toPlainText() == before
 
 
 def test_chat_pane_message_body_preserves_line_breaks():
@@ -91,3 +137,20 @@ def test_chat_pane_fresh_local_session_stays_local():
     assert "(local)" in pane.session_label.text()
     assert "Fresh local session ready." in pane.transcript.toPlainText()
     assert pane.new_session_button.text() == "Fresh Local Session"
+
+
+def test_busy_chat_rejects_shortcut_send_and_history_changes():
+    from types import SimpleNamespace
+    pane = _build_chat_pane()
+    pane._worker = SimpleNamespace(isRunning=lambda: True)
+    pane.transcript.setPlainText("You: original\nD.A.I.S.E: streaming")
+    before = pane.transcript.toPlainText()
+    session = pane.session_id
+    pane.input.setPlainText("Second send")
+    pane.new_session()
+    pane.refresh_history()
+    pane.send_message()
+    assert pane.session_id == session
+    assert pane.transcript.toPlainText() == before
+    assert pane.input.toPlainText() == "Second send"
+    pane._worker = None

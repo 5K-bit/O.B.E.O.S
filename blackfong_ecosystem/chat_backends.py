@@ -8,9 +8,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generator, Optional, Sequence
 
 import httpx
+from .cancellation import RequestCancelled, cancellation_resource, raise_if_cancelled
 
 from .config import chat_settings
-from .conversation_memory import conversation_memory_service
+from .http_clients import client_for
 from .ollama_models import filter_model_chain
 
 
@@ -65,6 +66,19 @@ class OllamaChatBackend(BaseChatBackend):
 
     provider_name = "ollama"
 
+    @staticmethod
+    def _verify_response_model(expected: str, reported: Any) -> None:
+        if not reported:
+            return
+        def normalized(name: str) -> str:
+            return name if ":" in name.rsplit("/", 1)[-1] else name + ":latest"
+        if normalized(str(reported)) != normalized(expected):
+            raise ChatBackendError(
+                "Ollama returned a different model than requested",
+                metadata={"error_type": "model_identity_mismatch", "provider": "ollama",
+                          "model": expected, "reported_model": str(reported)},
+            )
+
     def __init__(
         self,
         base_url: str | None = None,
@@ -73,7 +87,9 @@ class OllamaChatBackend(BaseChatBackend):
         keep_alive: str | None = None,
         num_ctx: int | None = None,
         num_predict: int | None = None,
+        trust_env: bool = True,
     ) -> None:
+        self.trust_env = trust_env
         self.base_url = (base_url or chat_settings.ollama_url).rstrip("/")
         self.model = model or chat_settings.ollama_model
         self.timeout = timeout if timeout is not None else chat_settings.ollama_timeout
@@ -103,6 +119,10 @@ class OllamaChatBackend(BaseChatBackend):
                 "num_predict": effective_num_predict,
             },
         }
+        if "think" in options:
+            payload["think"] = bool(options["think"])
+        if "temperature" in options:
+            payload["options"]["temperature"] = float(options["temperature"])
 
         timeout = httpx.Timeout(connect=5.0, read=effective_timeout, write=30.0, pool=5.0)
         last_error: Exception | None = None
@@ -131,9 +151,10 @@ class OllamaChatBackend(BaseChatBackend):
             }
 
         for attempt in range(max_attempts):
+            raise_if_cancelled()
             attempt_started = time.perf_counter()
             try:
-                with httpx.Client(timeout=timeout) as client:
+                with client_for(self.base_url, timeout=timeout, **({"trust_env": False} if not self.trust_env else {})) as client, cancellation_resource(getattr(client, "close", lambda: None)):
                     response = client.post(f"{self.base_url}/api/chat", json=payload)
                     response.raise_for_status()
                     data = response.json()
@@ -158,6 +179,7 @@ class OllamaChatBackend(BaseChatBackend):
                 if retry_read_timeout and attempt < max_attempts - 1:
                     time.sleep(0.5)
                     continue
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama request timed out after {effective_timeout:.0f}s for model {effective_model}",
                     metadata=failure_metadata("read_timeout", timeout_reason=f"read_timeout_after_{effective_timeout:.0f}s"),
@@ -174,6 +196,7 @@ class OllamaChatBackend(BaseChatBackend):
                     }
                 )
                 if status_code == 404:
+                    raise_if_cancelled()
                     raise ChatBackendError(
                         f"Ollama model not found: {effective_model}",
                         metadata=failure_metadata("model_not_found"),
@@ -181,6 +204,7 @@ class OllamaChatBackend(BaseChatBackend):
                 if attempt < max_attempts - 1 and status_code >= 500:
                     time.sleep(0.5)
                     continue
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama backend returned HTTP {status_code} for model {effective_model}: {detail[:240]}",
                     metadata=failure_metadata(f"http_{status_code}"),
@@ -198,10 +222,13 @@ class OllamaChatBackend(BaseChatBackend):
                 if attempt < max_attempts - 1:
                     time.sleep(0.5)
                     continue
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama backend unavailable: {exc}",
                     metadata=failure_metadata("http_error"),
                 ) from exc
+            except RequestCancelled:
+                raise
             except Exception as exc:  # pragma: no cover - network failure path
                 last_error = exc
                 attempt_log.append(
@@ -212,19 +239,23 @@ class OllamaChatBackend(BaseChatBackend):
                         "error": str(exc)[:240],
                     }
                 )
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama backend unavailable: {exc}",
                     metadata=failure_metadata("unexpected_error"),
                 ) from exc
         else:  # pragma: no cover - defensive fallback
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama backend unavailable: {last_error}",
                 metadata=failure_metadata("unavailable"),
             )
 
         data = data or {}
+        self._verify_response_model(effective_model, data.get("model"))
         content = (data.get("message") or {}).get("content", "").strip()
         if not content:
+            raise_if_cancelled()
             raise ChatBackendError(
                 "Ollama backend returned an empty response",
                 metadata=failure_metadata("empty_response"),
@@ -236,13 +267,18 @@ class OllamaChatBackend(BaseChatBackend):
         return ChatBackendResult(
             text=content,
             provider=self.provider_name,
-            model=data.get("model", self.model),
+            model=data.get("model") or effective_model,
             metadata={
                 "done": data.get("done"),
+                "finish_reason": data.get("done_reason"),
+                "response_complete": data.get("done") is True and data.get("done_reason") == "stop",
+                "termination": "output_limit" if data.get("done_reason") == "length" else data.get("done_reason"),
                 "total_duration": data.get("total_duration"),
                 "load_duration": data.get("load_duration"),
                 "ollama_total_duration_ms": round(float(total_duration) / 1_000_000, 2) if total_duration else None,
                 "load_duration_ms": round(float(load_duration) / 1_000_000, 2) if load_duration else None,
+                "prompt_eval_ms": round(float(data["prompt_eval_duration"]) / 1_000_000, 2) if data.get("prompt_eval_duration") is not None else None,
+                "generation_ms": round(float(data["eval_duration"]) / 1_000_000, 2) if data.get("eval_duration") is not None else None,
                 "eval_count": data.get("eval_count"),
                 "prompt_eval_count": data.get("prompt_eval_count"),
                 "keep_alive": effective_keep_alive,
@@ -286,10 +322,16 @@ class OllamaChatBackend(BaseChatBackend):
                 "num_predict": effective_num_predict,
             },
         }
+        if "think" in options:
+            payload["think"] = bool(options["think"])
+        if "temperature" in options:
+            payload["options"]["temperature"] = float(options["temperature"])
         timeout = httpx.Timeout(connect=5.0, read=effective_timeout, write=30.0, pool=5.0)
         wall_started = time.perf_counter()
         parts: list[str] = []
+        first_token_ms: float | None = None
         model_name = str(payload["model"])
+        final_data: Dict[str, Any] = {}
         def failure_metadata(error_type: str, *, timeout_reason: str | None = None) -> Dict[str, Any]:
             return {
                 "provider": self.provider_name,
@@ -309,29 +351,36 @@ class OllamaChatBackend(BaseChatBackend):
             }
 
         try:
-            with httpx.Client(timeout=timeout) as client:
+            with client_for(self.base_url, timeout=timeout, **({"trust_env": False} if not self.trust_env else {})) as client, cancellation_resource(getattr(client, "close", lambda: None)):
                 with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
                     if response.status_code == 404:
+                        raise_if_cancelled()
                         raise ChatBackendError(
                             f"Ollama model not found: {model_name}",
                             metadata=failure_metadata("model_not_found"),
                         )
                     response.raise_for_status()
                     for line in response.iter_lines():
+                        raise_if_cancelled()
                         if not line:
                             continue
                         try:
                             data = json.loads(line)
                         except ValueError:
                             continue
+                        self._verify_response_model(str(payload["model"]), data.get("model"))
+                        final_data = data
                         token = str((data.get("message") or {}).get("content") or "")
                         if token:
+                            if first_token_ms is None:
+                                first_token_ms = round((time.perf_counter() - wall_started) * 1000, 2)
                             parts.append(token)
                             if on_token is not None:
                                 on_token(token)
                         if data.get("done"):
                             model_name = str(data.get("model") or model_name)
         except httpx.ReadTimeout as exc:  # pragma: no cover - network failure path
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama request timed out after {effective_timeout:.0f}s for model {model_name}",
                 metadata=failure_metadata("read_timeout", timeout_reason=f"read_timeout_after_{effective_timeout:.0f}s"),
@@ -340,26 +389,38 @@ class OllamaChatBackend(BaseChatBackend):
             detail = exc.response.text.strip()
             status_code = exc.response.status_code
             if status_code == 404:
+                raise_if_cancelled()
                 raise ChatBackendError(
                     f"Ollama model not found: {model_name}",
                     metadata=failure_metadata("model_not_found"),
                 ) from exc
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama backend returned HTTP {status_code} for model {model_name}: {detail[:240]}",
                 metadata=failure_metadata(f"http_{status_code}"),
             ) from exc
         except httpx.HTTPError as exc:  # pragma: no cover - network failure path
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama backend unavailable: {exc}",
                 metadata=failure_metadata("http_error"),
             ) from exc
         except ChatBackendError:
             raise
+        except RequestCancelled:
+            raise
         except Exception as exc:  # pragma: no cover - network failure path
+            raise_if_cancelled()
             raise ChatBackendError(
                 f"Ollama backend unavailable: {exc}",
                 metadata=failure_metadata("unexpected_error"),
             ) from exc
+        raise_if_cancelled()
+        if not final_data.get("done"):
+            raise ChatBackendError(
+                "Ollama stream ended before provider completion",
+                metadata=failure_metadata("incomplete_stream"),
+            )
         content = "".join(parts).strip()
         if not content:
             # Some local Ollama builds accept the stream route but return no deltas.
@@ -383,6 +444,21 @@ class OllamaChatBackend(BaseChatBackend):
             metadata={
                 "mode": invocation_mode,
                 "streamed": True,
+                "first_token_ms": first_token_ms,
+                "done": final_data.get("done"),
+                "finish_reason": final_data.get("done_reason"),
+                "response_complete": final_data.get("done_reason") == "stop",
+                "termination": "output_limit" if final_data.get("done_reason") == "length" else final_data.get("done_reason"),
+                "total_duration": final_data.get("total_duration"),
+                "load_duration": final_data.get("load_duration"),
+                "ollama_total_duration_ms": round(float(final_data.get("total_duration")) / 1_000_000, 2) if final_data.get("total_duration") else None,
+                "load_duration_ms": round(float(final_data.get("load_duration")) / 1_000_000, 2) if final_data.get("load_duration") else None,
+                "prompt_eval_ms": round(float(final_data["prompt_eval_duration"]) / 1_000_000, 2) if final_data.get("prompt_eval_duration") is not None else None,
+                "generation_ms": round(float(final_data["eval_duration"]) / 1_000_000, 2) if final_data.get("eval_duration") is not None else None,
+                "num_ctx": effective_num_ctx,
+                "num_predict": effective_num_predict,
+                "eval_count": final_data.get("eval_count"),
+                "prompt_eval_count": final_data.get("prompt_eval_count"),
                 "wall_time_ms": round((time.perf_counter() - wall_started) * 1000, 2),
             },
         )
@@ -482,14 +558,18 @@ class HeuristicChatBackend(BaseChatBackend):
                 "Hello. D.A.I.S.E. is here with local O.B.E.O.S. memory, recent session context, "
                 "and stored knowledge still available."
             )
-
-        if fallback_reason:
-            fallback_source = "live model" if provider == "ollama" else provider or "the unavailable backend"
-            return (
-                f"The live model lane is unavailable right now. "
-                f"Falling back to local O.B.E.O.S. memory because: {fallback_reason}. "
-                "I’m answering from stored context while the primary backend recovers."
-            )
+        if self._contains_any_phrase(
+            lowered,
+            "good evening",
+            "good morning",
+            "good afternoon",
+            "how are you",
+            "are you still there",
+            "are you there",
+            "still there",
+            "are you hungry",
+        ):
+            return "I am here inside O.B.E.O.S., and I can still answer from local memory while the live model lane recovers."
 
         if self._contains_any_phrase(lowered, "system status") or self._contains_any_word(lowered, "status", "health"):
             return "O.B.E.O.S is online locally. Use the HUD for sessions, memory, commands, and voice controls."
@@ -506,6 +586,13 @@ class HeuristicChatBackend(BaseChatBackend):
         grounded = self._grounded_context_fallback(lowered, context_text)
         if grounded:
             return grounded
+
+        if fallback_reason:
+            return (
+                "The live model lane did not complete this turn, so I do not want to invent an answer. "
+                f"Falling back to local O.B.E.O.S. memory because: {fallback_reason}. "
+                "I can retry the live model when it is available."
+            )
 
         return (
             "I can still help from local O.B.E.O.S. memory and stored knowledge while the live model lane recovers. "
@@ -559,6 +646,8 @@ class HeuristicChatBackend(BaseChatBackend):
             last_context = " ".join(str((last_context_match.group("context") if last_context_match else "") or "").split()).strip(" ,.;:-")
             if last_context.lower().startswith("more specifically, i mean "):
                 last_context = last_context[len("more specifically, i mean ") :].strip(" ,.;:-")
+            from .conversation_memory import conversation_memory_service
+
             continuity_flags = conversation_memory_service._conversational_followup_flags(lowered)
             if thread and any(
                 token in lowered
@@ -816,9 +905,26 @@ class HeuristicChatBackend(BaseChatBackend):
 
         cleaned = re.sub(r"[_*#~`|]+", " ", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:-")
+        structured_summary = bool(passage_snippet) and len(re.findall(r"[A-Za-z]{4,}", cleaned)) >= 8
+        if (
+            "[page" in cleaned.lower()
+            or "ufg " in cleaned.lower()
+            or " j! " in cleaned.lower()
+            or (not structured_summary and HeuristicChatBackend._looks_like_ocr_noise(cleaned))
+        ):
+            return ""
         if len(cleaned) > 320:
             cleaned = cleaned[:317].rstrip(" ,.;:-") + "..."
         return cleaned
+
+    @staticmethod
+    def _looks_like_ocr_noise(text: str) -> bool:
+        tokens = re.findall(r"[A-Za-z]{2,}", str(text or ""))
+        if not tokens:
+            return True
+        uppercase_tokens = [token for token in tokens if token.isupper() and len(token) >= 3]
+        short_tokens = [token for token in tokens if len(token) <= 3]
+        return len(uppercase_tokens) >= 4 or (len(short_tokens) >= 8 and len(tokens) >= 10)
 
     @staticmethod
     def _contains_any_word(text: str, *words: str) -> bool:
