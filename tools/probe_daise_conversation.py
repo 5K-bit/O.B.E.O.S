@@ -18,6 +18,14 @@ import sys
 import time
 from pathlib import Path
 
+# A model reply can carry any character. On a legacy Windows console stdout is
+# cp1252, where printing one would raise UnicodeEncodeError and lose the whole
+# run after the work was already done. Degrade the character, not the result.
+try:  # pragma: no cover - depends on the host console
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 TURNS = [
     ("hi", "greeting"),
     ("hi", "greeting repeated -- must differ from the first"),

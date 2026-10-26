@@ -1,5 +1,24 @@
 # Working agreements for O.B.E.O.S
 
+## The operator is on Windows PowerShell — hand over PowerShell, not bash
+
+Their checkout is `C:\Users\New User\Documents\Projects 2026\O.B.E.O.S (official blackfong
+ecosystem operating system)` — note the spaces and parentheses, so any path that does get
+written needs quoting. The shell is PowerShell 5.1, which rejects bash habits outright:
+
+- **no `&&`** ("The token '&&' is not a valid statement separator in this version") — give
+  separate lines instead, which also means each command reports its own result rather than the
+  chain aborting silently;
+- **no `\` line continuation** (PowerShell uses a backtick, but plain separate lines are
+  better);
+- **no `grep`**, `sed`, `awk`, `curl` as written — `Select-String` and `Invoke-WebRequest` are
+  the equivalents, or drop the filter;
+- **`python`, not `python3`** (fall back to `py`);
+- backslash path separators in arguments: `tools\probe_daise_conversation.py`.
+
+The agent container is Linux, so commands verified there are not automatically pasteable. Write
+the hand-over block in PowerShell.
+
 ## Verification runs on the operator's machine, not in the agent's container
 
 A cloud session has no model backend — nothing answers on `127.0.0.1:8091` (llama.cpp) or
