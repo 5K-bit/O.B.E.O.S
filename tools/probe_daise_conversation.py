@@ -60,10 +60,41 @@ def main() -> int:
         print(f"  /v1/models    : UNREACHABLE ({type(exc).__name__}: {exc})")
 
     if not reachable:
+        # OBEOS starts llama-server itself (LlamaCppServerSupervisor), so an
+        # unreachable port usually means the launch files are missing or the
+        # process died on startup. Say which, instead of leaving it to guesswork.
         print()
-        print("  !! llama-server is not answering. Every turn below will fall back to")
-        print("     a heuristic greeting, which looks exactly like the original bug.")
-        print("     Start llama-server first or this probe proves nothing.")
+        print("  LAUNCH FILES")
+        for label, value in (
+            ("binary", llamacpp_settings.binary_path),
+            ("model", llamacpp_settings.model_path),
+            ("mmproj", llamacpp_settings.mmproj_path),
+        ):
+            path = Path(value) if value else None
+            exists = bool(path and path.is_file())
+            size = f"{path.stat().st_size / 1e9:.2f} GB" if exists else "MISSING"
+            print(f"    {label:7s} {'OK ' if exists else '!! '} {size:>10}  {value or '(unset)'}")
+        print(f"    is_configured(): {llamacpp_settings.is_configured()}")
+
+        from blackfong_ecosystem.config import paths
+
+        log_path = paths.data_root / "logs" / "llamacpp-server.log"
+        print()
+        print(f"  SERVER LOG  {log_path}")
+        if log_path.is_file():
+            tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-25:]
+            for line in tail:
+                print(f"    {line}")
+        else:
+            print("    (no log -- llama-server has never been launched from this checkout)")
+
+        print()
+        print("  !! Not sending any turns: with the backend down they would fall back to a")
+        print("     fixed heuristic greeting that looks exactly like the bug being tested,")
+        print("     and each one is persisted into conversation history. Re-run with")
+        print("     --force to see that fallback deliberately.")
+        if "--force" not in sys.argv:
+            return 2
     print()
 
     from blackfong_ecosystem.operator_chat import OperatorChatService
