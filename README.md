@@ -1,4 +1,10 @@
+<div align="center">
+  <img src="assets/brand/github-banner.svg" alt="O.B.E.O.S. — Offline-first intelligence environment" width="1200">
+</div>
+
 # O.B.E.O.S. / Blackfong
+
+[Quick Start](#quick-start) · [Current Product Truth](#current-product-truth) · [Packaging Status](#packaging-status)
 
 O.B.E.O.S. is the **Official Blackfong Environment Operating System**: a sovereign, offline-first intelligence environment built around one governing spine, one shared memory system, and multiple operator surfaces.
 
@@ -61,7 +67,8 @@ Thoughtglass HUD is still important, but it is no longer the entire product.
 ## Quick Start
 
 ```powershell
-cd "C:\Users\New User\Documents\Projects 2026\O.B.E.O.S (official blackfong ecosystem operating system)"
+git clone https://github.com/5K-bit/O.B.E.O.S.git
+cd O.B.E.O.S
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
