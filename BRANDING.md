@@ -21,3 +21,7 @@ Explain the working product before the roadmap. Keep setup, limits and evidence 
 ## Maintenance
 
 Edit the SVG as text. Keep the name and descriptor inside the left text area (x=48 through x=860); reserve the right area for the symbol. Preserve the viewBox so the README scales on mobile. Change the README alt text whenever the product descriptor changes.
+
+## GitHub presentation
+
+The README opens with the project banner, explicit stage, navigation and a three-part overview. Stage: **Release candidate gated**. CI badges, when present, link to existing workflows and show actual status. Keep original technical documentation below the introduction.

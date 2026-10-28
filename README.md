@@ -1,10 +1,22 @@
 <div align="center">
-  <img src="assets/brand/github-banner.svg" alt="O.B.E.O.S. — Offline-first intelligence environment" width="1200">
+
+<img src="assets/brand/github-banner.svg" alt="O.B.E.O.S. — Offline-first intelligence environment. A Blackfong project." width="1200">
+
+**Offline-first intelligence environment.**
+
+![Stage](https://img.shields.io/badge/stage-Release%20candidate%20gated-79e0cd?style=for-the-badge&labelColor=0c1220)
+
+[Quick start](#quick-start) · [Product identity](#current-product-truth) · [Architecture](#architecture-summary) · [Packaging](#packaging-status)
+
 </div>
 
-# O.B.E.O.S. / Blackfong
+---
 
-[Quick Start](#quick-start) · [Current Product Truth](#current-product-truth) · [Packaging Status](#packaging-status)
+# O.B.E.O.S.
+
+| Govern | Interact | Inspect |
+|---|---|---|
+| Blackfong spine, policy and memory | D.A.I.S.E. and native Workspace | Thoughtglass and Memory Chamber |
 
 O.B.E.O.S. is the **Official Blackfong Environment Operating System**: a sovereign, offline-first intelligence environment built around one governing spine, one shared memory system, and multiple operator surfaces.
 
