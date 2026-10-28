@@ -9,7 +9,17 @@ import sqlite3
 import time
 import webbrowser
 
-if __name__ == "__main__" and "--classic" not in sys.argv:
+# Blackfong Workspace is the default surface of a bare `desktop_shell.py`
+# launch. Earth used to be the default instead (triggered whenever
+# "--classic" was absent), which meant a plain OBEOS launch cold-started
+# both PySide6/model-warmup processes at once - too much for a machine that
+# can't comfortably run both together. Earth is now opt-in only: pass
+# --earth (or use `blackfong desktop earth` / the in-workspace "Start Earth"
+# button) when you actually want it, separately, whenever you want it.
+# --classic is still accepted and is now simply a no-op, kept so Earth's own
+# "Classic Workspace" button (earth/desktop.py's workspace() method, which
+# launches `desktop_shell.py --classic`) keeps working unchanged.
+if __name__ == "__main__" and "--earth" in sys.argv:
     from blackfong_ecosystem.earth.desktop import main as earth_main
     raise SystemExit(earth_main())
 
@@ -1825,6 +1835,21 @@ class MainWindow(QMainWindow):
         ):
             action = float_menu.addAction(label)
             action.triggered.connect(self._logged_handler(f"Float:{label}", lambda checked=False, pid=panel_id: self.window_manager.float_panel(pid)))
+        # "TinyProgrammer" above only floats the dock into view - it says
+        # nothing about the companion process itself, so with autostart off
+        # by default (deliberately: no extra weight at OBEOS launch until the
+        # operator actually wants it) the floated panel just shows "offline".
+        # This action does the other half: it actually starts the companion,
+        # on demand, the same way the automatic retry path would.
+        start_tiny_action = float_menu.addAction("Start TinyProgrammer")
+        start_tiny_action.triggered.connect(self._logged_handler("Start TinyProgrammer", self._manual_start_tiny))
+        # Earth is its own process, started on request only - see the
+        # --earth flip at the top of this file. This starts it the same way
+        # Earth's own "Classic Workspace" button starts the workspace: a
+        # plain subprocess, independent of this one, free to move to another
+        # monitor or to simply not be started at all on a weaker machine.
+        start_earth_action = float_menu.addAction("Start OBEOS Earth")
+        start_earth_action.triggered.connect(self._logged_handler("Start OBEOS Earth", self._manual_start_earth))
         dock_back_action = float_menu.addAction("Dock Back Active")
         dock_back_action.triggered.connect(self._logged_handler("Dock Back Active", self._dock_back_active_panel))
         float_button = self._toolbar_menu_button("Pop Outs", float_menu)
@@ -2349,6 +2374,42 @@ class MainWindow(QMainWindow):
         self._tiny_retry_worker = TinyProgrammerAutoStartWorker(self.services.tinyprogrammer)
         self._tiny_retry_worker.finished.connect(self._on_tiny_retry_finished)
         self._tiny_retry_worker.start()
+
+    def _manual_start_tiny(self) -> None:
+        """Operator-triggered start, independent of autostart_enabled.
+
+        autostart_enabled stays False by default on purpose - it keeps
+        TinyProgrammer from adding weight to every OBEOS launch - so
+        _schedule_tiny_retry_if_needed's automatic path never fires on its
+        own. This is the on-demand equivalent: float the dock so the
+        operator can see status, then run the same background worker the
+        automatic retry uses, so a manual start still can't block the UI
+        thread. _start_tiny_retry already no-ops if a start is in flight.
+        """
+        self.window_manager.float_panel("dock_tiny")
+        self._start_tiny_retry()
+
+    def _manual_start_earth(self) -> None:
+        """Launch OBEOS Earth as its own process, on demand.
+
+        Earth no longer starts automatically with the workspace (see the
+        --earth flip at the top of this file) - it is heavy enough, between
+        its own PySide6/Chromium renderer and local model warmup, that
+        running it alongside this workspace by default was overloading
+        weaker machines. This mirrors how Earth itself starts the workspace
+        from its own "Classic Workspace" button: a plain, independent
+        subprocess, not something this window manages or owns afterward.
+        """
+        import subprocess
+        from pathlib import Path
+
+        script_path = Path(__file__).resolve()
+        command = [sys.executable, str(script_path), "--earth"]
+        try:
+            subprocess.Popen(command, cwd=str(script_path.parent))
+            self.statusBar().showMessage("Starting OBEOS Earth…", 5000)
+        except OSError as exc:
+            self.statusBar().showMessage(f"Could not start OBEOS Earth: {exc}", 8000)
 
     def _on_tiny_retry_finished(self, result: Dict[str, Any]) -> None:
         if self._tiny_retry_worker is not None:

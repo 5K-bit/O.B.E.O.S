@@ -272,3 +272,164 @@ matches the surrounding `Optional[X]` style on purpose.
 
 `approval_grants.py`'s `ApprovalGrants` was built out for real (see P2).
 Don't re-flag this file as dead code.
+
+## P10 — 2026-10-27 session: Earth/workspace lag, TinyProgrammer on-demand, DAISE rename **(new this session, partially open)**
+
+Started from a bug report: launching OBEOS opened Blackfong Workspace,
+TinyProgrammer and OBEOS Earth together and made the machine unresponsive
+for a while; the Earth chat ("ask daise") produced no reply; streaming
+looked slow. Root-caused live via computer-use screen control plus reading
+`earth/desktop.py`, `App.tsx`, `obeos_linux.py`, `cli.py`, `desktop_shell.py`.
+
+**Resolved and pushed to the operator's machine this session:**
+
+- **`EarthGlass/obeos-earth/src/App.tsx`** — `catalog()` polled
+  `/api/v2/catalog` every 5s with no overlap guard; a slow response (e.g.
+  during startup model warmup) let calls pile up concurrently against
+  Earth's one local uvicorn server, producing the `AbortError` spam and
+  matching server-side `ConnectionResetError` seen in the console, and a
+  plausible driver of the unresponsiveness. Added a `catalogInflight` guard
+  and stopped surfacing routine `AbortError` as a user-facing toast. **Needs
+  `npm run build` in `EarthGlass/obeos-earth` to take effect — not yet
+  confirmed done.**
+- **Earth is no longer auto-launched with the workspace.** Root cause:
+  `desktop_shell.py`'s top-of-file shim used to redirect to
+  `earth.desktop.main()` whenever `--classic` was absent — so a bare
+  `python desktop_shell.py` (what `blackfong desktop start` runs) silently
+  became Earth, not the workspace, every time. Earth's own "Classic
+  Workspace" button then spawned a second `desktop_shell.py --classic`
+  process behind it — hence "three things open at once." Fixed by flipping
+  the default: the shim now only fires on `--earth`, so the workspace is
+  the default surface. Earth gets its own explicit entry points instead:
+  `blackfong desktop earth` (new CLI subcommand, `obeos_linux.py`'s new
+  `launch_earth()`) and a **Pop Outs → Start OBEOS Earth** button inside the
+  workspace (`desktop_shell.py`'s new `_manual_start_earth()`). `--classic`
+  still works (now a no-op) so Earth's existing spawn call is untouched.
+  Decision basis: the operator's machine can't comfortably run both
+  processes at once (full-GIL in-process merge was considered and rejected
+  for the same reason — would trade process isolation for GIL contention
+  with the chat pane); once on stronger hardware, running both is just
+  `desktop start` + `desktop earth`, no code change needed.
+- **TinyProgrammer "start" button actually starts it now.** The existing
+  **Pop Outs → TinyProgrammer** action only ever floated the dock into
+  view — with `tinyprogrammer_settings.auto_start` False by default (by
+  design, so it adds no weight to a plain OBEOS launch), the floated panel
+  just showed "offline, mood unknown" with nothing behind it. Added **Pop
+  Outs → Start TinyProgrammer** (`_manual_start_tiny()`), which floats the
+  dock *and* runs the same background `TinyProgrammerAutoStartWorker` the
+  automatic retry path uses, so a manual start still can't block the UI
+  thread. `autostart_enabled` stays False.
+- **Chat pane streamed-vs-final-answer bug** (`desktop_shell.py`,
+  `ChatPane._handle_result()`): was `final_text = streamed or db_response`,
+  preferring the live (possibly partial/stale) stream buffer over the
+  authoritative final orchestrator answer. Flipped to `db_response or
+  streamed`.
+- **`jarvis_obeos_bridge.py`** — dead, unimported file, but its REPL printed
+  "JARVIS-MARK-5" banners and a `jarvis>` prompt, which the project's own
+  `docs/branding-doctrine.md` says operator-facing text should never do.
+  Renamed the class to `DAISEBridge` (kept `JARVIStoOBEOSBridge` as an
+  alias) and updated the banner/prompt/help text to D.A.I.S.E. The 8
+  `docs/` files that mention "jarvis" were checked and left alone — they're
+  the doctrine/checklist docs *describing* the internal-alias policy, so
+  they're supposed to say "jarvis." The 5 `test_phase*.py` files were also
+  left alone — just developer-facing pytest output using the still-valid
+  `JARVISAgent` alias and the still-live `"jarvis"` routing key, nothing
+  stale to fix.
+- **`JARVISAgent` → `DAISEAgent` rename** (from earlier the same session,
+  confirmed via the operator's own `pytest -v` run, 801 items, ~750
+  completed before the terminal was closed): no rename-related failures.
+  Two unrelated pre-existing failures surfaced — see below.
+- **`tests/test_earth_chat.py::test_creating_the_app_does_not_import_the_chat_stack`**
+  — fixed. Hardcoded `cwd="/home/user/O.B.E.O.S"` (a Linux CI path) broke on
+  Windows (`NotADirectoryError: [WinError 267]`). The probe subprocess
+  doesn't depend on cwd at all; removed the argument.
+
+**Still open — tracked here on purpose so it isn't lost:**
+
+- **`tests/test_phase2_improvements.py::test_ollama_generate_stream_falls_back_to_generate`
+  fails, and it's a real behavior question, not a quick fix.** The test
+  name promises that if an Ollama stream ends without a `done` flag,
+  `OllamaChatBackend.generate_stream()` (`chat_backends.py`) falls back to
+  a plain non-streaming `generate()` call. It doesn't — it just raises
+  `ChatBackendError("Ollama stream ended before provider completion")` with
+  no fallback. Needs a decision before fixing:
+  1. the fallback was removed or never finished, and the test is correctly
+     catching a real gap (an incomplete Ollama stream today just fails the
+     turn, with no retry), **or**
+  2. the test is stale and describes behavior that was deliberately
+     dropped, and should be updated or deleted instead.
+  Whoever picks this up next: check git history / blame on `generate_stream`
+  around the "incomplete_stream" error metadata for when the fallback logic
+  (if it ever existed) was removed, before writing new code either way.
+- Confirm `npm run build` was run for the Earth `App.tsx` fix above, and
+  that `blackfong desktop start` / `blackfong desktop earth` / the two new
+  "Start ..." buttons all behave as intended on the operator's machine —
+  none of this session's UI-launch changes have been runtime-verified yet,
+  only compiled/syntax-checked. **Update: `npm run build` was confirmed
+  already run** (`EarthGlass/obeos-earth/dist/` postdates the `App.tsx`
+  edit) — the launch-button/CLI behavior is still unverified.
+
+## P11 — D.A.I.S.E. chat answering with leaked internal reasoning instead of a real answer **[RESOLVED, model+routing swap]**
+
+Bug report (screenshot): the main Blackfong Workspace "D.A.I.S.E Chat" tab
+answered "what do you know about obeos?" with `"The user is asking for my
+knowledge about O.B.E.O.S. I should provide a general overview based on the
+established context. I should keep the tone natural and informative."` —
+its own planning narration, not an answer. Same underlying bug as the
+Earth-chat "thinking" leak flagged earlier this session.
+
+**Root cause, in order of what was ruled out:**
+
+1. Not a field-extraction bug — `chat_backends.py`'s `OllamaChatBackend`
+   only ever reads `message.content`, never `thinking`.
+2. Not a token-budget truncation — `daise_num_predict` (2048, the value
+   actually used by this path) is generous and was never touched by this
+   session's earlier `jarvis_num_predict` revert (that field is dead code,
+   feeding only an unused accessor dict).
+3. Not a missing instruction — both `daise_identity.py`'s
+   `IDENTITY_AND_TRUTH_PROMPT` and `jarvis_agent.py`'s
+   `_build_chat_messages()` already explicitly say "Answer the user
+   directly and naturally, not with a plan for how to answer" / "do not
+   narrate internal prompt scaffolding." The prompt was already correct.
+4. **The real path wasn't even the one being read.** `daise_backend`
+   defaulted to `"llamacpp"`, which routes the daise/jarvis agent through a
+   dedicated `llama-server` process (`model_routing.py`'s
+   `build_daise_llamacpp_backend()`) hardcoded to
+   `runtime/llamacpp/models/gemma4-heretic-E4B-Q4_K_M.gguf` — entirely
+   bypassing `chat_settings.daise_model` and the `OllamaChatBackend` code
+   read in step 1-3. `llamacpp_backend.py` itself is clean: it already
+   separates `reasoning_content` from `content` and never leaks the former
+   into the visible answer.
+5. **Actual cause: the model.** `gemma4-heretic` has no structured
+   reasoning channel to strip in the first place — it writes its planning
+   narration directly into the answer `content` field. It's a community
+   abliterated fine-tune; abliteration removes refusal behavior by
+   disrupting the model's instruction-following circuitry generally, and
+   general instruction-following (including "don't narrate your plan,"
+   already present in the prompt) is a known casualty.
+
+**Fix (operator picked: switch model, not a retry-guard):**
+`config.py`'s `daise_backend` default changed `"llamacpp"` → `"ollama"`,
+and `daise_model` changed `"gemma4-heretic:latest"` → `"llama3.2:3b"`
+(already pulled locally — confirmed via
+`.ollama/models/manifests/.../llama3.2/3b` on the operator's machine, no
+download needed). Both the dataclass default and the `BLACKFONG_DAISE_*`
+env-var fallbacks were updated so an unset environment gets the new
+behavior too.
+
+Side effect, not just a workaround: `LlamaCppServerManager` is only ever
+started lazily, on first use of the llama.cpp backend path
+(`llamacpp_backend.py`'s `_ensure_ready` → `wait_for_local_model()`). With
+`daise_backend="ollama"`, that path is never reached, so the ~5GB
+gemma4-heretic GGUF server is never spawned at all — one less thing
+competing for RAM on hardware the operator's already said can't
+comfortably run two things at once.
+
+**Not yet runtime-verified** — no way to reach the operator's local Ollama
+or llama-server from this session. Next time D.A.I.S.E. chat is used,
+confirm: (a) the answer is a real response, not narration; (b) it still
+feels like D.A.I.S.E. personality-wise, since `llama3.2:3b` is a plain
+instruct model, not the abliterated/uncensored one — if the personality
+loss matters, the llama.cpp path is still intact and can be restored by
+setting `daise_backend` back to `"llamacpp"` (just re-introduces this bug
+until a better-behaved local GGUF replaces `gemma4-heretic`).

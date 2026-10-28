@@ -669,6 +669,9 @@ class OBEOSLinuxPlatformService:
         return self.workspace_root / "desktop_shell.py"
 
     def launch_workspace(self, *, execute: bool = True) -> Dict[str, Any]:
+        # desktop_shell.py now defaults to the Blackfong Workspace surface
+        # (Earth no longer launches automatically - see launch_earth below),
+        # so no flag is needed here.
         script_path = self.workspace_script_path()
         command = [sys.executable, str(script_path)]
         result = {
@@ -686,6 +689,46 @@ class OBEOSLinuxPlatformService:
                 {
                     "status": "unavailable",
                     "error": f"Workspace shell script not found at {script_path}",
+                }
+            )
+            return result
+        if not execute:
+            result["status"] = "planned"
+            return result
+        try:
+            process = subprocess.Popen(command, cwd=str(self.workspace_root))
+        except OSError as exc:
+            result.update({"status": "failed", "error": str(exc)})
+            return result
+        result.update({"status": "launched", "pid": process.pid})
+        return result
+
+    def launch_earth(self, *, execute: bool = True) -> Dict[str, Any]:
+        """Start OBEOS Earth as its own process, independent of the
+        Blackfong Workspace. Earth used to be the default surface of a bare
+        `desktop_shell.py` launch, which meant it cold-started every time the
+        workspace did - two PySide6/model-warmup processes racing for CPU at
+        once, which is too much for a weaker machine. Earth is now an
+        explicit, separate start: nothing launches it until this (or the
+        matching in-workspace button) is called, and the operator decides
+        whether their machine can run both at once."""
+        script_path = self.workspace_script_path()
+        command = [sys.executable, str(script_path), "--earth"]
+        result = {
+            "action": "earth",
+            "command": "earth",
+            "status": "planned",
+            "surface": "obeos_earth",
+            "workspace_mode": "managed_blackcomputer_workspace",
+            "managed_surface_rule": "OBEOS Earth is its own managed surface, started independently of Blackfong Workspace.",
+            "script_path": str(script_path),
+            "command_line": command,
+        }
+        if not script_path.exists():
+            result.update(
+                {
+                    "status": "unavailable",
+                    "error": f"Earth launcher script not found at {script_path}",
                 }
             )
             return result

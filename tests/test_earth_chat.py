@@ -50,8 +50,12 @@ def test_creating_the_app_does_not_import_the_chat_stack(client, tmp_path):
         "print('LEAKED' if 'blackfong_ecosystem.operator_chat' in sys.modules else 'CLEAN');"
         "control.close(); engine.stop()"
     )
+    # No cwd pinned here: the probe only imports already-installed packages
+    # and works entirely from the absolute tmp_path it's given, so it has no
+    # dependency on the working directory. A hardcoded Linux CI path here
+    # previously broke this test on Windows dev machines.
     out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
-                         cwd="/home/user/O.B.E.O.S", timeout=180)
+                         timeout=180)
     assert "CLEAN" in out.stdout, out.stdout + out.stderr
 
 

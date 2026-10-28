@@ -1,11 +1,18 @@
 """
-JARVIS-MARK-5 to O.B.E.O.S Bridge Layer
+Legacy JARVIS-MARK-5 to O.B.E.O.S Bridge Layer (unused: nothing in the
+codebase imports this module; kept only as a historical standalone CLI).
 
-Compatibility wrapper that allows JARVIS-MARK-5 to use O.B.E.O.S
-as the intelligence backend while maintaining API compatibility.
+D.A.I.S.E. is the canonical brain; "jarvis"/"JARVIS-MARK-5" survives here
+only as the legacy identifier this bridge was written to be compatible
+with. Per the project's identity doctrine, operator-facing text should
+never present as "Jarvis" - so the console banner, prompt and help text
+below were updated to D.A.I.S.E. even though the module itself is dead.
+
+Compatibility wrapper that allows the legacy JARVIS-MARK-5 CLI to use
+O.B.E.O.S as the intelligence backend while maintaining API compatibility.
 
 This is the gradual migration path:
-- JARVIS becomes the interface/CLI
+- D.A.I.S.E. (formerly JARVIS) is the interface/CLI
 - O.B.E.O.S becomes the control plane
 - Events provide observability
 - Backward compatible queries still work
@@ -21,48 +28,48 @@ from blackfong_ecosystem.unified_orchestrator import unified_orchestrator, Input
 from blackfong_ecosystem.observability import log_action, LogLevel
 
 
-class JARVIStoOBEOSBridge:
+class DAISEBridge:
     """
-    Compatibility layer between JARVIS-MARK-5 and O.B.E.O.S.
-    
-    Routes JARVIS queries through O.B.E.O.S while maintaining
-    backward compatibility with existing JARVIS code.
+    Compatibility layer between the legacy JARVIS-MARK-5 CLI and O.B.E.O.S.
+
+    Routes JARVIS-MARK-5 queries through O.B.E.O.S while maintaining
+    backward compatibility with existing JARVIS-MARK-5 code.
     """
-    
+
     def __init__(self):
         self.orchestrator = unified_orchestrator
         self.query_count = 0
-    
+
     def respond(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> str:
         """
-        JARVIS-compatible respond() method.
-        
+        JARVIS-MARK-5-compatible respond() method.
+
         Routes through O.B.E.O.S and returns string response.
         """
-        
+
         # Detect query type
         modality = self._detect_modality(prompt)
-        
+
         # Process through O.B.E.O.S
         result = self.orchestrator.process_input(
             prompt,
             modality=modality,
             context=context
         )
-        
+
         self.query_count += 1
-        
+
         # Log response
         log_action(
             LogLevel.INFO,
-            "jarvis_bridge",
+            "daise_bridge",
             "respond_completed",
             query_count=self.query_count,
             agent=result.get("agent"),
             confidence=result.get("confidence")
         )
-        
-        # Return just the response text for JARVIS compatibility
+
+        # Return just the response text for JARVIS-MARK-5 compatibility
         return result.get("response", "No response generated")
     
     def _detect_modality(self, prompt: str) -> InputModality:
@@ -99,17 +106,17 @@ class JARVIStoOBEOSBridge:
     
     def run_repl(self):
         """
-        JARVIS-compatible REPL that dispatches to O.B.E.O.S.
+        JARVIS-MARK-5-compatible REPL that dispatches to O.B.E.O.S.
         """
         print("\n" + "="*70)
-        print("🤖 JARVIS-MARK-5 (Powered by O.B.E.O.S)")
+        print("🤖 D.A.I.S.E. (Powered by O.B.E.O.S, legacy JARVIS-MARK-5 bridge)")
         print("="*70)
         print("Status: Connected to O.B.E.O.S unified orchestrator")
         print("Commands: help, status, stress, exit\n")
-        
+
         while True:
             try:
-                user_input = input("jarvis> ").strip()
+                user_input = input("daise> ").strip()
                 
                 if not user_input:
                     continue
@@ -140,25 +147,27 @@ class JARVIStoOBEOSBridge:
                 print(f"Error: {e}")
     
     def _print_help(self):
-        """Print help compatible with JARVIS"""
-        print("\nJARVIS-MARK-5 Commands:")
+        """Print help compatible with JARVIS-MARK-5"""
+        print("\nD.A.I.S.E. Commands:")
         print("  <query>     - Ask a question (routed to O.B.E.O.S)")
         print("  status      - Show system status")
         print("  stress      - Run stress test")
         print("  help        - Show this help message")
         print("  exit        - Exit the system\n")
-    
+
     def _print_status(self):
         """Print status"""
-        print(f"\n✅ JARVIS-MARK-5 Status:")
+        print(f"\n✅ D.A.I.S.E. Status:")
         print(f"  Queries processed: {self.query_count}")
         print(f"  Backend: O.B.E.O.S Unified Orchestrator")
         print(f"  Status: Operational")
         print()
 
 
-# Global bridge instance
-jarvis_bridge = JARVIStoOBEOSBridge()
+# Global bridge instance. Kept as the name legacy callers of this unused,
+# unimported module would have used; D.A.I.S.E. is the current identity.
+JARVIStoOBEOSBridge = DAISEBridge
+jarvis_bridge = DAISEBridge()
 
 
 if __name__ == "__main__":

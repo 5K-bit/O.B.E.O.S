@@ -1119,6 +1119,26 @@ def desktop_workspace_command(dry_run: bool) -> None:
     )
 
 
+@desktop_group.command("earth")
+@click.option("--dry-run", is_flag=True, help="Show the Earth launch contract without executing it.")
+def desktop_earth_command(dry_run: bool) -> None:
+    """Start OBEOS Earth on its own, independent of Blackfong Workspace.
+
+    `blackfong desktop start` no longer launches Earth automatically - on a
+    machine that can't comfortably run both at once, start the workspace
+    with `desktop start` and bring Earth up separately with this command
+    only when you actually want it.
+    """
+    from .obeos_linux import OBEOSLinuxPlatformService
+
+    click.echo(
+        json.dumps(
+            OBEOSLinuxPlatformService(workspace_root=paths.root).launch_earth(execute=not dry_run),
+            indent=2,
+        )
+    )
+
+
 @cli.command("home")
 @click.option("--dry-run", is_flag=True, help="Show the return-to-OBEOS-home contract without executing it.")
 def home_command(dry_run: bool) -> None:
