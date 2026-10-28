@@ -7,6 +7,8 @@ from typing import Any, Dict, Optional
 
 import click
 
+from .terminal_brand import PRODUCT, product_version, show_banner
+
 from .config import hud_settings, paths
 from .daise import DAISE
 from .events import EVENT_SOURCES, Event
@@ -16,9 +18,14 @@ from .capsules import CapsuleImporter
 from .knowledge import ingest_file, ingest_directory
 
 
-@click.group()
-def cli() -> None:
-    """Blackcomputer / D.A.I.S.E. command-line interface."""
+@click.group(epilog="BLACKFONG / PROJECTS · Operator authority stays with you.")
+@click.version_option(version=product_version(), prog_name=PRODUCT)
+@click.option("--banner", is_flag=True, help="Show the product banner on stderr, including in scripts.")
+@click.option("--no-banner", is_flag=True, help="Suppress the interactive startup banner.")
+def cli(banner: bool = False, no_banner: bool = False) -> None:
+    """O.B.E.O.S. — Blackcomputer / D.A.I.S.E. operator CLI. By Blackfong."""
+    if not no_banner:
+        show_banner(force=banner)
 
 
 @cli.command("init")
