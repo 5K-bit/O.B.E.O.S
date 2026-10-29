@@ -21,16 +21,25 @@ from blackfong_ecosystem.chat_backends import (
     build_agent_chat_backend,
 )
 from blackfong_ecosystem.config import chat_settings
+from blackfong_ecosystem.daise_identity import (
+    IDENTITY_AND_TRUTH_PROMPT,
+    grounded_answer_message,
+    runtime_truth_message,
+)
+from blackfong_ecosystem.history_budget import estimated_tokens, recent_history
 from blackfong_ecosystem.conversation_memory import conversation_memory_service
 from blackfong_ecosystem.model_routing import (
     backend_options_for_context,
     build_routed_chat_backend,
-    detect_intent,
     model_chain_for_agent,
     normalize_response_mode,
 )
 from blackfong_ecosystem.event_client import EventClient
 from blackfong_ecosystem.tool_dispatcher import ToolDispatcher
+
+
+# Raw transcript messages kept for quick-mode turns (still token-budgeted).
+QUICK_TRANSCRIPT_FLOOR = 6
 
 
 class JARVISAgent(Agent):
@@ -123,6 +132,11 @@ class JARVISAgent(Agent):
 
             # Step 3: Generate response with the local chat backend
             response_text, backend_info = self._generate_response(user_input, context or {})
+            response_text, sanitization = self._sanitize_visible_response(response_text, user_input)
+            backend_info = dict(backend_info)
+            backend_metadata = dict(backend_info.get("metadata") or {})
+            backend_metadata.update(sanitization)
+            backend_info["metadata"] = backend_metadata
             
             step_3 = ReasoningStep(
                 step_id="generate_response",
@@ -135,12 +149,12 @@ class JARVISAgent(Agent):
                     "backend_error": backend_info.get("backend_error"),
                     "metadata": backend_info.get("metadata"),
                 },
-                confidence=0.92 if backend_info.get("provider") == "ollama" else 0.68,
+                confidence=0.0 if backend_info.get("backend_error") else (0.92 if backend_info.get("provider") == "ollama" else 0.68),
             )
             trace.steps.append(step_3)
-            
+
             trace.final_decision = response_text
-            trace.overall_confidence = 0.92 if backend_info.get("provider") == "ollama" else 0.68
+            trace.overall_confidence = 0.0 if backend_info.get("backend_error") else (0.92 if backend_info.get("provider") == "ollama" else 0.68)
             
             # Emit reasoning trace as an event
             correlation_id = context.get("correlation_id") if context else None
@@ -161,7 +175,9 @@ class JARVISAgent(Agent):
                 "provider": backend_info.get("provider"),
                 "model": backend_info.get("model"),
                 "backend_error": backend_info.get("backend_error"),
+                "error": backend_info.get("backend_error"),
                 "backend_metadata": backend_info.get("metadata"),
+                "response_path": (backend_info.get("metadata") or {}).get("response_path") or "unknown",
                 "agent": self.name,
             }
         
@@ -175,33 +191,45 @@ class JARVISAgent(Agent):
                 "error": str(e),
                 "agent": self.name,
             }
+
+    def _sanitize_visible_response(self, response_text: str, user_input: str) -> tuple[str, Dict[str, Any]]:
+        """Keep internal fallback/source artifacts out of the operator transcript."""
+        text = str(response_text or "").strip()
+        lowered = text.lower()
+        raw_markers = ("[source ", "kind=knowledge_collection", "[page 1]", "raw ocr")
+        if any(marker in lowered for marker in raw_markers):
+            return (
+                "I found local material related to this question, but the retrieved extract was not readable enough to present reliably. Please rephrase the topic or ask me to inspect that collection directly.",
+                {"response_sanitized": True, "sanitization_reason": "raw_retrieval_artifact"},
+            )
+        # These phrases are implementation diagnostics and should not become
+        # D.A.I.S.E.'s conversational voice when a backend answer is usable.
+        if not any(token in str(user_input or "").lower() for token in ("trace", "diagnos", "fallback", "backend")):
+            text = re.sub(
+                r"\s*The live model lane missed this turn, so I am answering from bounded local O\.B\.E\.O\.S\. memory and knowledge instead\.?\s*$",
+                "",
+                text,
+                flags=re.IGNORECASE,
+            ).strip()
+            text = re.sub(r"\s*I still have our recent work around .*?(?=\.|$)", "", text, flags=re.IGNORECASE).strip()
+        identity_replacements = (
+            "Digital Assistant for Intelligent Systems and Expertise",
+            "Distributed Assistant for Innovative Solutions and Expertise",
+        )
+        if any(phrase.lower() in lowered for phrase in identity_replacements):
+            text = re.sub(
+                r"Digital Assistant for Intelligent Systems and Expertise|Distributed Assistant for Innovative Solutions and Expertise",
+                "Direct Artificial Intelligence System Environment",
+                text,
+                flags=re.IGNORECASE,
+            )
+        return text or "I'm here and ready to help. What would you like to work through?", {
+            "response_sanitized": text != str(response_text or "").strip(),
+            "sanitization_reason": "internal_phrase_cleanup" if text != str(response_text or "").strip() else None,
+        }
     
     def _generate_response(self, user_input: str, context: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
         """Generate a response with the configured local backend and safe fallback."""
-        grounded = self._grounded_memory_response(context) or self._grounded_knowledge_response(context)
-        if grounded is not None:
-            prompt_metrics = dict(((context.get("memory_context") or {}).get("prompt_metrics") or {}))
-            metadata = dict(grounded["metadata"])
-            metadata["prompt_metrics"] = prompt_metrics
-            metadata.setdefault("prompt_message_count", 0)
-            metadata.setdefault("prompt_chars", 0)
-            metadata.setdefault("approx_prompt_tokens", 0)
-            metadata.setdefault("streamed", False)
-            metadata.setdefault("health_forced_fallback", False)
-            metadata.setdefault("backend_health_state_at_request", (context.get("backend_health") or {}).get("state"))
-            metadata.setdefault("recovery_probe_attempted", False)
-            metadata.setdefault("recovery_probe_succeeded", False)
-            metadata.setdefault("degraded_reason", None)
-            metadata.setdefault("recovery_reason", None)
-            metadata.setdefault("timeout_window_seconds", None)
-            metadata.setdefault("live_lane_attempted", False)
-            metadata.setdefault("fallback_mode", "none")
-            return grounded["answer"], {
-                "provider": grounded["provider"],
-                "model": grounded["model"],
-                "metadata": metadata,
-                "backend_error": None,
-            }
         messages, prompt_metrics = self._build_chat_messages(user_input, context)
         generation_mode = self._effective_generation_mode(user_input, context)
         backend_context = dict(context)
@@ -230,11 +258,14 @@ class JARVISAgent(Agent):
             prompt_metrics=prompt_metrics,
             generation_mode=generation_mode,
         ):
-            backend_result = self._bounded_context_fallback_response(
+            bounded_fallback = self._bounded_context_fallback_response(
                 user_input=user_input,
                 context=context,
                 backend_error=self._backend_health_reason(backend_health),
-            ) or self.fallback_backend.generate(
+                primary_provider=getattr(chat_backend, "provider_name", None),
+            )
+            generic_fallback_used = bounded_fallback is None
+            backend_result = bounded_fallback or self.fallback_backend.generate(
                 messages,
                 backend_error=self._backend_health_reason(backend_health),
                 fallback_reason=self._backend_health_reason(backend_health),
@@ -273,11 +304,14 @@ class JARVISAgent(Agent):
             metadata["requested_mode"] = requested_mode
             metadata["generation_mode"] = generation_mode
             return backend_result.text, {
-                "provider": backend_result.provider,
+                "provider": (
+                    getattr(chat_backend, "provider_name", None) or backend_result.provider
+                ) if generic_fallback_used else backend_result.provider,
                 "model": backend_result.model,
                 "metadata": metadata,
                 "backend_error": self._backend_health_reason(backend_health),
             }
+        generic_fallback_used = False
         try:
             stream_callback = context.get("stream_callback")
             if stream_callback is not None and hasattr(chat_backend, "generate_stream"):
@@ -290,24 +324,31 @@ class JARVISAgent(Agent):
                 backend_result = chat_backend.generate(messages, **backend_options)
             backend_error = None
             metadata = dict(backend_result.metadata or {})
+            if metadata.get("response_complete") is False or metadata.get("finish_reason") == "length":
+                backend_error = "Model response is incomplete: " + str(
+                    metadata.get("termination") or metadata.get("finish_reason") or "unknown termination")
+                metadata["response_complete"] = False
             metadata.setdefault("response_path", "live_model")
             metadata.setdefault("health_forced_fallback", False)
             metadata.setdefault("fallback_trigger", None)
             metadata.setdefault("streamed", bool(stream_callback is not None and metadata.get("streamed") is True))
             metadata.setdefault("backend_health_state_at_request", backend_health.get("state"))
             metadata.setdefault("recovery_probe_attempted", recovery_probe_attempted)
-            metadata.setdefault("recovery_probe_succeeded", recovery_probe_attempted)
+            metadata.setdefault("recovery_probe_succeeded", recovery_probe_attempted and backend_error is None)
             metadata.setdefault("degraded_reason", backend_health.get("degraded_reason"))
-            metadata.setdefault("recovery_reason", "live_model_response" if recovery_probe_attempted else backend_health.get("recovery_reason"))
+            metadata.setdefault("recovery_reason", "live_model_response" if recovery_probe_attempted and backend_error is None else backend_health.get("recovery_reason"))
             metadata.setdefault("timeout_window_seconds", backend_health.get("timeout_window_seconds"))
             metadata.setdefault("live_lane_attempted", True)
             metadata.setdefault("fallback_mode", "none")
         except ChatBackendError as exc:
-            backend_result = self._bounded_context_fallback_response(
+            bounded_fallback = self._bounded_context_fallback_response(
                 user_input=user_input,
                 context=context,
                 backend_error=str(exc),
-            ) or self.fallback_backend.generate(
+                primary_provider=getattr(chat_backend, "provider_name", None),
+            )
+            generic_fallback_used = bounded_fallback is None
+            backend_result = bounded_fallback or self.fallback_backend.generate(
                 messages,
                 backend_error=str(exc),
                 fallback_reason=str(exc),
@@ -373,64 +414,17 @@ class JARVISAgent(Agent):
         metadata.setdefault("fallback_mode", "none")
 
         return backend_result.text, {
-            "provider": backend_result.provider,
+            "provider": (
+                getattr(chat_backend, "provider_name", None) or backend_result.provider
+            ) if generic_fallback_used else backend_result.provider,
             "model": backend_result.model,
             "metadata": metadata,
             "backend_error": backend_error,
         }
 
     def _effective_generation_mode(self, user_input: str, context: Dict[str, Any]) -> str:
-        """Keep standard retrieval while letting lightweight chat use the faster generation lane."""
+        """Honor the selected generation lane instead of silently downgrading it."""
         requested_mode = normalize_response_mode(context.get("analysis_mode") or context.get("response_mode"))
-        if requested_mode != "standard":
-            return requested_mode
-        transport = str(context.get("transport") or context.get("input_origin") or "").strip().lower()
-        if transport in {"telegram", "hud", "desktop", "legion", "tui", "operator_chat", "frame"}:
-            return requested_mode
-        memory_context = context.get("memory_context") or {}
-        grounded_conversation = memory_context.get("grounded_conversation_answer") or {}
-        if isinstance(grounded_conversation, dict) and str(grounded_conversation.get("answer") or "").strip():
-            return requested_mode
-        prompt_metrics = memory_context.get("prompt_metrics") or {}
-        if isinstance(prompt_metrics, dict):
-            prompt_tokens = int(prompt_metrics.get("prompt_context_tokens_estimate") or 0)
-            if (
-                prompt_tokens >= 700
-                or int(prompt_metrics.get("semantic_hits") or 0) > 0
-                or int(prompt_metrics.get("global_memories") or 0) > 0
-                or int(prompt_metrics.get("recent_events") or 0) > 0
-                or int(prompt_metrics.get("session_summaries") or 0) > 0
-                or bool(prompt_metrics.get("operator_profile"))
-                or bool(prompt_metrics.get("grounded_answer"))
-                or bool(prompt_metrics.get("grounded_memory"))
-                or bool(prompt_metrics.get("grounded_conversation"))
-                or bool(prompt_metrics.get("followup_continuity_guidance"))
-            ):
-                return requested_mode
-        if str(memory_context.get("prompt_mode") or "").strip().lower() in {"standard", "deep"}:
-            return requested_mode
-        detected = context.get("detected_intent")
-        if isinstance(detected, dict):
-            is_casual = bool(detected.get("casual"))
-            is_heavy = any(
-                bool(detected.get(key))
-                for key in ("coding", "deep_reasoning", "file_ops", "diagnostics", "tinyprogrammer")
-            )
-        else:
-            inferred = detect_intent(user_input)
-            is_casual = inferred.casual
-            is_heavy = any(
-                (
-                    inferred.coding,
-                    inferred.deep_reasoning,
-                    inferred.file_ops,
-                    inferred.diagnostics,
-                    inferred.tinyprogrammer,
-                )
-            )
-        text = str(user_input or "").strip()
-        if is_casual and not is_heavy and len(text) <= 220:
-            return "fast"
         return requested_mode
 
     @staticmethod
@@ -571,13 +565,20 @@ class JARVISAgent(Agent):
             },
         }
 
-    def _grounded_knowledge_response(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _grounded_knowledge_response(self, context: Dict[str, Any], *, user_input: str) -> Optional[Dict[str, Any]]:
         memory_context = context.get("memory_context") or {}
         grounded = memory_context.get("grounded_knowledge_answer")
         if not isinstance(grounded, dict):
             return None
         answer_text = str(grounded.get("answer") or "").strip()
         if not answer_text:
+            return None
+        citations = list(memory_context.get("citations") or [])
+        lowered = str(user_input or "").strip().lower()
+        if (
+            self._looks_like_raw_knowledge_dump(answer_text)
+            or not self._should_use_grounded_knowledge(lowered, citations)
+        ):
             return None
         return {
             "answer": answer_text,
@@ -604,6 +605,7 @@ class JARVISAgent(Agent):
         user_input: str,
         context: Dict[str, Any],
         backend_error: str,
+        primary_provider: Optional[str] = None,
     ) -> Optional[ChatBackendResult]:
         memory_context = context.get("memory_context") or {}
         operator_profile = dict(memory_context.get("operator_profile") or {})
@@ -616,10 +618,21 @@ class JARVISAgent(Agent):
         grounded_conversation = memory_context.get("grounded_conversation_answer") or {}
         knowledge_context = str(memory_context.get("knowledge_context") or "").strip()
         citations = list(memory_context.get("citations") or [])
+        backend_health = dict(memory_context.get("backend_health") or {})
         lowered = str(user_input or "").strip().lower()
 
         answer = ""
-        if active_work and any(
+        if self._is_social_checkin_prompt(lowered):
+            answer = self._compose_social_checkin_fallback(active_work, operator_profile)
+        elif self._is_runtime_status_prompt(lowered):
+            answer = self._compose_runtime_status_fallback(
+                active_work=active_work,
+                operator_profile=operator_profile,
+                backend_health=backend_health,
+                transport=str(context.get("transport") or memory_context.get("transport") or "").strip(),
+                user_input=user_input,
+            )
+        elif active_work and any(
             phrase in lowered
             for phrase in (
                 "improve obeos",
@@ -663,11 +676,16 @@ class JARVISAgent(Agent):
             )
         ):
             answer = self._compose_project_direction_fallback(active_work, operator_profile)
-        elif grounded_knowledge and str(grounded_knowledge.get("answer") or "").strip():
+        elif (
+            grounded_knowledge
+            and str(grounded_knowledge.get("answer") or "").strip()
+            and not self._looks_like_raw_knowledge_dump(str(grounded_knowledge.get("answer") or ""))
+            and self._should_use_grounded_knowledge(lowered, citations)
+        ):
             answer = str(grounded_knowledge.get("answer") or "").strip()
         elif grounded_conversation and str(grounded_conversation.get("answer") or "").strip():
             answer = str(grounded_conversation.get("answer") or "").strip()
-        elif knowledge_context:
+        elif knowledge_context and self._should_use_grounded_knowledge(lowered, citations):
             answer = self._compose_knowledge_context_fallback(
                 user_input=user_input,
                 knowledge_context=knowledge_context,
@@ -698,12 +716,18 @@ class JARVISAgent(Agent):
             )
         return ChatBackendResult(
             text=answer,
-            provider="heuristic",
+            provider=(
+                primary_provider
+                or getattr(self.chat_backend, "provider_name", None)
+                or "ollama"
+            ),
             model="bounded-context-grounded",
             metadata={
                 "fallback_reason": backend_error,
                 "bounded_context_fallback": True,
                 "response_path": "bounded_context_fallback",
+                "fallback_provider": "heuristic",
+                "fallback_model": "bounded-context-grounded",
             },
         )
 
@@ -746,6 +770,52 @@ class JARVISAgent(Agent):
             "Those are the tracks most likely to improve whether O.B.E.O.S. feels grounded, coherent, and dependable across its surfaces."
         )
 
+    def _compose_social_checkin_fallback(
+        self,
+        active_work: List[str],
+        operator_profile: Dict[str, Any],
+    ) -> str:
+        preferred_name = str(operator_profile.get("preferred_name") or "").strip()
+        salutation = f"{preferred_name}, " if preferred_name else ""
+        if active_work:
+            return (
+                f"{salutation}I'm here, and still tracking {self._join_items(active_work[:2])} inside O.B.E.O.S."
+            )
+        return f"{salutation}I'm here and still present inside O.B.E.O.S."
+
+    def _compose_runtime_status_fallback(
+        self,
+        *,
+        active_work: List[str],
+        operator_profile: Dict[str, Any],
+        backend_health: Dict[str, Any],
+        transport: str,
+        user_input: str,
+    ) -> str:
+        preferred_name = str(operator_profile.get("preferred_name") or "").strip()
+        salutation = f"{preferred_name}, " if preferred_name else ""
+        parts: List[str] = []
+        lowered = str(user_input or "").strip().lower()
+        surface = transport.replace("_", " ").strip()
+        if any(token in lowered for token in ("which surface", "came from", "trace test")):
+            if surface:
+                parts.append(f"{salutation}this turn came through {surface}.")
+            else:
+                parts.append(f"{salutation}this turn came through the current O.B.E.O.S. surface.")
+        state = str(backend_health.get("state") or "").strip().lower()
+        if state == "degraded":
+            reason = str(backend_health.get("degraded_reason") or "recent backend issues").replace("_", " ").strip()
+            parts.append(f"The last runtime health I have is degraded because of {reason}.")
+            if backend_health.get("allow_recovery_probe"):
+                parts.append("A bounded live-model recovery probe is still allowed on the next turn.")
+        elif state:
+            parts.append(f"The last runtime health I have is {state}.")
+        else:
+            parts.append("I do not have a fresh runtime health snapshot in this fallback lane, but I am still present.")
+        if active_work:
+            parts.append(f"I still have {self._join_items(active_work[:2])} in focus.")
+        return " ".join(part.strip() for part in parts if part.strip()).strip()
+
     def _compose_knowledge_context_fallback(
         self,
         *,
@@ -755,6 +825,8 @@ class JARVISAgent(Agent):
     ) -> str:
         cleaned = re.sub(r"\s+", " ", knowledge_context).strip()
         if not cleaned:
+            return ""
+        if self._looks_like_raw_knowledge_dump(cleaned):
             return ""
         cleaned = re.sub(r"^Bounded retrieval context:\s*", "", cleaned, flags=re.IGNORECASE)
         cleaned = cleaned.replace("[truncated for standard chat latency]", "").strip()
@@ -784,6 +856,101 @@ class JARVISAgent(Agent):
         return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
 
     @staticmethod
+    def _is_social_checkin_prompt(lowered: str) -> bool:
+        return any(
+            token in lowered
+            for token in (
+                "good evening",
+                "good morning",
+                "good afternoon",
+                "how are you",
+                "howre you",
+                "how's it going",
+                "hows it going",
+                "are you still there",
+                "still there",
+                "are you there",
+                "you still there",
+                "are you hungry",
+            )
+        )
+
+    @staticmethod
+    def _is_runtime_status_prompt(lowered: str) -> bool:
+        return any(
+            token in lowered
+            for token in (
+                "runtime status",
+                "system status",
+                "backend status",
+                "which surface",
+                "came from",
+                "trace test",
+                "runtime looking",
+                "backend alive",
+            )
+        )
+
+    @staticmethod
+    def _should_use_grounded_knowledge(lowered: str, citations: List[Dict[str, Any]]) -> bool:
+        if any(
+            token in lowered
+            for token in (
+                "good evening",
+                "good morning",
+                "good afternoon",
+                "how are you",
+                "howre you",
+                "are you hungry",
+                "are you still there",
+                "still there",
+                "trace test",
+                "runtime status",
+                "system status",
+                "backend status",
+                "which surface",
+                "came from",
+            )
+        ):
+            return False
+        query_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9][a-z0-9_.-]+", lowered)
+            if token not in {
+                "about", "and", "are", "can", "do", "does", "explain", "have", "how",
+                "i", "is", "me", "of", "please", "remember", "recall", "tell", "the",
+                "this", "to", "what", "we", "who", "with", "you", "your",
+            }
+        }
+        evidence_tokens: set[str] = set()
+        for item in citations:
+            for field in ("collection", "title", "source_file", "path"):
+                value = str(item.get(field) or "").strip().lower()
+                evidence_tokens.update(
+                    token
+                    for token in re.findall(r"[a-z0-9][a-z0-9_.-]+", value)
+                    if len(token) >= 3
+                )
+        # Retrieval is supplementary. A relevant topic must be named in the
+        # question before a citation can become the answer.
+        return bool(query_tokens & evidence_tokens)
+
+    @staticmethod
+    def _looks_like_raw_knowledge_dump(text: str) -> bool:
+        normalized = str(text or "").strip().lower()
+        if not normalized:
+            return False
+        return any(
+            marker in normalized
+            for marker in (
+                "kind=knowledge_collection",
+                "raw ocr",
+                "[page 1]",
+                "ufg ",
+            )
+        )
+
+    @staticmethod
     def _backend_chain_preview(chat_backend: BaseChatBackend, response_mode: str, options: Dict[str, Any]) -> List[str]:
         override = options.get("model")
         if override:
@@ -807,27 +974,22 @@ class JARVISAgent(Agent):
     def _build_chat_messages(self, user_input: str, context: Dict[str, Any]) -> tuple[List[Dict[str, str]], Dict[str, Any]]:
         """Build a chat transcript for the local model backend."""
         memory_context = context.get("memory_context", {})
-        session_messages = list(memory_context.get("session_messages", []))
+        session_messages = [message for message in memory_context.get("session_messages", [])
+                            if message.get("prompt_eligible", True)]
         prompt_context = memory_context.get("prompt_context", "")
         grounded_conversation = memory_context.get("grounded_conversation_answer") or {}
         prompt_mode = str(memory_context.get("prompt_mode") or memory_context.get("memory_profile", {}).get("prompt_mode") or "standard")
         agent_override = context.get("agent_override")
-        transcript_limit = 0 if prompt_mode.startswith("quick") else min(
-            len(session_messages),
-            6 if prompt_mode == "standard" else chat_settings.transcript_window,
-        )
+        # Quick turns still need the last few exchanges to resolve terse follow-ups.
         transcript_messages = self._sanitize_session_messages(
-            session_messages[-transcript_limit:] if transcript_limit else [],
+            session_messages[-QUICK_TRANSCRIPT_FLOOR:] if prompt_mode.startswith("quick") else session_messages,
             current_input=user_input,
         )
 
         system_prompt = (
-            "You are D.A.I.S.E. inside O.B.E.O.S. "
-            "Answer as D.A.I.S.E., be truthful and concise, and use supplied memory context when it is relevant. "
-            "Do not volunteer the Jarvis compatibility alias unless the operator asks about naming. "
-            "If asked what D.A.I.S.E. stands for, answer Direct Artificial Intelligence System Environment. "
-            "Treat bounded memory evidence and citations in this prompt as authoritative for the current turn. "
-            "For broad reflective or project-level prompts, respond naturally in first-person as D.A.I.S.E. and do not talk like an internal trace, retrieval summary, or prompt scaffold."
+            IDENTITY_AND_TRUTH_PROMPT +
+            "Use relevant memory and cite sources when useful. Resolve follow-ups from the immediate conversation "
+            "before older memories. Match reply length to the question; do not narrate internal prompt scaffolding."
         )
         if agent_override:
             visible_name = "D.A.I.S.E" if str(agent_override).strip().lower() in {"daise", "jarvis"} else str(agent_override)
@@ -902,15 +1064,43 @@ class JARVISAgent(Agent):
                         }
                     )
 
-        if not str(prompt_mode).startswith("quick"):
-            for message in transcript_messages:
-                role = message.get("role", "user")
-                content = str(message.get("text", "")).strip()
-                if not content:
-                    continue
-                if role not in {"user", "assistant", "system"}:
-                    role = "user"
-                messages.append({"role": role, "content": content})
+        # Deterministic answers and runtime facts are evidence for the model's own reply.
+        if context.get("allow_deterministic_evidence", True) is not False:
+            for label, grounded in (
+                ("Memory-backed answer", self._grounded_memory_response(context)),
+                ("Knowledge-collection answer", self._grounded_knowledge_response(context, user_input=user_input)),
+            ):
+                evidence_message = grounded_answer_message(label, grounded)
+                if evidence_message is not None:
+                    messages.append(evidence_message)
+            truth_message = runtime_truth_message(context.get("runtime_truth"))
+            if truth_message is not None:
+                messages.append(truth_message)
+
+        context_capacity = int(getattr(chat_settings, "daise_num_ctx", 8192) or 8192)
+        output_reserve = int(getattr(chat_settings, "daise_num_predict", 2048) or 2048)
+        reserved = sum(estimated_tokens(item["content"]) for item in messages)
+        history_budget = max(0, min(
+            context_capacity // 3,
+            context_capacity - output_reserve - reserved - estimated_tokens(user_input) - 256,
+        ))
+        if transcript_messages and str(transcript_messages[-1].get("text", "")).strip() == user_input and transcript_messages[-1].get("role") == "user":
+            transcript_messages = transcript_messages[:-1]
+        transcript_messages = recent_history(transcript_messages, history_budget)
+        history = []
+        for message in transcript_messages:
+            role = message.get("role", "user")
+            content = str(message.get("text", "")).strip()
+            if not content:
+                continue
+            if role not in {"user", "assistant", "system"}:
+                role = "user"
+            history.append({"role": role, "content": content})
+        if history and history[-1] == {"role": "user", "content": user_input}:
+            history.pop()
+        # Keep stable history ahead of changing retrieval evidence so local
+        # providers can reuse the conversation prefix between turns.
+        messages[1:1] = history
 
         if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != user_input:
             messages.append({"role": "user", "content": user_input})

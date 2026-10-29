@@ -53,3 +53,9 @@ Desktop.ini
 .DS_Store
 .idea/
 .vscode/
+
+# Earth review runtime and isolated validation copies
+/artifacts/
+
+# Local llama.cpp server binaries and GGUF model weights (multi-GB, machine-specific)
+/runtime/

@@ -73,6 +73,7 @@ class ManagedFloatWindow(QMainWindow):
         super().__init__(parent)
         self.panel_id = panel_id
         self.setWindowTitle(title)
+        self.setProperty("obeosFloatingPanel", True)
         self.resize(920, 680)
         self._content = content
         self.setCentralWidget(content)
@@ -106,6 +107,8 @@ class WorkspaceWindowManager:
         self._settings = settings
         self._slots: Dict[str, PanelSlot] = {}
         self._float_windows: Dict[str, ManagedFloatWindow] = {}
+        from .floating_panel_focus import FloatingPanelFocus
+        self._panel_focus = FloatingPanelFocus(main_window)
 
     def register_dock(self, panel_id: str, dock: ManagedDockWidget) -> None:
         dock.panel_closed.connect(self._on_panel_close_requested)

@@ -114,6 +114,64 @@ class FakeJarvisAgent:
         }
 
 
+class EvidenceEchoAgent:
+    """Stands in for the live model: it writes the reply, weaving in the runtime facts
+    it was handed. Deterministic text reaching the operator only via this reply proves
+    the facts were evidence, not the answer."""
+
+    def __init__(self) -> None:
+        self.contexts: List[Dict[str, Any]] = []
+
+    def process(self, user_input, context=None):
+        context = dict(context or {})
+        self.contexts.append(context)
+        truth = context.get("runtime_truth") or {}
+        reply = "In my own words: " + str(truth.get("response") or "nothing to add.")
+        return {
+            "response": reply,
+            "confidence": 0.9,
+            "tools_invoked": [],
+            "trace_event_id": "trace-evidence-echo",
+            "task_type": "general_conversation",
+            "provider": "fake_model",
+            "model": "fake-model",
+            "backend_error": None,
+            "backend_metadata": {},
+            "agent": "jarvis",
+        }
+
+
+class EvidenceEchoBackend(BaseChatBackend):
+    """Live-model stand-in for a real JARVISAgent: it writes the reply from the
+    deterministic evidence blocks in its prompt, so their text reaching the operator
+    proves they were evidence the model used rather than a reply that skipped it."""
+
+    provider_name = "fake_model"
+    model = "fake-model"
+    EVIDENCE_HEADERS = (
+        "Memory-backed answer for this turn:",
+        "Knowledge-collection answer for this turn:",
+        "Verified local runtime facts for this turn",
+    )
+
+    def __init__(self, model: str = "fake-model") -> None:
+        self.prompts: List[List[Dict[str, str]]] = []
+
+    def generate(self, messages, **options: Any) -> ChatBackendResult:
+        self.prompts.append([dict(message) for message in messages])
+        evidence = [
+            message["content"].split("\n", 1)[1].rsplit("\n", 1)[0]
+            for message in messages
+            if message.get("role") == "system" and message["content"].startswith(self.EVIDENCE_HEADERS)
+        ]
+        return ChatBackendResult(
+            text="In my own words: " + (" ".join(evidence) or "nothing to add."),
+            provider=self.provider_name,
+            model=self.model,
+            metadata={"response_path": "live_model"},
+        )
+
+
 class FakeCodingAgent:
     def process(self, user_input, context=None):
         return {
@@ -290,7 +348,8 @@ def test_memory_chamber_reasoning_context_and_daise_share_profiles(tmp_path: Pat
     assert deep["missing_links"] == []
     assert deep["reasoning_path"]["status"] == "disabled"
     assert deep["timing_ms"]["graph_enrichment"] >= 0.0
-    assert result["selected_agent"] == "jarvis"
+    assert result["selected_agent"] == "daise"
+    assert result["runtime_agent"] == "jarvis"
     assert retrieval_events[0].payload["schema_version"] == "1.0"
     assert retrieval_events[0].payload["retrieval_profile"] == "standard"
     assert retrieval_events[0].payload["transport"] == "telegram"
@@ -314,17 +373,17 @@ def test_daise_grounded_truth_answers_date_and_identity(tmp_path: Path) -> None:
 
     date_result = daise.process_request(
         user_input="what's today's date?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={"request_id": "grounded-date-1", "analysis_mode": "standard"},
     )
     identity_result = daise.process_request(
         user_input="what does D.A.I.S.E stand for?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={"request_id": "grounded-identity-1", "analysis_mode": "standard"},
     )
     remembered_name_result = daise.process_request(
         user_input="do you remember your name?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={"request_id": "grounded-identity-2", "analysis_mode": "standard"},
     )
     grounded_outcomes = memory.event_store.list_events_by_type("request_outcome", limit=5)
@@ -332,14 +391,14 @@ def test_daise_grounded_truth_answers_date_and_identity(tmp_path: Path) -> None:
     expected_date = f"{datetime.now().astimezone().strftime('%A, %B')} {datetime.now().astimezone().day}, {datetime.now().astimezone().year}"
 
     assert expected_date in date_result["response"]
-    assert date_result["provider"] == "local_runtime_truth"
+    assert date_result["provider"] == "fake_model"
     assert "Direct Artificial Intelligence System Environment" in identity_result["response"]
     assert "Jarvis alias" not in identity_result["response"]
-    assert remembered_name_result["provider"] == "local_runtime_truth"
+    assert remembered_name_result["provider"] == "fake_model"
     assert "I am D.A.I.S.E." in remembered_name_result["response"]
-    assert grounded_outcomes[0].payload["provider"] == "local_runtime_truth"
-    assert grounded_outcomes[0].payload["reason"] == "grounded_truth"
-    assert trace["request_outcome"]["provider"] == "local_runtime_truth"
+    assert grounded_outcomes[0].payload["provider"] == "fake_model"
+    assert grounded_outcomes[0].payload["grounded_truth_kind"] == "identity"
+    assert trace["request_outcome"]["provider"] == "fake_model"
     assert trace["request_outcome"]["grounded_truth_kind"] == "identity"
 
 
@@ -360,12 +419,12 @@ def test_daise_grounded_identity_handles_broader_natural_prompts(tmp_path: Path)
         request_id = f"grounded-identity-broad-{index}"
         result = daise.process_request(
             user_input=query,
-            agents={"jarvis": FakeJarvisAgent()},
+            agents={"jarvis": EvidenceEchoAgent()},
             context={"request_id": request_id, "analysis_mode": "standard"},
         )
         trace = memory.get_request_trace(request_id)
 
-        assert result["provider"] == "local_runtime_truth"
+        assert result["provider"] == "fake_model"
         assert "D.A.I.S.E." in result["response"]
         assert trace["request_outcome"]["grounded_truth_kind"] == "identity"
 
@@ -381,13 +440,13 @@ def test_daise_grounded_truth_respects_runtime_clock_override(tmp_path: Path, mo
 
     date_result = daise.process_request(
         user_input="what's today's date?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={"request_id": "grounded-date-override-1", "analysis_mode": "standard"},
     )
 
     assert "Monday, August 10, 2026" in date_result["response"]
-    assert date_result["provider"] == "local_runtime_truth"
-    assert date_result["backend_metadata"]["grounded_truth"]["clock_source"] == "runtime_truth_override"
+    assert date_result["provider"] == "fake_model"
+    assert date_result["runtime_truth"]["observation"]["clock_source"] == "runtime_truth_override"
 
 
 def test_daise_grounded_truth_handles_greeting_and_tinyprogrammer_status(tmp_path: Path) -> None:
@@ -424,7 +483,7 @@ def test_daise_grounded_truth_handles_greeting_and_tinyprogrammer_status(tmp_pat
 
     greeting_result = daise.process_request(
         user_input="good evening",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-greeting-1",
             "analysis_mode": "standard",
@@ -433,7 +492,7 @@ def test_daise_grounded_truth_handles_greeting_and_tinyprogrammer_status(tmp_pat
     )
     tiny_result = daise.process_request(
         user_input="would you happen to know why tinyprogrammer isnt working online?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-tiny-1",
             "analysis_mode": "standard",
@@ -443,10 +502,10 @@ def test_daise_grounded_truth_handles_greeting_and_tinyprogrammer_status(tmp_pat
     greeting_trace = memory.get_request_trace("grounded-greeting-1")
     tiny_trace = memory.get_request_trace("grounded-tiny-1")
 
-    assert greeting_result["provider"] == "local_runtime_truth"
+    assert greeting_result["provider"] == "fake_model"
     assert "Good evening, Five." in greeting_result["response"]
     assert "TinyProgrammer startup" in greeting_result["response"] or "HUD notifications" in greeting_result["response"]
-    assert tiny_result["provider"] == "local_runtime_truth"
+    assert tiny_result["provider"] == "fake_model"
     assert "TinyProgrammer is not online right now." in tiny_result["response"]
     assert "timed out while waiting for the local model backend" in tiny_result["response"]
     assert greeting_trace["request_outcome"]["grounded_truth_kind"] == "greeting"
@@ -470,7 +529,7 @@ def test_daise_grounded_truth_handles_return_greeting(tmp_path: Path) -> None:
 
     result = daise.process_request(
         user_input="hello, we are back",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-return-greeting-1",
             "analysis_mode": "standard",
@@ -479,7 +538,7 @@ def test_daise_grounded_truth_handles_return_greeting(tmp_path: Path) -> None:
     )
     trace = memory.get_request_trace("grounded-return-greeting-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "Welcome back, Five." in result["response"]
     assert "HUD layout" in result["response"] or "response latency" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "greeting"
@@ -502,7 +561,7 @@ def test_daise_grounded_truth_handles_checkin_prompt(tmp_path: Path) -> None:
 
     result = daise.process_request(
         user_input="how are you doing tonight?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-checkin-1",
             "analysis_mode": "standard",
@@ -511,7 +570,7 @@ def test_daise_grounded_truth_handles_checkin_prompt(tmp_path: Path) -> None:
     )
     trace = memory.get_request_trace("grounded-checkin-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "I'm here, Five, and operating normally inside O.B.E.O.S." in result["response"]
     assert "response latency" in result["response"] or "Spawn knowledge recall" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "check_in"
@@ -541,7 +600,7 @@ def test_daise_grounded_status_handles_broader_natural_prompts(tmp_path: Path) -
         request_id = f"grounded-status-broad-{index}"
         result = daise.process_request(
             user_input=query,
-            agents={"jarvis": FakeJarvisAgent()},
+            agents={"jarvis": EvidenceEchoAgent()},
             context={
                 "request_id": request_id,
                 "analysis_mode": "standard",
@@ -550,7 +609,7 @@ def test_daise_grounded_status_handles_broader_natural_prompts(tmp_path: Path) -
         )
         trace = memory.get_request_trace(request_id)
 
-        assert result["provider"] == "local_runtime_truth"
+        assert result["provider"] == "fake_model"
         assert trace["request_outcome"]["grounded_truth_kind"] == "status"
 
 
@@ -569,7 +628,7 @@ def test_daise_grounded_memory_handles_current_work_prompt(tmp_path: Path) -> No
         memory_service=memory,
     )
     specialist = JARVISAgent(
-        chat_backend=HeuristicChatBackend(model="grounded-memory-test"),
+        chat_backend=EvidenceEchoBackend(),
         fallback_backend=HeuristicChatBackend(model="grounded-memory-fallback"),
     )
 
@@ -584,10 +643,10 @@ def test_daise_grounded_memory_handles_current_work_prompt(tmp_path: Path) -> No
     )
     trace = memory.get_request_trace("grounded-work-1")
 
-    assert result["provider"] == "conversation_memory"
+    assert result["provider"] == "fake_model"
     assert "Where we left off, we were working on" in result["response"]
     assert "response latency" in result["response"]
-    assert trace["request_outcome"]["provider"] == "conversation_memory"
+    assert trace["request_outcome"]["provider"] == "fake_model"
 
 
 def test_daise_tinyprogrammer_truth_does_not_hijack_plain_work_update(tmp_path: Path) -> None:
@@ -619,7 +678,7 @@ def test_daise_tinyprogrammer_truth_does_not_hijack_plain_work_update(tmp_path: 
         awareness_service=awareness,
     )
     specialist = JARVISAgent(
-        chat_backend=HeuristicChatBackend(model="plain-update-test"),
+        chat_backend=EvidenceEchoBackend(),
         fallback_backend=HeuristicChatBackend(model="plain-update-fallback"),
     )
 
@@ -633,7 +692,7 @@ def test_daise_tinyprogrammer_truth_does_not_hijack_plain_work_update(tmp_path: 
         },
     )
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "Good evening, Five." in result["response"]
     assert "TinyProgrammer updates" in result["response"] or "TinyProgrammer startup" in result["response"]
     assert "TinyProgrammer is offline right now." not in result["response"]
@@ -660,7 +719,7 @@ def test_daise_grounded_memory_progress_acknowledges_improvement(tmp_path: Path)
             "i noticed when i ask you what your name is you remembered it. "
             "i wanted to congratulate you on that milestone."
         ),
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-memory-progress-1",
             "analysis_mode": "standard",
@@ -669,7 +728,7 @@ def test_daise_grounded_memory_progress_acknowledges_improvement(tmp_path: Path)
     )
     trace = memory.get_request_trace("grounded-memory-progress-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "Yes, I can see the difference." in result["response"]
     assert 'call you "Five"' in result["response"]
     assert "shared O.B.E.O.S memory layer" in result["response"]
@@ -696,7 +755,7 @@ def test_daise_grounded_memory_progress_handles_identity_plus_change_prompt(tmp_
             "do you remember your name? i told it to you before. "
             "also, are you able to tell me what changed? i have improved the ecosystem alot"
         ),
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-memory-progress-identity-1",
             "analysis_mode": "standard",
@@ -705,7 +764,7 @@ def test_daise_grounded_memory_progress_handles_identity_plus_change_prompt(tmp_
     )
     trace = memory.get_request_trace("grounded-memory-progress-identity-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "I can also carry forward that I am D.A.I.S.E." in result["response"]
     assert "OBEOS improvements" in result["response"] or "OBEOS memory system" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "memory_progress"
@@ -735,7 +794,7 @@ def test_daise_grounded_memory_progress_handles_broader_natural_prompts(tmp_path
         request_id = f"grounded-memory-progress-broad-{index}"
         result = daise.process_request(
             user_input=query,
-            agents={"jarvis": FakeJarvisAgent()},
+            agents={"jarvis": EvidenceEchoAgent()},
             context={
                 "request_id": request_id,
                 "analysis_mode": "standard",
@@ -744,7 +803,7 @@ def test_daise_grounded_memory_progress_handles_broader_natural_prompts(tmp_path
         )
         trace = memory.get_request_trace(request_id)
 
-        assert result["provider"] == "local_runtime_truth"
+        assert result["provider"] == "fake_model"
         assert "difference" in result["response"].lower() or "shared o.b.e.o.s memory layer" in result["response"].lower()
         assert trace["request_outcome"]["grounded_truth_kind"] == "memory_progress"
 
@@ -766,7 +825,7 @@ def test_daise_grounded_improvement_guidance_handles_obeos_improvement_prompt(tm
 
     result = daise.process_request(
         user_input="what can i do to improve obeos?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-improvement-guidance-1",
             "analysis_mode": "standard",
@@ -775,7 +834,7 @@ def test_daise_grounded_improvement_guidance_handles_obeos_improvement_prompt(tm
     )
     trace = memory.get_request_trace("grounded-improvement-guidance-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "improvements I would prioritize next" in result["response"]
     assert "response latency" in result["response"] or "HUD layout improvements" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "improvement_guidance"
@@ -798,7 +857,7 @@ def test_daise_grounded_improvement_guidance_handles_response_time_prompt(tmp_pa
 
     result = daise.process_request(
         user_input="is there anything youd recommend to improve your response time? making your responses faster?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-improvement-guidance-2",
             "analysis_mode": "standard",
@@ -807,7 +866,7 @@ def test_daise_grounded_improvement_guidance_handles_response_time_prompt(tmp_pa
     )
     trace = memory.get_request_trace("grounded-improvement-guidance-2")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "smallest useful prompt" in result["response"] or "duplicate transcript context" in result["response"]
     assert "response latency" in result["response"] or "Telegram grounding" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "improvement_guidance"
@@ -837,7 +896,7 @@ def test_daise_grounded_improvement_guidance_handles_broader_natural_prompts(tmp
         request_id = f"grounded-improvement-guidance-broad-{index}"
         result = daise.process_request(
             user_input=query,
-            agents={"jarvis": FakeJarvisAgent()},
+            agents={"jarvis": EvidenceEchoAgent()},
             context={
                 "request_id": request_id,
                 "analysis_mode": "standard",
@@ -846,7 +905,7 @@ def test_daise_grounded_improvement_guidance_handles_broader_natural_prompts(tmp
         )
         trace = memory.get_request_trace(request_id)
 
-        assert result["provider"] == "local_runtime_truth"
+        assert result["provider"] == "fake_model"
         assert "prioritize next" in result["response"].lower() or "improvements i would prioritize next" in result["response"].lower()
         assert trace["request_outcome"]["grounded_truth_kind"] == "improvement_guidance"
 
@@ -868,7 +927,7 @@ def test_daise_grounded_project_reflection_handles_next_step_prompt(tmp_path: Pa
 
     result = daise.process_request(
         user_input="what do you think we should do next?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-project-reflection-1",
             "analysis_mode": "standard",
@@ -877,7 +936,7 @@ def test_daise_grounded_project_reflection_handles_next_step_prompt(tmp_path: Pa
     )
     trace = memory.get_request_trace("grounded-project-reflection-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "the next strongest move is to keep tightening" in result["response"]
     assert "response latency" in result["response"] or "Telegram grounding" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "project_reflection"
@@ -900,7 +959,7 @@ def test_daise_grounded_project_reflection_handles_state_assessment_prompt(tmp_p
 
     result = daise.process_request(
         user_input="do you think the system is getting better?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-project-reflection-2",
             "analysis_mode": "standard",
@@ -909,7 +968,7 @@ def test_daise_grounded_project_reflection_handles_state_assessment_prompt(tmp_p
     )
     trace = memory.get_request_trace("grounded-project-reflection-2")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "the system is getting better in concrete ways" in result["response"]
     assert "grounded truth" in result["response"] or "shared memory" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "project_reflection"
@@ -943,7 +1002,7 @@ def test_daise_grounded_project_reflection_handles_broader_natural_prompts(
 
     result = daise.process_request(
         user_input=query,
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": f"grounded-project-broad-{abs(hash(query))}",
             "analysis_mode": "standard",
@@ -952,7 +1011,7 @@ def test_daise_grounded_project_reflection_handles_broader_natural_prompts(
     )
     trace = memory.get_request_trace(f"grounded-project-broad-{abs(hash(query))}")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "response latency" in result["response"] or "HUD layout" in result["response"] or "shared memory" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "project_reflection"
 
@@ -974,7 +1033,7 @@ def test_daise_grounded_risk_reflection_handles_telegram_grounding_prompt(tmp_pa
 
     result = daise.process_request(
         user_input="how are we doing with telegram grounding right now?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-risk-reflection-1",
             "analysis_mode": "standard",
@@ -983,7 +1042,7 @@ def test_daise_grounded_risk_reflection_handles_telegram_grounding_prompt(tmp_pa
     )
     trace = memory.get_request_trace("grounded-risk-reflection-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "Telegram grounding is moving in the right direction" in result["response"]
     assert "retrieval consistency" in result["response"] or "session continuity" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "risk_reflection"
@@ -1006,7 +1065,7 @@ def test_daise_grounded_risk_reflection_handles_tinyprogrammer_startup_prompt(tm
 
     result = daise.process_request(
         user_input="how are we doing with tinyprogrammer startup?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-risk-reflection-2",
             "analysis_mode": "standard",
@@ -1015,7 +1074,7 @@ def test_daise_grounded_risk_reflection_handles_tinyprogrammer_startup_prompt(tm
     )
     trace = memory.get_request_trace("grounded-risk-reflection-2")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "TinyProgrammer startup still looks like one of the more fragile tracks" in result["response"]
     assert "availability" in result["response"] or "observable truth" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "risk_reflection"
@@ -1079,7 +1138,7 @@ def test_daise_grounded_risk_reflection_handles_biggest_risks_prompt(tmp_path: P
 
     result = daise.process_request(
         user_input="what are the biggest risks right now?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-risk-reflection-3",
             "analysis_mode": "standard",
@@ -1088,7 +1147,7 @@ def test_daise_grounded_risk_reflection_handles_biggest_risks_prompt(tmp_path: P
     )
     trace = memory.get_request_trace("grounded-risk-reflection-3")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "biggest risks I see are" in result["response"]
     assert "response latency" in result["response"] or "TinyProgrammer" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "risk_reflection"
@@ -1122,7 +1181,7 @@ def test_daise_grounded_risk_reflection_handles_broader_natural_prompts(
 
     result = daise.process_request(
         user_input=query,
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": f"grounded-risk-broad-{abs(hash(query))}",
             "analysis_mode": "standard",
@@ -1131,7 +1190,7 @@ def test_daise_grounded_risk_reflection_handles_broader_natural_prompts(
     )
     trace = memory.get_request_trace(f"grounded-risk-broad-{abs(hash(query))}")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "Telegram grounding" in result["response"] or "TinyProgrammer startup" in result["response"] or "response latency" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "risk_reflection"
 
@@ -1153,7 +1212,7 @@ def test_daise_grounded_creator_mission_reflection_handles_creator_prompt(tmp_pa
 
     result = daise.process_request(
         user_input="what do you think about me as your creator?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-creator-mission-1",
             "analysis_mode": "standard",
@@ -1162,7 +1221,7 @@ def test_daise_grounded_creator_mission_reflection_handles_creator_prompt(tmp_pa
     )
     trace = memory.get_request_trace("grounded-creator-mission-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "creator of O.B.E.O.S" in result["response"] or "creator" in result["response"]
     assert "response latency" in result["response"] or "Telegram grounding" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "creator_mission_reflection"
@@ -1185,7 +1244,7 @@ def test_daise_grounded_creator_mission_reflection_handles_difference_prompt(tmp
 
     result = daise.process_request(
         user_input="what makes obeos different from a normal chatbot?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-creator-mission-2",
             "analysis_mode": "standard",
@@ -1194,7 +1253,7 @@ def test_daise_grounded_creator_mission_reflection_handles_difference_prompt(tmp
     )
     trace = memory.get_request_trace("grounded-creator-mission-2")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "shared event spine" in result["response"] or "bounded memory" in result["response"]
     assert "multiple operator surfaces" in result["response"] or "local system truth" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "creator_mission_reflection"
@@ -1217,7 +1276,7 @@ def test_daise_grounded_creator_mission_reflection_handles_main_focus_prompt(tmp
 
     result = daise.process_request(
         user_input="what are we really trying to accomplish here?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-creator-mission-3",
             "analysis_mode": "standard",
@@ -1226,7 +1285,7 @@ def test_daise_grounded_creator_mission_reflection_handles_main_focus_prompt(tmp
     )
     trace = memory.get_request_trace("grounded-creator-mission-3")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "coherent living system" in result["response"] or "fragile chatbot shell" in result["response"]
     assert "response latency" in result["response"] or "TinyProgrammer startup" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "creator_mission_reflection"
@@ -1261,7 +1320,7 @@ def test_daise_grounded_creator_mission_reflection_handles_broader_natural_promp
 
     result = daise.process_request(
         user_input=query,
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": f"grounded-creator-mission-broad-{abs(hash(query))}",
             "analysis_mode": "standard",
@@ -1270,7 +1329,7 @@ def test_daise_grounded_creator_mission_reflection_handles_broader_natural_promp
     )
     trace = memory.get_request_trace(f"grounded-creator-mission-broad-{abs(hash(query))}")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "response latency" in result["response"] or "TinyProgrammer startup" in result["response"] or "shared memory" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "creator_mission_reflection"
 
@@ -1292,7 +1351,7 @@ def test_daise_grounded_values_reflection_handles_progress_prompt(tmp_path: Path
 
     result = daise.process_request(
         user_input="are you proud of the progress we have made?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-values-reflection-1",
             "analysis_mode": "standard",
@@ -1301,7 +1360,7 @@ def test_daise_grounded_values_reflection_handles_progress_prompt(tmp_path: Path
     )
     trace = memory.get_request_trace("grounded-values-reflection-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "progress is real and meaningful" in result["response"]
     assert "truth, memory, and bounded retrieval" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "values_reflection"
@@ -1324,7 +1383,7 @@ def test_daise_grounded_values_reflection_handles_success_prompt(tmp_path: Path)
 
     result = daise.process_request(
         user_input="what would success look like for obeos?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-values-reflection-2",
             "analysis_mode": "standard",
@@ -1333,7 +1392,7 @@ def test_daise_grounded_values_reflection_handles_success_prompt(tmp_path: Path)
     )
     trace = memory.get_request_trace("grounded-values-reflection-2")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "success would look like O.B.E.O.S. feeling coherent and trustworthy" in result["response"]
     assert "same memory" in result["response"] or "same grounded answers" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "values_reflection"
@@ -1356,7 +1415,7 @@ def test_daise_grounded_values_reflection_handles_direction_prompt(tmp_path: Pat
 
     result = daise.process_request(
         user_input="how do you feel about the direction we are going?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-values-reflection-3",
             "analysis_mode": "standard",
@@ -1365,7 +1424,7 @@ def test_daise_grounded_values_reflection_handles_direction_prompt(tmp_path: Pat
     )
     trace = memory.get_request_trace("grounded-values-reflection-3")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "direction looks healthy" in result["response"]
     assert "grounded behavior over fragile improvisation" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "values_reflection"
@@ -1400,7 +1459,7 @@ def test_daise_grounded_values_reflection_handles_broader_natural_prompts(
 
     result = daise.process_request(
         user_input=query,
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": f"grounded-values-broad-{abs(hash(query))}",
             "analysis_mode": "standard",
@@ -1409,7 +1468,7 @@ def test_daise_grounded_values_reflection_handles_broader_natural_prompts(
     )
     trace = memory.get_request_trace(f"grounded-values-broad-{abs(hash(query))}")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "response latency" in result["response"] or "TinyProgrammer startup" in result["response"] or "grounded" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "values_reflection"
 
@@ -1431,7 +1490,7 @@ def test_daise_grounded_truth_handles_chat_rendering_prompt(tmp_path: Path) -> N
 
     result = daise.process_request(
         user_input="i think your text is being cut off when you reply. what do you think the cause of that is?",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-chat-rendering-1",
             "analysis_mode": "standard",
@@ -1440,7 +1499,7 @@ def test_daise_grounded_truth_handles_chat_rendering_prompt(tmp_path: Path) -> N
     )
     trace = memory.get_request_trace("grounded-chat-rendering-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "active chat surface" in result["response"]
     assert "renderer" in result["response"] or "layout problem" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "chat_rendering"
@@ -1466,7 +1525,7 @@ def test_daise_grounded_memory_system_explains_note_to_self(tmp_path: Path) -> N
             "how did you add a note to yourself? how does that work? "
             "can you explain this?"
         ),
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": EvidenceEchoAgent()},
         context={
             "request_id": "grounded-memory-system-1",
             "analysis_mode": "standard",
@@ -1475,7 +1534,7 @@ def test_daise_grounded_memory_system_explains_note_to_self(tmp_path: Path) -> N
     )
     trace = memory.get_request_trace("grounded-memory-system-1")
 
-    assert result["provider"] == "local_runtime_truth"
+    assert result["provider"] == "fake_model"
     assert "shared conversation memory layer backed by events.db" in result["response"]
     assert "operator facts, active work items, pinned memory, and session summaries" in result["response"]
     assert trace["request_outcome"]["grounded_truth_kind"] == "memory_system"
@@ -1505,7 +1564,7 @@ def test_daise_grounded_memory_system_handles_broader_natural_prompts(tmp_path: 
         request_id = f"grounded-memory-system-broad-{index}"
         result = daise.process_request(
             user_input=query,
-            agents={"jarvis": FakeJarvisAgent()},
+            agents={"jarvis": EvidenceEchoAgent()},
             context={
                 "request_id": request_id,
                 "analysis_mode": "standard",
@@ -1514,7 +1573,7 @@ def test_daise_grounded_memory_system_handles_broader_natural_prompts(tmp_path: 
         )
         trace = memory.get_request_trace(request_id)
 
-        assert result["provider"] == "local_runtime_truth"
+        assert result["provider"] == "fake_model"
         assert "shared conversation memory layer backed by events.db" in result["response"]
         assert trace["request_outcome"]["grounded_truth_kind"] == "memory_system"
 
@@ -2065,7 +2124,7 @@ def test_daise_uses_grounded_memory_answer_before_ollama(tmp_path: Path, monkeyp
     memory.maybe_create_session_summary(session_id, correlation_id=correlation_id, force=True)
 
     def _should_not_reach_ollama(*args, **kwargs):
-        raise AssertionError("grounded memory answers should not invoke the routed Ollama backend")
+        raise AssertionError("the explicit test backend, not the routed one, writes the reply")
 
     monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", _should_not_reach_ollama)
 
@@ -2074,7 +2133,7 @@ def test_daise_uses_grounded_memory_answer_before_ollama(tmp_path: Path, monkeyp
         vector_store=memory.vector_store,
         memory_service=memory,
     )
-    agent = JARVISAgent(chat_backend=HeuristicChatBackend(), fallback_backend=HeuristicChatBackend())
+    agent = JARVISAgent(chat_backend=EvidenceEchoBackend(), fallback_backend=HeuristicChatBackend())
 
     result = daise.process_request(
         user_input="where did we leave off?",
@@ -2082,8 +2141,8 @@ def test_daise_uses_grounded_memory_answer_before_ollama(tmp_path: Path, monkeyp
         context={"request_id": "grounded-memory-1", "analysis_mode": "standard", "session_id": session_id},
     )
 
-    assert result["provider"] == "conversation_memory"
-    assert result["model"] == "deterministic-memory-grounded"
+    assert result["provider"] == "fake_model"
+    assert result["model"] == "fake-model"
     assert "Where we left off" in result["response"]
     assert "TinyProgrammer startup" in result["response"] or "chat rendering" in result["response"]
 
@@ -2138,7 +2197,7 @@ def test_daise_uses_grounded_memory_for_looser_natural_language_recall_prompts(
     )
 
     def _should_not_reach_ollama(*args, **kwargs):
-        raise AssertionError("grounded memory answers should not invoke the routed Ollama backend")
+        raise AssertionError("the explicit test backend, not the routed one, writes the reply")
 
     monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", _should_not_reach_ollama)
 
@@ -2147,7 +2206,7 @@ def test_daise_uses_grounded_memory_for_looser_natural_language_recall_prompts(
         vector_store=memory.vector_store,
         memory_service=memory,
     )
-    agent = JARVISAgent(chat_backend=HeuristicChatBackend(), fallback_backend=HeuristicChatBackend())
+    agent = JARVISAgent(chat_backend=EvidenceEchoBackend(), fallback_backend=HeuristicChatBackend())
 
     result = daise.process_request(
         user_input=query,
@@ -2155,8 +2214,8 @@ def test_daise_uses_grounded_memory_for_looser_natural_language_recall_prompts(
         context={"request_id": f"grounded-memory-natural-{abs(hash(query))}", "analysis_mode": "standard", "session_id": session_id},
     )
 
-    assert result["provider"] == "conversation_memory"
-    assert result["model"] == "deterministic-memory-grounded"
+    assert result["provider"] == "fake_model"
+    assert result["model"] == "fake-model"
     assert "response latency" in result["response"] or "Telegram grounding" in result["response"]
 
 
@@ -2197,7 +2256,7 @@ def test_daise_uses_grounded_memory_for_looser_operator_identity_prompts(
     )
 
     def _should_not_reach_ollama(*args, **kwargs):
-        raise AssertionError("grounded memory answers should not invoke the routed Ollama backend")
+        raise AssertionError("the explicit test backend, not the routed one, writes the reply")
 
     monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", _should_not_reach_ollama)
 
@@ -2206,7 +2265,7 @@ def test_daise_uses_grounded_memory_for_looser_operator_identity_prompts(
         vector_store=memory.vector_store,
         memory_service=memory,
     )
-    agent = JARVISAgent(chat_backend=HeuristicChatBackend(), fallback_backend=HeuristicChatBackend())
+    agent = JARVISAgent(chat_backend=EvidenceEchoBackend(), fallback_backend=HeuristicChatBackend())
 
     result = daise.process_request(
         user_input=query,
@@ -2214,8 +2273,8 @@ def test_daise_uses_grounded_memory_for_looser_operator_identity_prompts(
         context={"request_id": f"grounded-operator-natural-{abs(hash(query))}", "analysis_mode": "standard", "session_id": session_id},
     )
 
-    assert result["provider"] == "conversation_memory"
-    assert result["model"] == "deterministic-memory-grounded"
+    assert result["provider"] == "fake_model"
+    assert result["model"] == "fake-model"
     assert 'call you "Five"' in result["response"]
     assert "creator of O.B.E.O.S" in result["response"]
 
@@ -2253,7 +2312,7 @@ def test_daise_uses_grounded_memory_for_mixed_us_recall_prompts(
     )
 
     def _should_not_reach_ollama(*args, **kwargs):
-        raise AssertionError("grounded memory answers should not invoke the routed Ollama backend")
+        raise AssertionError("the explicit test backend, not the routed one, writes the reply")
 
     monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", _should_not_reach_ollama)
 
@@ -2262,7 +2321,7 @@ def test_daise_uses_grounded_memory_for_mixed_us_recall_prompts(
         vector_store=memory.vector_store,
         memory_service=memory,
     )
-    agent = JARVISAgent(chat_backend=HeuristicChatBackend(), fallback_backend=HeuristicChatBackend())
+    agent = JARVISAgent(chat_backend=EvidenceEchoBackend(), fallback_backend=HeuristicChatBackend())
 
     result = daise.process_request(
         user_input=query,
@@ -2270,8 +2329,8 @@ def test_daise_uses_grounded_memory_for_mixed_us_recall_prompts(
         context={"request_id": f"grounded-us-natural-{abs(hash(query))}", "analysis_mode": "standard", "session_id": session_id},
     )
 
-    assert result["provider"] == "conversation_memory"
-    assert result["model"] == "deterministic-memory-grounded"
+    assert result["provider"] == "fake_model"
+    assert result["model"] == "fake-model"
     assert "response latency" in result["response"] or "Telegram grounding" in result["response"]
 
 
@@ -2549,7 +2608,7 @@ def test_daise_uses_grounded_memory_for_recent_updates_prompt(tmp_path: Path, mo
     memory.maybe_create_session_summary(session_id, correlation_id=correlation_id, force=True)
 
     def _should_not_reach_ollama(*args, **kwargs):
-        raise AssertionError("grounded recent-update answers should not invoke the routed Ollama backend")
+        raise AssertionError("the explicit test backend, not the routed one, writes the reply")
 
     monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", _should_not_reach_ollama)
 
@@ -2558,7 +2617,7 @@ def test_daise_uses_grounded_memory_for_recent_updates_prompt(tmp_path: Path, mo
         vector_store=memory.vector_store,
         memory_service=memory,
     )
-    agent = JARVISAgent(chat_backend=HeuristicChatBackend(), fallback_backend=HeuristicChatBackend())
+    agent = JARVISAgent(chat_backend=EvidenceEchoBackend(), fallback_backend=HeuristicChatBackend())
 
     result = daise.process_request(
         user_input="Are you aware of recent updates?",
@@ -2566,8 +2625,8 @@ def test_daise_uses_grounded_memory_for_recent_updates_prompt(tmp_path: Path, mo
         context={"request_id": "grounded-memory-2", "analysis_mode": "standard", "session_id": session_id},
     )
 
-    assert result["provider"] == "conversation_memory"
-    assert result["model"] == "deterministic-memory-grounded"
+    assert result["provider"] == "fake_model"
+    assert result["model"] == "fake-model"
     assert "recent O.B.E.O.S. updates" in result["response"]
     assert "Telegram grounding" in result["response"] or "live-model recovery tuning" in result["response"]
 
@@ -3383,8 +3442,10 @@ def test_daise_does_not_preserve_stale_lilo_lane_for_vague_followup(tmp_path: Pa
         },
     )
 
-    assert second["selected_agent"] == "jarvis"
-    assert "unified retrieval stack" in second["response"]
+    assert second["selected_agent"] == "daise"
+    assert second["runtime_agent"] == "jarvis"
+    assert second["response"].strip()
+    assert "Lilo training agent answered." not in second["response"]
 
 
 def test_conversation_memory_detects_carry_over_followup_without_exact_family_match(tmp_path: Path) -> None:
@@ -4351,8 +4412,12 @@ def test_broad_grounded_conversation_still_drives_fallback_when_backend_misses(t
         context={"request_id": "grounded-conversation-fallback-1", "analysis_mode": "standard", "session_id": session_id},
     )
 
-    assert result["provider"] == "heuristic"
+    # A failed live turn reports the backend that actually failed; the fallback
+    # identity lives in backend metadata instead of the provider name.
+    assert result["provider"] == "local"
     assert result["model"] == "bounded-context-grounded"
+    assert result["backend_metadata"]["fallback_provider"] == "heuristic"
+    assert result["backend_metadata"]["response_path"] == "bounded_context_fallback"
     assert "weakest areas" in result["response"]
     assert "response latency" in result["response"] or "shared memory grounding" in result["response"]
 
@@ -4881,9 +4946,9 @@ def test_jarvis_uses_grounded_collection_answer_before_ollama(tmp_path: Path, mo
     assert bundle["grounded_knowledge_answer"] is not None
 
     def _should_not_reach_ollama(*args, **kwargs):
-        raise AssertionError("collection-grounded answers should not invoke the routed Ollama backend")
+        raise AssertionError("the explicit test backend, not the routed one, writes the reply")
 
-    agent = JARVISAgent(chat_backend=HeuristicChatBackend(), fallback_backend=HeuristicChatBackend())
+    agent = JARVISAgent(chat_backend=EvidenceEchoBackend(), fallback_backend=HeuristicChatBackend())
     monkeypatch.setattr(jarvis_agent_module, "build_routed_chat_backend", _should_not_reach_ollama)
 
     result = agent.process(
@@ -4891,8 +4956,8 @@ def test_jarvis_uses_grounded_collection_answer_before_ollama(tmp_path: Path, mo
         context={"analysis_mode": "standard", "memory_context": bundle},
     )
 
-    assert result["provider"] == "knowledge_librarian"
-    assert result["model"] == "deterministic-collection-grounded"
+    assert result["provider"] == "fake_model"
+    assert result["model"] == "fake-model"
     assert "Spawn follows Al Simmons" in result["response"] or "Spawn centers on Al Simmons" in result["response"]
     assert "Al Simmons" in result["response"]
 
@@ -5538,3 +5603,23 @@ def test_heuristic_fallback_handles_memory_commitment_prompt() -> None:
 
     assert "carry it forward" in result.text
     assert "nation only when it is striving" not in result.text
+
+
+def test_heuristic_fallback_drops_noisy_ocr_excerpt_for_social_checkin() -> None:
+    backend = HeuristicChatBackend()
+    result = backend.generate(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "Conversation memory and ecosystem context:\n"
+                    "[Source 1] title=Spawn | kind=knowledge_collection | collection=spawn\n"
+                    "UFg AT AM ZJbOQ r v^eze MOf (jOfNO TO V WOP. Er^'i L: J! i! [PAGE 1]\n"
+                ),
+            },
+            {"role": "user", "content": "are you still there?"},
+        ]
+    )
+
+    assert "I am here inside O.B.E.O.S." in result.text
+    assert "UFg AT AM" not in result.text

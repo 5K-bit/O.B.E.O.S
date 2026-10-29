@@ -39,13 +39,15 @@ def test_model_chains():
     assert fast
     assert deep
     assert coding
-    assert "deepseek" in deep[0].lower() or "r1" in deep[0].lower()
+    assert deep[0] == fast[0] == "gemma4-heretic:latest"
 
 
-def test_fast_backend_caps_tokens():
-    options = backend_options_for_context({"analysis_mode": "fast"}, "jarvis")
-    assert options["mode"] == "fast"
-    assert options["num_predict"] >= 384
+def test_daise_modes_preserve_natural_response_budget():
+    budgets = [backend_options_for_context({"analysis_mode": mode}, "jarvis") for mode in ("fast", "standard", "deep")]
+    assert all(options["num_predict"] == 2048 for options in budgets)
+    assert all(options["num_ctx"] == 8192 for options in budgets)
+    assert all(options["think"] is False for options in budgets)
+    assert backend_options_for_context({"analysis_mode": "fast"}, "voice")["mode"] == "fast"
 
 
 def test_disable_chain_fallbacks_returns_primary_only():

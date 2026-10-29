@@ -38,47 +38,10 @@ from .engines import EvolutionEngine, IngestionEngine, MemoryEngine, ReflectionE
 TraceCallback = Callable[[Dict[str, Any]], None]
 
 
-@dataclass
-class AgentReport:
-    """Normalized specialist report returned to D.A.I.S.E."""
-
-    agent: str
-    response: str
-    confidence: float
-    trace_event_id: Optional[str]
-    tool_activity_summary: List[str]
-    provider: str
-    model: str
-    evidence_summary: str
-    task_type: str
-    backend_error: Optional[str]
-    backend_metadata: Dict[str, Any]
-    raw_result: Dict[str, Any]
-    routing_relevance: float = 0.0
-    trust_score: float = 0.5
-    score: float = 0.0
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "agent": self.agent,
-            "response": self.response,
-            "confidence": self.confidence,
-            "trace_event_id": self.trace_event_id,
-            "tool_activity_summary": self.tool_activity_summary,
-            "provider": self.provider,
-            "model": self.model,
-            "evidence_summary": self.evidence_summary,
-            "task_type": self.task_type,
-            "backend_error": self.backend_error,
-            "backend_metadata": self.backend_metadata,
-            "routing_relevance": self.routing_relevance,
-            "trust_score": self.trust_score,
-            "score": self.score,
-        }
-
+from .report_orchestration import AgentReport, ReportOrchestration
 
 @dataclass
-class DAISE:
+class DAISE(ReportOrchestration):
     """
     DAISE: Direct Artificial Intelligence System Environment.
 
@@ -412,20 +375,7 @@ class DAISE:
                     "execution_time_ms": execution_time_ms,
                 }
 
-            grounded_result = self._handle_grounded_truth_request(
-                user_input=user_input,
-                modality=modality,
-                context=context,
-                policy_decision=policy_decision,
-                session_id=session_id,
-                correlation_id=correlation_id,
-                request_id=request_id,
-                request_started=request_started,
-                progress_callback=progress_callback,
-            )
-            if grounded_result is not None:
-                return grounded_result
-
+            # Runtime truth is model evidence on the v1 lane, never a canned reply here.
             file_intent = parse_file_chat_intent(user_input) if self.file_workflow is not None else None
             if file_intent is not None and self.file_workflow is not None:
                 return self._handle_file_workflow_request(
@@ -721,6 +671,8 @@ class DAISE:
 
             reports.sort(key=lambda report: (report.score, report.confidence), reverse=True)
             top_report = reports[0]
+            if top_report.raw_result.get("error"):
+                raise RuntimeError(str(top_report.raw_result["error"]))
             second_report = reports[1] if len(reports) > 1 else None
             score_gap = round(top_report.score - second_report.score, 3) if second_report else 1.0
             synthesized = False
@@ -881,7 +833,7 @@ class DAISE:
                 provider=top_report.provider,
                 model=top_report.model,
                 execution_time_ms=execution_time_ms,
-                success=True,
+                success=not bool(top_report.backend_error),
                 extras={
                     "selected_agent": selected_agent,
                     "consulted_agents": candidate_agents,
@@ -980,7 +932,7 @@ class DAISE:
                 event_type="request_outcome",
                 payload={
                     "schema_version": "1.0",
-                    "success": True,
+                    "success": not bool(top_report.backend_error),
                     "decision_state": "approve",
                     "selected_agent": selected_agent,
                     "output_agent": output_agent,
@@ -1024,7 +976,7 @@ class DAISE:
 
             decision_quality_controller.record_execution_result(
                 correlation_id=correlation_id,
-                execution_success=True,
+                execution_success=not bool(top_report.backend_error),
                 execution_duration=execution_time_ms / 1000.0,
             )
 
@@ -1053,6 +1005,7 @@ class DAISE:
                 "model": top_report.model,
                 "backend_error": top_report.backend_error,
                 "backend_metadata": top_report.backend_metadata,
+                "error": top_report.backend_error,
                 "task_type": top_report.task_type,
                 "analysis_mode": analysis_mode,
                 "routing_confidence": routing_confidence,
@@ -1159,115 +1112,6 @@ class DAISE:
                 "error": str(exc),
             }
 
-    def _collect_agent_reports(
-        self,
-        *,
-        user_input: str,
-        context: Dict[str, Any],
-        session_id: str,
-        correlation_id: str,
-        request_id: str,
-        candidate_agents: Sequence[str],
-        agents: Dict[str, Any],
-        memory_bundles: Dict[str, Dict[str, Any]],
-        route_scores: Dict[str, float],
-        report_callback: Optional[TraceCallback],
-    ) -> List[AgentReport]:
-        reports: List[AgentReport] = []
-        for agent_name in candidate_agents:
-            agent_context = dict(context)
-            agent_context.update(
-                {
-                    "session_id": session_id,
-                    "correlation_id": correlation_id,
-                    "request_id": request_id,
-                    "memory_context": memory_bundles.get(agent_name, {}),
-                    "daise_selected_candidates": list(candidate_agents),
-                    "daise_routing_relevance": route_scores.get(agent_name, 0.0),
-                }
-            )
-            raw_result = agents[agent_name].process(user_input, context=agent_context)
-            report = self._normalize_agent_report(agent_name, raw_result)
-            report.routing_relevance = round(route_scores.get(agent_name, 0.0), 3)
-            report.trust_score = self.get_agent_trust_score(agent_name, report.task_type)
-            reports.append(report)
-
-            self.conversation_memory.persist_workflow_event(
-                source="daise",
-                event_type="agent_report",
-                payload={
-                    **report.to_dict(),
-                    "response_preview": report.response[:280],
-                },
-                confidence=report.confidence,
-                session_id=session_id,
-                correlation_id=correlation_id,
-                request_id=request_id,
-            )
-            self._emit_report(
-                report_callback,
-                request_id=request_id,
-                session_id=session_id,
-                report=report,
-            )
-
-        if not reports:
-            raise RuntimeError("No agent reports were produced")
-        return reports
-
-    def _normalize_agent_report(self, agent_name: str, result: Dict[str, Any]) -> AgentReport:
-        tools_invoked = result.get("tools_invoked") or []
-        tool_activity_summary: List[str] = []
-        for tool in tools_invoked:
-            if isinstance(tool, dict):
-                tool_activity_summary.append(
-                    str(tool.get("tool") or tool.get("tool_name") or tool.get("status") or "tool")
-                )
-            else:
-                tool_activity_summary.append(str(tool))
-
-        response = str(result.get("response") or "")
-        task_type = str(result.get("task_type") or result.get("agent") or agent_name)
-        evidence_summary = self._build_evidence_summary(result)
-        return AgentReport(
-            agent=agent_name,
-            response=response,
-            confidence=float(result.get("confidence", 0.0)),
-            trace_event_id=result.get("trace_event_id"),
-            tool_activity_summary=tool_activity_summary,
-            provider=str(result.get("provider") or ""),
-            model=str(result.get("model") or ""),
-            evidence_summary=evidence_summary,
-            task_type=task_type,
-            backend_error=result.get("backend_error"),
-            backend_metadata=dict(result.get("backend_metadata") or {}),
-            raw_result=result,
-        )
-
-    def _build_evidence_summary(self, result: Dict[str, Any]) -> str:
-        if result.get("analysis"):
-            analysis = result["analysis"]
-            issues_found = analysis.get("issues_found")
-            summary = analysis.get("summary")
-            if summary:
-                return str(summary)
-            if issues_found is not None:
-                return f"Analysis found {issues_found} issue(s)."
-        if result.get("quiz_data"):
-            quiz_data = result["quiz_data"]
-            if quiz_data.get("topic"):
-                return f"Training context focused on {quiz_data['topic']}."
-        if result.get("exercise_data"):
-            exercise_data = result["exercise_data"]
-            if exercise_data.get("topic"):
-                return f"Learning context focused on {exercise_data['topic']}."
-        if result.get("reasoning_trace"):
-            trace = result["reasoning_trace"]
-            steps = trace.get("steps", [])
-            if steps:
-                return f"Reasoning trace captured {len(steps)} step(s)."
-        return "Specialist report generated."
-
     def _grounded_conversation_override_for_generic_report(
         self,
         *,
@@ -1282,10 +1126,23 @@ class DAISE:
         normalized_provider = " ".join(str(top_report.provider or "").strip().lower().split())
         normalized_model = " ".join(str(top_report.model or "").strip().lower().split())
         normalized_response = " ".join(str(top_report.response or "").strip().lower().split())
-        if normalized_provider not in {"heuristic", ""}:
+        # A fallback answer now reports the backend that actually failed, so the
+        # provider/model strings no longer identify it. Trust the explicit
+        # fallback marker first and keep the legacy name check for reports that
+        # carry no fallback metadata.
+        backend_metadata = getattr(top_report, "backend_metadata", None) or {}
+        fallback_mode = " ".join(
+            str(backend_metadata.get("fallback_mode") or "").strip().lower().split()
+        )
+        used_fallback = bool(fallback_mode) and fallback_mode != "none"
+        # A failed live turn must not become a successful canned conversation.
+        if used_fallback or getattr(top_report, "backend_error", None):
             return None
-        if normalized_model and normalized_model not in {"fake-jarvis", "heuristic", "fallback-heuristic"}:
-            return None
+        if not used_fallback:
+            if normalized_provider not in {"heuristic", ""}:
+                return None
+            if normalized_model and normalized_model not in {"fake-jarvis", "heuristic", "fallback-heuristic"}:
+                return None
         if not self._looks_like_low_information_agent_reply(normalized_response):
             return None
         primary_bundle = memory_bundles.get(selected_agent) or next(iter(memory_bundles.values()), {})
@@ -1618,13 +1475,19 @@ class DAISE:
             "study for",
             "study plan",
             "exam prep",
-            "certification",
             "test me on",
+            "quiz me",
+            "help me study",
+            "practice questions",
+            "practice exam",
         )
         if any(phrase in lower_input for phrase in clear_phrases):
             return True
-        training_markers = ("study", "exam", "quiz", "certification", "progress", "topic", "pcep")
-        return sum(1 for marker in training_markers if marker in lower_input) >= 1
+        # A topic mention or runtime "progress" question is not consent to a
+        # training session. Explicit agent overrides are handled separately.
+        return bool(re.search(
+            r"\b(?:start|begin|resume|continue)\s+(?:(?:a|the|my)\s+)?"
+            r"(?:quiz|training|study session|exam practice)\b", lower_input))
 
     @staticmethod
     def _is_learning_intent(lower_input: str) -> bool:
@@ -1809,6 +1672,40 @@ class DAISE:
                 return normalized[len(banner) :].lstrip("- \n")
         return normalized
 
+    def _persist_runtime_truth_observation(
+        self,
+        truth: Dict[str, Any],
+        *,
+        session_id: str,
+        correlation_id: str,
+        request_id: str,
+        parent_event_id: Optional[str],
+    ) -> Any:
+        """Record the deterministic facts handed to the model for this turn."""
+        event_type = (
+            "backend_health_observation"
+            if truth["kind"] in {"status", "tinyprogrammer_status"}
+            else "environment_snapshot"
+        )
+        return self.conversation_memory.persist_workflow_event(
+            source="daise",
+            event_type=event_type,
+            payload={
+                "schema_version": "1.0",
+                "grounded_truth": {
+                    "kind": truth["kind"],
+                    "source": truth.get("source"),
+                    "observation": truth.get("observation"),
+                },
+            },
+            confidence=0.94,
+            session_id=session_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            parent_event_id=parent_event_id,
+            tags=["grounded_truth", truth["kind"]],
+        )
+
     def _handle_grounded_truth_request(
         self,
         *,
@@ -1826,6 +1723,8 @@ class DAISE:
         if truth is None:
             return None
 
+        visible_response = "Local evidence summary (not model-generated).\n" + str(truth["response"])
+
         query_event = self.conversation_memory.persist_user_turn(
             session_id=session_id,
             correlation_id=correlation_id,
@@ -1836,35 +1735,19 @@ class DAISE:
             agent_override=context.get("agent_override"),
             request_id=request_id,
         )
-        event_type = (
-            "backend_health_observation"
-            if truth["kind"] in {"status", "tinyprogrammer_status"}
-            else "environment_snapshot"
-        )
-        trace_event = self.conversation_memory.persist_workflow_event(
-            source="daise",
-            event_type=event_type,
-            payload={
-                "schema_version": "1.0",
-                "grounded_truth": {
-                    "kind": truth["kind"],
-                    "source": truth["source"],
-                    "observation": truth["observation"],
-                },
-            },
-            confidence=0.94,
+        trace_event = self._persist_runtime_truth_observation(
+            truth,
             session_id=session_id,
             correlation_id=correlation_id,
             request_id=request_id,
             parent_event_id=query_event.id,
-            tags=["grounded_truth", truth["kind"]],
         )
         execution_time_ms = (time.time() - request_started) * 1000
         response_event = self.conversation_memory.persist_agent_response(
             session_id=session_id,
             correlation_id=correlation_id,
             agent_name="daise",
-            response_text=truth["response"],
+            response_text=visible_response,
             confidence=0.94,
             modality=modality,
             parent_event_id=query_event.id,
@@ -1885,6 +1768,8 @@ class DAISE:
                     "kind": truth["kind"],
                     "source": truth["source"],
                 },
+                "response_path": "deterministic_evidence",
+                "deterministic_label": "Local evidence summary (not model-generated).",
             },
             request_id=request_id,
         )
@@ -1924,7 +1809,7 @@ class DAISE:
         )
         operator_trace = self.conversation_memory.get_request_trace(request_id)
         return {
-            "response": truth["response"],
+            "response": visible_response,
             "confidence": 0.94,
             "agent": "daise",
             "output_agent": "daise",
@@ -1936,7 +1821,11 @@ class DAISE:
             "provider": "local_runtime_truth",
             "model": "grounded-truth-v1",
             "backend_error": None,
-            "backend_metadata": {"grounded_truth": truth["observation"]},
+            "backend_metadata": {
+                "grounded_truth": truth["observation"],
+                "response_path": "deterministic_evidence",
+                "deterministic_label": "Local evidence summary (not model-generated).",
+            },
             "task_type": "grounded_truth",
             "analysis_mode": context.get("analysis_mode"),
             "routing_confidence": 1.0,
@@ -2880,6 +2769,22 @@ class DAISE:
 
     def _matches_values_or_emotional_reflection_truth(self, normalized_compact: str) -> bool:
         if not normalized_compact or len(normalized_compact.split()) > 48:
+            return False
+        # Operator corrections are conversation feedback, not invitations to
+        # generate a values reflection from the current work ledger.
+        if any(
+            phrase in normalized_compact
+            for phrase in (
+                "just saying things",
+                "not answering",
+                "didn't answer",
+                "didnt answer",
+                "not my question",
+                "better conversing than remembering",
+                "wont ask you to recall",
+                "won't ask you to recall",
+            )
+        ):
             return False
         tokens = set(re.findall(r"[a-z0-9']+", normalized_compact))
         explicit_truth_anchor = bool(tokens.intersection({"obeos", "project"}))

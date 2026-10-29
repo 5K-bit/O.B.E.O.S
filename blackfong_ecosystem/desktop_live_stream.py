@@ -58,7 +58,9 @@ class DesktopLiveStreamWorker(QThread):
 
         self._stop_requested = False
         try:
-            with httpx.Client(timeout=httpx.Timeout(connect=3.0, read=None, write=10.0, pool=5.0)) as client:
+            from .http_clients import client_for
+
+            with client_for(self._url, timeout=httpx.Timeout(connect=3.0, read=None, write=10.0, pool=5.0)) as client:
                 with client.stream("GET", self._url, headers={"Accept": "text/event-stream"}) as response:
                     debug_session_log(
                         hypothesis_id="A",

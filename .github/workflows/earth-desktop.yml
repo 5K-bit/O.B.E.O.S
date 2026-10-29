@@ -1,0 +1,82 @@
+name: Earth desktop acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            lock: windows
+          - os: ubuntu-latest
+            lock: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.ECOSYSTEM_READ_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - name: Install locked dependencies
+        run: python -m pip install --require-hashes -r requirements/desktop-${{ matrix.lock }}-py311.lock
+      - name: Install local packages without re-resolving dependencies
+        run: python -m pip install --no-deps --no-build-isolation -e EarthGlass -e .
+      - name: Canonical repository paths
+        run: python tools/validate_ecosystem_paths.py
+      - name: Spatial contract parity
+        run: python EarthGlass/tools/export_spatial_contracts.py --check
+      - name: Earth Control contract parity
+        run: python tools/export_earth_control_contracts.py --check
+      - name: Backend and desktop regressions
+        run: python -m pytest tests/test_earth_control.py tests/test_event_outbox.py tests/test_background_delivery.py tests/test_desktop_cancellation.py EarthGlass/tests -q
+      - name: Client dependencies
+        run: pnpm --dir EarthGlass/obeos-earth install --frozen-lockfile
+      - name: Client regressions
+        run: pnpm --dir EarthGlass/obeos-earth test
+      - name: Client bundle
+        run: pnpm --dir EarthGlass/obeos-earth build
+      - name: Clean release wheels
+        run: python tools/build_earth_release.py
+      - name: Installed wheel imports and offline API
+        run: python tools/verify_earth_wheels.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: earth-wheels-${{ matrix.lock }}
+          path: artifacts/wheels/*.whl
+  weather:
+    # The optional GFS decoding stack (xarray/cfgrib/ecCodes) is deliberately absent from
+    # the desktop lock; only this job installs it, and the weather tests skip without it.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            lock: windows
+          - os: ubuntu-latest
+            lock: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.ECOSYSTEM_READ_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install locked desktop and optional weather dependencies
+        run: python -m pip install --require-hashes -r requirements/desktop-${{ matrix.lock }}-py311.lock -r requirements/weather-${{ matrix.lock }}-py311.lock
+      - name: Install local packages without re-resolving dependencies
+        run: python -m pip install --no-deps --no-build-isolation -e EarthGlass -e .
+      - name: Weather decoding regressions
+        run: python -m pytest EarthGlass/tests/weather -q

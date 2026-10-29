@@ -12,7 +12,9 @@ from .ollama_models import filter_model_chain
 
 MAX_MODEL_CHAIN_WALL_S = 90.0
 FAST_CHAIN_TIMEOUT_CAP_S = 25.0
-STANDARD_CHAIN_TIMEOUT_CAP_S = 45.0
+# A single standard-model request may need time to load a cold local model.
+# Multi-model chains are still divided below so retries remain bounded.
+STANDARD_CHAIN_TIMEOUT_CAP_S = 75.0
 DEEP_CHAIN_TIMEOUT_CAP_S = 90.0
 
 ResponseMode = str  # "fast" | "standard" | "deep"
@@ -63,6 +65,34 @@ _FILE_KEYWORDS = (
     "write to ",
     "open file",
     "file workflow",
+)
+
+_KNOWN_KNOWLEDGE_NAMES = (
+    "spawn",
+    "obeos",
+    "blackforge",
+    "night-watch",
+    "nightwatch",
+    "quietdrop",
+    "earthglass",
+    "earth glass",
+    "dreamgraph",
+    "memory chamber",
+    "tinyprogrammer",
+    "tiny programmer",
+    "max payne",
+)
+
+_KNOWLEDGE_QUERY_MARKERS = (
+    "tell me about",
+    "what is",
+    "what are",
+    "explain",
+    "describe",
+    "recall",
+    "remember",
+    "what do you know",
+    "where did we",
 )
 
 
@@ -132,7 +162,20 @@ def resolve_response_mode(
         return "deep"
     if intent.coding and mode == "fast":
         return "standard"
+    # Fast remains the low-latency default, but named knowledge questions need
+    # enough retrieval context to avoid a confident shallow guess.
+    if mode == "fast" and _looks_like_named_knowledge_query(user_input):
+        return "standard"
     return mode
+
+
+def _looks_like_named_knowledge_query(user_input: str) -> bool:
+    lowered = " ".join(str(user_input or "").lower().split())
+    if not lowered or lowered.startswith("/"):
+        return False
+    has_name = any(name in lowered for name in _KNOWN_KNOWLEDGE_NAMES)
+    has_request = any(marker in lowered for marker in _KNOWLEDGE_QUERY_MARKERS)
+    return has_name and has_request
 
 
 def should_use_fast_path(user_input: str, context: Dict[str, Any]) -> bool:
@@ -194,7 +237,9 @@ def model_chain_for_agent(agent_name: Optional[str], response_mode: str) -> List
     """Ordered Ollama models to try (primary first, then fallbacks)."""
     agent = (agent_name or "jarvis").strip().lower()
     mode = normalize_response_mode(response_mode)
-    if agent in {"coding", "coding_agent"}:
+    if agent in {"daise", "jarvis"}:
+        raw = [chat_settings.daise_model]
+    elif agent in {"coding", "coding_agent"}:
         raw = list(chat_settings.coding_model_chain())
     elif agent in {"voice", "voice_agent"}:
         raw = list(chat_settings.voice_model_chain())
@@ -209,6 +254,17 @@ def model_chain_for_agent(agent_name: Optional[str], response_mode: str) -> List
 
 def backend_options_for_context(context: Dict[str, Any], agent_name: str = "jarvis") -> Dict[str, Any]:
     """Ollama option bundle for the active response mode."""
+    if agent_name.lower() in {"daise", "jarvis"}:
+        # Mode must not shorten natural conversation. Latency comes from streaming
+        # and bounded retrieval, while a generous ceiling still limits runaway output.
+        return {
+            "mode": "standard", "timeout": chat_settings.standard_timeout,
+            "max_attempts": 1, "retry_read_timeout": False,
+            "num_predict": chat_settings.daise_num_predict,
+            "num_ctx": chat_settings.daise_num_ctx,
+            "keep_alive": chat_settings.standard_keep_alive,
+            "think": False,
+        }
     mode = normalize_response_mode(context.get("analysis_mode") or context.get("response_mode"))
     is_deep = mode == "deep" or bool(context.get("long_running_task"))
     if is_deep:
@@ -242,14 +298,46 @@ def backend_options_for_context(context: Dict[str, Any], agent_name: str = "jarv
     }
 
 
+def _is_daise_agent(agent_name: str) -> bool:
+    return (agent_name or "").strip().lower() in {"daise", "jarvis"}
+
+
+def build_daise_llamacpp_backend() -> Optional[BaseChatBackend]:
+    """Return the selected llama.cpp backend; readiness is checked at invocation.
+
+    Only used for the daise/jarvis agent slot: llama-server is a dedicated,
+    single-model process for the edited Gemma model, kept separate from the
+    Ollama chains the other agents still use.
+    """
+    # Re-import (not the module-level `chat_settings`) so callers that patch
+    # blackfong_ecosystem.config.chat_settings for testing are honored here too.
+    from .config import chat_settings as _current_chat_settings
+    from .config import llamacpp_settings
+    from .llamacpp_backend import LlamaCppChatBackend
+
+    if getattr(_current_chat_settings, "daise_backend", "ollama").strip().lower() != "llamacpp":
+        return None
+    return LlamaCppChatBackend(
+        base_url=llamacpp_settings.base_url,
+        model=llamacpp_settings.model_alias,
+        timeout=llamacpp_settings.request_timeout,
+        num_predict=getattr(_current_chat_settings, "daise_num_predict", 2048),
+    )
+
+
 def build_routed_chat_backend(agent_name: str, response_mode: str) -> BaseChatBackend:
-    """Construct an Ollama backend with model fallbacks for the given mode."""
+    """Construct a chat backend (with model fallbacks) for the given agent/mode."""
     if chat_settings.backend.lower() != "ollama":
         return HeuristicChatBackend(model=f"{agent_name}-{chat_settings.backend}-fallback")
 
+    if _is_daise_agent(agent_name):
+        llamacpp_backend = build_daise_llamacpp_backend()
+        if llamacpp_backend is not None:
+            return llamacpp_backend
+
     chain = model_chain_for_agent(agent_name, response_mode)
     primary = chain[0]
-    fallbacks = chain[1:]
+    fallbacks = [] if _is_daise_agent(agent_name) else chain[1:]
     options = backend_options_for_context({"analysis_mode": response_mode}, agent_name)
     return OllamaRoutingChatBackend(
         model=primary,

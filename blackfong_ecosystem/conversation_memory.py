@@ -7,8 +7,9 @@ import shutil
 import time
 import uuid
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .config import chat_settings, paths
 from .events import Event
@@ -20,90 +21,9 @@ from .storage import ChromaVectorStore, EventStore, NullVectorStore, VectorStore
 
 CHAT_EVENT_TYPES = {"agent_query", "agent_response"}
 MEMORY_EVENT_TYPES = {"session_summary", "knowledge_ingested"}
-WORKFLOW_EVENT_TYPES = {
-    "routing_decision",
-    "memory_retrieval",
-    "agent_report",
-    "agent_evaluation",
-    "agent_selection",
-    "tinyprogrammer_status",
-    "tinyprogrammer_state_transition",
-    "tinyprogrammer_program_created",
-    "tinyprogrammer_program_archived",
-    "tinyprogrammer_reflection",
-    "tinyprogrammer_brief_applied",
-    "tinyprogrammer_feedback",
-    "awareness_snapshot",
-    "performance_snapshot",
-    "latency_observation",
-    "routing_quality_observation",
-    "memory_retrieval_observation",
-    "backend_health_observation",
-    "environment_snapshot",
-    "sensor_capability_snapshot",
-    "audio_device_observation",
-    "camera_device_observation",
-    "queue_pressure_observation",
-    "consistency_conflict",
-    "request_outcome",
-    "agent_trust_update",
-    "policy_decision",
-    "capability_snapshot",
-    "adapter_health_observation",
-    "agent_admission_decision",
-    "learner_profile_update",
-    "learning_attempt",
-    "resource_budget_observation",
-    "spine_conflict_detected",
-    "spine_mode_changed",
-    "vision_tool_result",
-    "installer_plan_generated",
-    "identity_resolution_event",
-    "operator_consent",
-    "file_workflow_state",
-    "file_proposal_created",
-    "file_proposal_expired",
-    "file_pre_apply_validation",
-    "file_change_applied",
-    "file_post_apply_validation",
-    "file_scope_discovery",
-    "file_scope_root_approved",
-    "file_scope_map",
-    "file_scope_read",
-    "knowledge_source_added",
-    "knowledge_cleaned",
-    "knowledge_chunked",
-    "knowledge_embedded",
-    "knowledge_ingestion_failed",
-    "knowledge_phase1_started",
-    "knowledge_inventory_created",
-    "knowledge_coverage_created",
-    "knowledge_timeline_created",
-    "knowledge_memory_chamber_graph_updated",
-    "knowledge_phase1_completed",
-    "knowledge_phase1_failed",
-    "knowledge_gaps_detected",
-    "knowledge_summary_created",
-    "knowledge_librarian_answered",
-    "perception_gate_decision",
-    "vision_sensor_observation",
-    "screen_snapshot_observation",
-    "audio_sensor_observation",
-    "companion_brief_scope_decision",
-    "tinyprogrammer_process_state",
-    "notification_created",
-    "notification_read",
-    "notification_action_taken",
-    "notification_delivery_result",
-    "operator_intent_created",
-    "operator_intent_state",
-    "operator_intent_expired",
-    "operator_action_result",
-    "state_change_summary",
-    "frame_tap_event",
-    "frame_imu_observation",
-    "frame_display_update",
-}
+from .memory_persistence import MemoryPersistence, WORKFLOW_EVENT_TYPES
+from .memory_retrieval import SemanticRetrieval
+
 
 MEMORY_PROFILE_DEFAULTS: Dict[str, Any] = {
     "agent": "default",
@@ -159,7 +79,7 @@ AGENT_MEMORY_PROFILES: Dict[str, Dict[str, Any]] = {
 }
 
 
-class ConversationMemoryService:
+class ConversationMemoryService(MemoryPersistence, SemanticRetrieval):
     """Shared session and global memory service for the chat surfaces."""
 
     def __init__(
@@ -183,117 +103,6 @@ class ConversationMemoryService:
     @staticmethod
     def create_correlation_id() -> str:
         return str(uuid.uuid4())
-
-    def persist_user_turn(
-        self,
-        *,
-        session_id: str,
-        correlation_id: str,
-        text: str,
-        modality: str = "text",
-        routed_agent: str = "daise",
-        analysis_mode: str = "standard",
-        agent_override: Optional[str] = None,
-        request_id: Optional[str] = None,
-    ) -> Event:
-        event = Event.new(
-            source="user",
-            type="agent_query",
-            payload={
-                "text": text,
-                "modality": modality,
-                "agent": routed_agent,
-                "analysis_mode": analysis_mode,
-                "agent_override": agent_override,
-            },
-            confidence=1.0,
-            session_id=session_id,
-            correlation_id=correlation_id,
-            request_id=request_id,
-            tags=["conversation", "user_turn", modality],
-        )
-        self.event_store.add_event(event)
-        self._store_lifecycle_item(event, "event")
-        self._capture_derived_user_memories(
-            session_id=session_id,
-            source_event_id=event.id,
-            text=text,
-        )
-        return event
-
-    def persist_agent_response(
-        self,
-        *,
-        session_id: str,
-        correlation_id: str,
-        agent_name: str,
-        response_text: str,
-        confidence: float,
-        modality: str = "text",
-        parent_event_id: Optional[str] = None,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
-        execution_time_ms: Optional[float] = None,
-        success: bool = True,
-        extras: Optional[Dict[str, Any]] = None,
-        request_id: Optional[str] = None,
-    ) -> Event:
-        payload = {
-            "response": response_text,
-            "text": response_text,
-            "agent": agent_name,
-            "modality": modality,
-            "success": success,
-            "provider": provider or "",
-            "model": model or "",
-            "execution_time_ms": execution_time_ms or 0.0,
-        }
-        if extras:
-            payload.update(extras)
-
-        event = Event.new(
-            source=agent_name,  # type: ignore[arg-type]
-            type="agent_response",
-            payload=payload,
-            confidence=confidence,
-            parent_event=parent_event_id,
-            session_id=session_id,
-            correlation_id=correlation_id,
-            request_id=request_id,
-            tags=["conversation", "agent_response", agent_name],
-        )
-        self.event_store.add_event(event)
-        self._store_lifecycle_item(event, "event")
-        return event
-
-    def persist_workflow_event(
-        self,
-        *,
-        source: str,
-        event_type: str,
-        payload: Dict[str, Any],
-        confidence: float = 1.0,
-        session_id: Optional[str] = None,
-        correlation_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-        parent_event_id: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> Event:
-        event = Event.new(
-            source=source,  # type: ignore[arg-type]
-            type=event_type,
-            payload=payload,
-            confidence=confidence,
-            parent_event=parent_event_id,
-            session_id=session_id,
-            correlation_id=correlation_id,
-            request_id=request_id,
-            tags=tags or ["workflow", event_type],
-        )
-        self.event_store.add_event(event)
-        lifecycle_type = "trace" if event_type in WORKFLOW_EVENT_TYPES else "event"
-        self._store_lifecycle_item(event, lifecycle_type)
-        return event
 
     def maybe_create_session_summary(
         self,
@@ -425,6 +234,13 @@ class ConversationMemoryService:
         cleaned = self._clean_grounded_memory_text(text)
         lowered = cleaned.lower()
         if not cleaned:
+            return
+        # Greetings, test probes, transport chatter, and fallback diagnostics
+        # are conversation history, not durable operator knowledge.
+        if self._looks_like_noise_topic(cleaned) and not any(
+            marker in lowered
+            for marker in ("working on", "improve", "build", "implement", "configure", "set up")
+        ):
             return
 
         derived: List[Dict[str, Any]] = []
@@ -624,6 +440,8 @@ class ConversationMemoryService:
             prompt_budget_tokens = prompt_budget_tokens or chat_settings.deep_prompt_budget_tokens
 
         session_messages = self.get_session_messages(session_id, limit=transcript_limit * 2)
+        session_messages = [message for message in session_messages
+                            if message.get("prompt_eligible", True)]
         session_summaries = self._get_session_summaries(session_id, limit=summary_limit)
         memory_query = "" if (skip_vector_search or recall_kind is not None) else query
         global_memories = self.list_global_memories(
@@ -937,6 +755,91 @@ class ConversationMemoryService:
             },
         }
 
+    # Shared with _detect_conversational_recall_frame: the vocabulary that makes a
+    # turn read as being about the ongoing work. Keeping one copy stops the detector
+    # and the scope gate below from drifting apart.
+    _FRAME_ANCHOR_TERMS = frozenset({
+        "obeos", "o b e o s", "daise", "blackfong", "system", "project", "memory",
+        "work", "working", "progress", "direction", "future", "next", "risk",
+        "fragile", "creator", "mission", "success", "improve", "latency", "hud",
+        "telegram", "tinyprogrammer", "tiny", "recall", "response", "operator",
+        "surface", "thinking", "headed", "becoming", "stable", "stabilize",
+        "stabilizing", "grounded", "coherence", "cohesion", "pressure", "weakest",
+        "solid", "alive", "shape",
+        "everything", "overall", "together", "us", "our", "we", "you", "me",
+    })
+
+    # Expressions that point at something already in play, or at D.A.I.S.E itself.
+    # A turn carrying one of these is asking about the existing thread rather than
+    # opening a new topic, however it is phrased.
+    _REFERRING_TOKENS = frozenset({
+        "this", "that", "these", "those", "it", "its", "here", "there",
+        "we", "us", "our", "ours", "you", "your", "yours", "yourself",
+    })
+
+    def _unseen_proper_nouns(self, query: str, established: set) -> set:
+        """Capitalized mid-sentence words the session has never mentioned.
+
+        A turn naming new entities ("a picnic on Tuesday at Cedar Park") is raising
+        its own subject, not asking about the current one. Sentence-initial words
+        are skipped because their capitalization carries no information.
+        """
+        found = set()
+        for sentence in re.split(r"(?<=[.!?])\s+", str(query or "").strip()):
+            for word in sentence.split()[1:]:
+                bare = word.strip(".,!?;:'\"")
+                lowered = bare.lower()
+                if (
+                    len(bare) > 2
+                    and bare[:1].isupper()
+                    and lowered not in established
+                    # The project's own name is never outside subject matter.
+                    and lowered not in self._FRAME_ANCHOR_TERMS
+                ):
+                    found.add(bare)
+        return found
+
+    def _introduces_outside_subject(
+        self,
+        query: str,
+        *,
+        session_messages: Optional[Sequence[Dict[str, Any]]] = None,
+        session_summaries: Optional[Sequence[Any]] = None,
+    ) -> bool:
+        """True when a turn raises subject matter the session has not been discussing.
+
+        Keeps project narrative off an unrelated question ("what matters most when
+        making bread?") without demanding the operator name the project, so ordinary
+        reflective follow-ups still ground. The current turn is excluded from the
+        session side: introducing a topic must not make it count as established
+        context for the very turn that introduces it.
+        """
+        query_tokens = set(self._tokenize(query))
+        if not query_tokens:
+            return False
+
+        compact_query = " ".join(str(query or "").strip().lower().split())
+        established: set = set()
+        for message in list(session_messages or []):
+            if not isinstance(message, Mapping):
+                continue
+            text = str(message.get("text") or message.get("content") or "")
+            if " ".join(text.strip().lower().split()) == compact_query:
+                continue
+            established.update(self._tokenize(text))
+        for summary in list(session_summaries or []):
+            if isinstance(summary, Mapping):
+                summary = summary.get("summary") or summary.get("text") or ""
+            established.update(self._tokenize(str(summary)))
+
+        if self._unseen_proper_nouns(query, established):
+            return True
+        if query_tokens & self._FRAME_ANCHOR_TERMS:
+            return False
+        if query_tokens & self._REFERRING_TOKENS:
+            return False
+        return not bool(query_tokens & established)
+
     def grounded_conversational_answer(
         self,
         *,
@@ -958,6 +861,20 @@ class ConversationMemoryService:
         if frame is None:
             frame = self._detect_implicit_conversational_frame(query, messages)
         if frame is None:
+            return None
+
+        # Project narrative must not answer an unrelated question ("what matters most
+        # when making bread?"), but requiring the query to name the project silenced
+        # ordinary reflective follow-ups too -- "what still seems messy to you?" is
+        # about the work without ever saying "obeos", and that is the conversation
+        # this grounding exists to support. Discriminate on subject matter instead:
+        # withhold only when the turn introduces something the session has not been
+        # discussing. Follow-ups are anaphoric by definition and always pass.
+        if frame != "followup" and self._introduces_outside_subject(
+            query,
+            session_messages=messages,
+            session_summaries=session_summaries,
+        ):
             return None
 
         started = time.perf_counter()
@@ -1491,11 +1408,11 @@ class ConversationMemoryService:
         events = self.event_store.list_events_for_session(
             session_id,
             types=["agent_query", "agent_response", "operator_action_result"],
-            ascending=True,
+            ascending=False,
             limit=limit,
         )
         messages = []
-        for event in events:
+        for event in reversed(events):
             text = str(event.payload.get("text") or event.payload.get("response") or "")
             if event.type == "agent_response":
                 role = "assistant"
@@ -1512,9 +1429,28 @@ class ConversationMemoryService:
                     "agent": event.payload.get("agent") or event.payload.get("owned_by") or event.source,
                     "timestamp": event.timestamp / 1000.0,
                     "metadata": event.metadata,
+                    "prompt_eligible": self._response_prompt_eligible(event.type, event.payload),
                 }
             )
         return messages[-limit:]
+
+    @staticmethod
+    def _response_prompt_eligible(event_type: str, payload: Dict[str, Any]) -> bool:
+        if event_type != "agent_response":
+            return True
+        metadata = payload.get("backend_metadata") or payload.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return not (
+            payload.get("error") or payload.get("backend_error")
+            or payload.get("success") is False
+            or payload.get("status") in {"error", "failed", "cancelled"}
+            or payload.get("demonstrably_incorrect") is True
+            or payload.get("response_complete") is False
+            or metadata.get("response_complete") is False
+            or metadata.get("finish_reason") == "length"
+            or metadata.get("fallback_mode") in {"reactive", "preemptive"}
+        )
 
     def list_sessions(self, limit: int = 100) -> List[Dict[str, Any]]:
         sessions = self.event_store.list_recent_sessions(limit=limit)
@@ -1835,6 +1771,15 @@ class ConversationMemoryService:
             if fallback_used or backend_error:
                 if within_timeout_window:
                     recent_fallback_count += 1
+                skipped_live_lane = (
+                    backend_metadata.get("live_lane_attempted") is False
+                    or backend_metadata.get("preemptive_fallback") is True
+                    or backend_metadata.get("fallback_mode") == "preemptive"
+                )
+                # A skipped request repeats historical error text, not a new
+                # provider failure. Do not extend the outage with that echo.
+                if skipped_live_lane:
+                    continue
                 if within_timeout_window and ("timed out" in backend_error.lower() or "timed out" in fallback_reason.lower()):
                     recent_timeout_count += 1
                 provider = primary_provider or provider or ""
@@ -2069,109 +2014,6 @@ class ConversationMemoryService:
         if len(cleaned) <= max_chars:
             return cleaned
         return cleaned[: max_chars - 3].rstrip(" ,;:.") + "..."
-
-    def _retrieve_semantic_context(
-        self,
-        *,
-        query: str,
-        retrieval_profile: str,
-        skip_vector_search: bool,
-    ) -> Dict[str, Any]:
-        settings = retrieval_profile_settings(retrieval_profile)
-        empty = {
-            "hits": [],
-            "citations": [],
-            "context": "",
-            "timing_ms": {
-                "embedding": None,
-                "vector_query": 0.0,
-                "rerank_bounding": 0.0,
-                "total_retrieval": 0.0,
-            },
-        }
-        if (
-            skip_vector_search
-            or not settings.get("include_semantic")
-            or not str(query or "").strip()
-            or isinstance(self.vector_store, NullVectorStore)
-        ):
-            return empty
-
-        vector_k = int(settings.get("vector_k") or 0)
-        if vector_k <= 0:
-            return empty
-
-        query_tokens = self._tokenize(query)
-        hinted_collections = self._detect_collection_hints(query)
-        query_started = time.perf_counter()
-        try:
-            results = self.vector_store.search(query, k=max(vector_k * 3, vector_k))
-        except Exception:
-            results = []
-        query_completed = time.perf_counter()
-
-        rerank_started = time.perf_counter()
-        annotated_hits: List[Dict[str, Any]] = []
-        for collection in hinted_collections:
-            summary_hit = self._collection_summary_hit(
-                collection,
-                query=query,
-                query_tokens=query_tokens,
-                retrieval_profile=retrieval_profile,
-            )
-            if summary_hit is not None:
-                annotated_hits.append(summary_hit)
-        for result in self._search_hinted_collection_results(
-            query=query,
-            hinted_collections=hinted_collections,
-            retrieval_profile=retrieval_profile,
-            limit=max(vector_k * 2, vector_k),
-        ):
-            enriched = self._annotate_semantic_hit(
-                result,
-                query_tokens=query_tokens,
-                retrieval_profile=retrieval_profile,
-                hinted_collections=hinted_collections,
-            )
-            if enriched is not None:
-                annotated_hits.append(enriched)
-        for result in results:
-            enriched = self._annotate_semantic_hit(
-                result,
-                query_tokens=query_tokens,
-                retrieval_profile=retrieval_profile,
-                hinted_collections=hinted_collections,
-            )
-            if enriched is not None:
-                annotated_hits.append(enriched)
-        deduped_hits = self._dedupe_semantic_hits(annotated_hits)
-        deduped_hits.sort(
-            key=lambda item: (float(item["score"]), float(item["relevance"])),
-            reverse=True,
-        )
-        selected_hits = deduped_hits[: int(settings.get("citation_limit") or vector_k)]
-        selected_hits = self._limit_collection_focused_hits(
-            selected_hits,
-            query=query,
-            retrieval_profile=retrieval_profile,
-            hinted_collections=hinted_collections,
-        )
-        context = self._render_retrieval_context(
-            selected_hits,
-            max_chars=int(settings.get("context_chars") or 0),
-        )
-        rerank_completed = time.perf_counter()
-        return {
-            "hits": selected_hits,
-            "citations": [dict(item["citation"]) for item in selected_hits],
-            "context": context,
-            "timing_ms": {
-                "embedding": None,
-                "vector_query": round((query_completed - query_started) * 1000, 2),
-                "rerank_bounding": round((rerank_completed - rerank_started) * 1000, 2),
-                "total_retrieval": round((rerank_completed - query_started) * 1000, 2),
-            },
-        }
 
     def _annotate_semantic_hit(
         self,
@@ -2616,14 +2458,7 @@ class ConversationMemoryService:
             return None
         if any(token in compact for token in ("def ", "class ", "import ", "traceback", "/api/", "http://", "https://")):
             return None
-        anchor_terms = {
-            "obeos", "o b e o s", "daise", "system", "project", "memory", "work", "working",
-            "progress", "direction", "future", "next", "risk", "fragile", "creator", "mission",
-            "success", "improve", "latency", "hud", "telegram", "tinyprogrammer", "tiny",
-            "recall", "response", "operator", "surface", "thinking", "headed", "becoming",
-            "stable", "stabilize", "stabilizing", "grounded",
-            "everything", "overall", "together", "us", "our", "we", "you", "me",
-        }
+        anchor_terms = self._FRAME_ANCHOR_TERMS
         if not any(term in compact for term in anchor_terms):
             conversational_bridge_tokens = {
                 "this",
@@ -3878,6 +3713,8 @@ class ConversationMemoryService:
             match = re.search(pattern, cleaned, re.IGNORECASE)
             if match:
                 candidate = " ".join(match.group(1).split()).strip()
+                candidate = re.sub(r"^by my name\s+", "", candidate, flags=re.IGNORECASE)
+                candidate = re.split(r"[,.;!?]", candidate, maxsplit=1)[0].strip()
                 if self._is_plausible_operator_name(candidate):
                     return self._normalize_operator_display_name(candidate)
         return ""
@@ -3940,6 +3777,24 @@ class ConversationMemoryService:
         if not cleaned:
             return []
         cleaned = self._strip_work_topic_greeting_prefix(cleaned)
+        if self._looks_like_question_topic(cleaned) and not any(
+            marker in cleaned.lower()
+            for marker in (
+                "improve ",
+                "improving ",
+                "working on ",
+                "trying to ",
+                "keeps failing",
+                "fix ",
+                "build ",
+                "implement ",
+                "enable ",
+                "set up ",
+                "configure ",
+                "update ",
+            )
+        ):
+            return []
         topics: List[str] = list(self._canonical_work_topics(cleaned))
         lowered = cleaned.lower()
         for pattern in (
@@ -4026,6 +3881,12 @@ class ConversationMemoryService:
                 "hint",
                 "you never responded",
                 "know about obeos",
+                "jarvis or daise",
+                "shared memory from my computer",
+                "communicating to you now through telegram",
+                "communicating to you through telegram",
+                "through telegram you just have",
+                "just have a shared memory",
             )
         ):
             return []
@@ -4141,6 +4002,22 @@ class ConversationMemoryService:
             return False
         if lowered.startswith(("you ", "your ", "yes ", "add ", "as of ", "from ")):
             return False
+        if any(
+            token in lowered
+            for token in (
+                "jarvis or daise",
+                "shared memory",
+                "through telegram",
+                "communicating to you",
+                "from my computer",
+                "good evening",
+                "good morning",
+                "good afternoon",
+                "still there",
+                "are you hungry",
+            )
+        ):
+            return False
         if lowered in {
             "yes for now",
             "add to you",
@@ -4228,6 +4105,26 @@ class ConversationMemoryService:
                 "they should reflect",
                 "congratulate you on that milestone",
                 "some kind of memory",
+                "jarvis or daise",
+                "shared memory from my computer",
+                "communicating to you now through telegram",
+                "communicating to you through telegram",
+                "through telegram you just have",
+                "are you hungry",
+                "are you still there",
+                "still there",
+                "that wasnt my question",
+                "that wasn't my question",
+                "not my question",
+                "now you are just saying things",
+                "you are just saying things",
+                "better conversing than remembering",
+                "i wont ask you to recall",
+                "i won't ask you to recall",
+                "not answering me",
+                "didnt answer me",
+                "didn't answer me",
+                "regrouping and assessing your approach",
             )
         )
 
@@ -5435,6 +5332,7 @@ class ConversationMemoryService:
         return list(reversed(summaries))
 
     def _summarize_messages(self, messages: List[Dict[str, Any]]) -> str:
+        messages = [message for message in messages if message.get("prompt_eligible", True)]
         if not messages:
             return ""
         user_messages = [message["text"] for message in messages if message["role"] == "user"]
@@ -5529,14 +5427,13 @@ class ConversationMemoryService:
                     for event in recent_events[:6]
                 )
             )
-        # Standard chat already carries transcript turns as actual chat messages.
-        if session_messages and prompt_mode.startswith("quick"):
-            sections.append(
-                "Recent transcript:\n" + "\n".join(
-                    f"- {message['role']}: {message['text'][:220]}"
-                    for message in session_messages[-transcript_window:]
-                )
-            )
+        # Both generation paths now carry transcript turns as real chat messages --
+        # jarvis_agent keeps QUICK_TRANSCRIPT_FLOOR of them in quick mode, and
+        # reasoning_pipeline._normalize_conversation slices the last 12 -- so a
+        # flattened copy here would duplicate them. It did: a quick turn carried the
+        # same exchange seven times and overran the 600-token quick budget. Real
+        # role-tagged turns resolve terse follow-ups better than a truncated
+        # text block, so the turns stay and the block goes.
         return self._apply_prompt_budget(sections, prompt_budget_tokens).strip()
 
     def _build_specialist_continuity(self, *, session_id: str) -> str:
@@ -5587,6 +5484,9 @@ class ConversationMemoryService:
             for item in list(profile.get("active_work") or [])
             if str(item).strip()
         ]
+        active_work_relevant = self._query_needs_active_work_context(query, active_work)
+        if not active_work_relevant:
+            active_work = []
         if not preferred_name and not operator_role and not active_work and not grounded_conversation_answer:
             return ""
         lines: List[str] = []
@@ -5606,6 +5506,39 @@ class ConversationMemoryService:
                 lines.append("- For broad project or system questions, ground the reply in current shared focus before expanding outward.")
         return "\n".join(lines)
 
+    @staticmethod
+    def _query_needs_active_work_context(query: str, active_work: List[str]) -> bool:
+        compact = " ".join(str(query or "").lower().split())
+        if not compact or not active_work:
+            return False
+        if any(
+            marker in compact
+            for marker in (
+                "what are we working on",
+                "what have we been working on",
+                "where did we leave off",
+                "what changed",
+                "recent update",
+                "current task",
+                "project",
+                "obeos",
+                "system",
+                "latency",
+                "hud",
+                "telegram",
+                "memory",
+                "backend",
+            )
+        ):
+            return True
+        query_tokens = set(re.findall(r"[a-z0-9]{3,}", compact))
+        work_tokens = set(
+            token
+            for item in active_work
+            for token in re.findall(r"[a-z0-9]{3,}", str(item).lower())
+        )
+        return bool(query_tokens & work_tokens)
+
     def _build_conversation_continuity(
         self,
         *,
@@ -5621,6 +5554,7 @@ class ConversationMemoryService:
             for item in list(profile.get("active_work") or [])
             if str(item).strip()
         ]
+        active_work_relevant = self._query_needs_active_work_context(query, active_work)
         if recent_topics:
             if any(
                 (
@@ -5633,6 +5567,15 @@ class ConversationMemoryService:
                 active_work = recent_topics
             else:
                 active_work = self._unique_grounded_memory_items(recent_topics + active_work, limit=4)
+        if not active_work_relevant and not any(
+            (
+                followup_flags.get("ultra_short_followup"),
+                followup_flags.get("short_scope_followup"),
+                followup_flags.get("environment_followup"),
+                followup_flags.get("referential_followup"),
+            )
+        ):
+            active_work = []
         assistant_snapshot = self._recent_assistant_snapshot(session_messages, current_query=query)
         lines: List[str] = []
         if active_work:

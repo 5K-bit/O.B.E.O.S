@@ -1,0 +1,40 @@
+{
+  "startup_seconds": 6.665610599971842,
+  "renderer": {
+    "canvasWidth": 960,
+    "canvasHeight": 472,
+    "detailBudget": 200,
+    "frameP50Ms": 33.60000002384186,
+    "frameP95Ms": 74.0,
+    "worstFrameP95Ms": 187.0999999642372,
+    "frameSampledIntervals": 7804,
+    "frameWindowCount": 29,
+    "renderMode": "hidden",
+    "resolution": 0.5,
+    "targetFPS": 30,
+    "knownTracks": 372,
+    "renderedTracks": 200,
+    "updateMs": 7.400000035762787,
+    "loadGeneration": 40,
+    "loadedPages": 1,
+    "fetchedTracks": 372,
+    "loadPhase": "ready"
+  },
+  "history": {
+    "observations": 2155,
+    "payload_bytes": 2188093,
+    "entities": 2155,
+    "retention_days": 7,
+    "quota_bytes": 5368709120,
+    "database_bytes": 7389184,
+    "delivery": {
+      "pending": 2155,
+      "capacity": 20000,
+      "coalesced_by_entity": true,
+      "resync_required": false,
+      "resync_revision": "false"
+    }
+  },
+  "owned_process_memory_mib": 1219.3,
+  "shutdown_errors": []
+}

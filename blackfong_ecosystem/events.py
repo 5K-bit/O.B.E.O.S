@@ -9,6 +9,7 @@ from typing import Any, Dict, Literal, TypedDict
 
 
 EVENT_SOURCES = (
+    "earthglass",
     "blackbox",
     "project3000",
     "daise",
@@ -38,6 +39,7 @@ EVENT_SOURCES = (
 
 
 EventSource = Literal[
+    "earthglass",
     "blackbox",
     "project3000",
     "daise",
@@ -69,6 +71,7 @@ EventSource = Literal[
 # Canonical event types with multi-agent integration support
 # This prevents entropy and enforces a controlled vocabulary.
 EVENT_TYPES = {
+    "spatial_observation_batch",
     # Original Blackfong events
     "motion_spike",
     "object_added",

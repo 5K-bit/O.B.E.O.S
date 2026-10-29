@@ -1,0 +1,38 @@
+{
+  "checked_at": "2026-09-11",
+  "platform": "Windows / PySide6 6.11.1 / Intel UHD",
+  "observed": [
+    "Native Earth home launched in an isolated runtime",
+    "Detailed Esri imagery rendered at regional and neighborhood scale in New York",
+    "Aircraft enabled through native UI and over 100 regional contacts appeared",
+    "Selected aircraft displayed observed time, altitude, speed, attribution and nearby controls",
+    "Follow and overhead controls moved the camera; aircraft models and trails rendered",
+    "Maximized 1920x1032 native window rendered aircraft, GFS model samples and OSM infrastructure together",
+    "OSM infrastructure ingestion returned at least 165 contacts during the native run",
+    "Closing the earlier online session stopped owned resources without shutdown errors",
+    "Final latest-build Reload Earth check retained the New York view and enabled aircraft, earthquake and infrastructure layers",
+    "Final Save scene UI action persisted an investigation PNG; the image was visually inspected and contains detailed imagery, contacts and wrapped attribution",
+    "Final isolated session closed gracefully with no shutdown errors"
+  ],
+  "corrections_from_testing": [
+    "Separate trail entities so selection bounds stay centered on the contact",
+    "Restore full-resolution imagery when idle",
+    "Remove panel backdrop compositing after large-window rendering artifacts",
+    "Restore viewport before loading entity camera targets"
+  ],
+  "limits": [
+    "Kubuntu GUI and alternate display scaling remain unverified",
+    "Keyed providers have since been removed from the standard scope; configured 3000 camera bridge live acceptance remains unverified",
+    "No native-resolution 1080p performance claim is made from adaptive-resolution measurements"
+  ],
+  "final_ui_check": {
+    "status": "passed",
+    "snapshot": "native-snapshot-2026-09-11.png",
+    "metrics": "native-reload-snapshot-2026-09-11.json",
+    "visible_contacts_after_reload": {
+      "aircraft": 55,
+      "infrastructure": 198
+    },
+    "note": "Infrastructure retained cached contacts and visibly changed to degraded while its upstream refresh failed. This check verifies UI behavior, not performance acceptance."
+  }
+}

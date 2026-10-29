@@ -5,8 +5,15 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import sqlite3
 import time
 import webbrowser
+
+if __name__ == "__main__" and "--classic" not in sys.argv:
+    from blackfong_ecosystem.earth.desktop import main as earth_main
+    raise SystemExit(earth_main())
+
+from blackfong_ecosystem.cancellation import CancellationToken, RequestCancelled, cancellation_scope
 from typing import Any, Callable, Dict, Optional
 
 try:
@@ -48,6 +55,7 @@ from blackfong_ecosystem.operator_summary import OperatorSummaryService
 from blackfong_ecosystem.service_registry import get_ui_services
 from blackfong_ecosystem.system_awareness import SystemAwarenessService
 from blackfong_ecosystem.backend_warmup import BackendWarmupWorker
+from blackfong_ecosystem.llamacpp_process import LlamaCppServerManager
 from blackfong_ecosystem.cognition_renderer import NativeGraphCognitionRenderer
 from blackfong_ecosystem.config import chat_settings
 from blackfong_ecosystem.display_names import display_agent_name, format_chat_status_line
@@ -64,6 +72,8 @@ from blackfong_ecosystem.thoughtglass_scene_3d import Thoughtglass3DHost
 from blackfong_ecosystem.tiny_stream_view import TinyStreamView
 from blackfong_ecosystem.ui_commands import CommandContext, CommandRegistry, get_command_registry
 from blackfong_ecosystem.workspace_boot_splash import WorkspaceBootSplash
+from blackfong_ecosystem.workspace_theme import build_stylesheet
+from blackfong_ecosystem.workspace_command_center import CommandCenterPane
 from blackfong_ecosystem.workspace_shortcuts import (
     install_desktop_shortcuts,
     load_shortcut_overrides,
@@ -92,197 +102,10 @@ def _html(text: Any) -> str:
 
 
 def apply_workspace_theme(app: QApplication) -> None:
-    app.setStyleSheet(
-        """
-        QWidget {
-            background: #0a0f14;
-            color: #ece7dd;
-            font-family: "Segoe UI", "Aptos", sans-serif;
-            font-size: 13px;
-        }
-        QMainWindow, QTabWidget::pane, QDockWidget, QTextEdit, QLineEdit, QComboBox {
-            background: #0d141b;
-        }
-        QToolBar {
-            spacing: 8px;
-            padding: 8px;
-            border: 0;
-            background: #121b24;
-        }
-        QTabBar::tab {
-            background: #131d27;
-            border: 1px solid #273647;
-            border-bottom: 0;
-            border-top-left-radius: 10px;
-            border-top-right-radius: 10px;
-            padding: 10px 14px;
-            margin-right: 4px;
-            color: #cfd8df;
-        }
-        QTabBar::tab:selected {
-            background: #1c2733;
-            color: #f0d49a;
-            border-color: #8f7743;
-        }
-        QTabWidget::pane {
-            border: 1px solid #273647;
-            border-radius: 12px;
-            padding: 6px;
-        }
-        QTextEdit, QLineEdit, QComboBox {
-            border: 1px solid #2a3949;
-            border-radius: 10px;
-            padding: 8px;
-            selection-background-color: #3d5f78;
-        }
-        QPushButton, QToolButton {
-            background: #15212d;
-            border: 1px solid #2e4053;
-            border-radius: 10px;
-            padding: 9px 14px;
-            color: #ece7dd;
-        }
-        QPushButton:hover, QToolButton:hover {
-            border-color: #8f7743;
-            background: #1b2a37;
-        }
-        QPushButton:disabled, QToolButton:disabled {
-            color: #7a8591;
-            border-color: #24303b;
-        }
-        QPushButton[toolbarRole="primary"], QToolButton[toolbarRole="primary"] {
-            background: #1b2733;
-            border: 1px solid #8f7743;
-            color: #f5ead6;
-            font-weight: 600;
-            padding: 10px 16px;
-        }
-        QPushButton[toolbarRole="primary"]:hover, QToolButton[toolbarRole="primary"]:hover {
-            background: #223243;
-            border-color: #caa867;
-        }
-        QPushButton[toolbarRole="menu"], QToolButton[toolbarRole="menu"] {
-            background: #121b24;
-            border: 1px solid #334657;
-            color: #dce6ee;
-            font-weight: 500;
-        }
-        QLabel[toolbarRole="section"] {
-            background: transparent;
-            color: #7c93a8;
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 0.18em;
-            padding: 0 4px;
-        }
-        QWidget[toolbarRole="statusCluster"] {
-            background: #0f1821;
-            border: 1px solid #243647;
-            border-radius: 14px;
-        }
-        QLabel[toolbarRole="statusHero"] {
-            background: #162433;
-            border: 1px solid #35506a;
-            border-radius: 10px;
-            color: #f2d79b;
-            font-weight: 700;
-            padding: 6px 10px;
-        }
-        QLabel[toolbarRole="statusMinor"] {
-            background: #10171f;
-            border: 1px solid #243544;
-            border-radius: 8px;
-            color: #d7e0e8;
-            padding: 4px 8px;
-        }
-        QDockWidget::title {
-            text-align: left;
-            background: #121b24;
-            padding: 8px 10px;
-            border-bottom: 1px solid #273647;
-        }
-        QLabel[variant="kicker"] {
-            color: #7ba6c9;
-            font-size: 11px;
-            letter-spacing: 0.16em;
-            text-transform: uppercase;
-        }
-        QLabel[variant="status"] {
-            color: #d9be87;
-        }
-        """
-    )
+    app.setStyleSheet(build_stylesheet())
 
 
-class TinyProgrammerAutoStartWorker(QThread):
-    """Background worker to run TinyProgrammer auto-start without blocking UI."""
-
-    finished = Signal(dict)
-
-    def __init__(self, tinyprogrammer: Any) -> None:
-        super().__init__()
-        self.tinyprogrammer = tinyprogrammer
-
-    def run(self) -> None:
-        try:
-            result = self.tinyprogrammer.ensure_running(
-                require_stream=True,
-                adopt_external=True,
-                open_browser=False,
-                consent={"approved": True, "level": 1},
-            )
-            self.finished.emit(result)
-        except Exception as exc:
-            self.finished.emit({"success": False, "error": str(exc)})
-
-
-class ChatWorker(QThread):
-    """Run desktop-native D.A.I.S.E chat without freezing the workspace."""
-
-    finished = Signal(dict)
-    token_received = Signal(str)
-
-    def __init__(
-        self,
-        *,
-        operator_chat: Any,
-        message: str,
-        session_id: Optional[str],
-        agent_override: Optional[str],
-        analysis_mode: str,
-        stream: bool = True,
-    ) -> None:
-        super().__init__()
-        self.operator_chat = operator_chat
-        self.message = message
-        self.session_id = session_id
-        self.agent_override = agent_override
-        self.analysis_mode = analysis_mode
-        self.stream = stream
-        self._cancelled = False
-
-    def cancel(self) -> None:
-        self._cancelled = True
-
-    def run(self) -> None:
-        if self._cancelled:
-            self.finished.emit({"status": "cancelled", "error": "Chat cancelled"})
-            return
-        try:
-            stream_callback = (lambda token: self.token_received.emit(token)) if self.stream else None
-            result = self.operator_chat.send_message(
-                message=self.message,
-                session_id=self.session_id,
-                agent_override=self.agent_override,
-                analysis_mode=self.analysis_mode,
-                stream_callback=stream_callback,
-            )
-            if self._cancelled:
-                result = {"status": "cancelled", "error": "Chat cancelled", **result}
-        except Exception as exc:
-            result = {"status": "error", "error": str(exc)}
-        self.finished.emit(result)
-
+from blackfong_ecosystem.ui.desktop_workers import ChatWorker, TinyProgrammerAutoStartWorker, WarmupStatusBridge
 
 def build_workspace_snapshot(
     services: Any,
@@ -499,12 +322,17 @@ class ChatPane(QWidget):
         self.session_id: Optional[str] = None
         self._worker: Optional[ChatWorker] = None
         self._streaming_buffer = ""
+        self._stream_render_timer = QTimer(self)
+        self._stream_render_timer.setSingleShot(True)
+        self._stream_render_timer.setInterval(50)
+        self._stream_render_timer.timeout.connect(self._render_stream_buffer)
         self._stream_inserted = False
         self._stream_start = 0
         self._last_analysis_mode = "standard"
         self._chat_state = "ready"
         self._session_scope = "shared"
         self._session_mode = "resume_shared"
+        self._last_interaction_at = 0.0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -600,6 +428,11 @@ class ChatPane(QWidget):
 
         layout.addWidget(header)
         layout.addWidget(controls_row)
+        self.companion_label = QLabel(self)
+        self.companion_label.setTextFormat(Qt.PlainText)
+        self.companion_label.setWordWrap(True)
+        self.companion_label.hide()
+        layout.addWidget(self.companion_label)
         layout.addWidget(self.transcript, 1)
         layout.addWidget(composer)
         self.setLayout(layout)
@@ -608,6 +441,8 @@ class ChatPane(QWidget):
         self.new_session()
 
     def new_session(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
         mode = self._selected_session_boot_mode()
         if self.session_boot_mode_setter is not None:
             self.session_boot_mode_setter(mode)
@@ -626,6 +461,8 @@ class ChatPane(QWidget):
         self.refresh_button.setEnabled(history_count > 0)
 
     def refresh_history(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
         if not self.session_id:
             self.new_session()
             return
@@ -641,6 +478,8 @@ class ChatPane(QWidget):
             self._set_chat_state("cancelled", "cancelling request")
 
     def send_message(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
         text = self.input.toPlainText().strip()
         if not text:
             self._set_chat_state("failed", "add a message first")
@@ -648,6 +487,8 @@ class ChatPane(QWidget):
         if text.startswith("/") and self.command_registry is not None and self.command_context is not None:
             self._run_slash_command(text)
             return
+        self._last_interaction_at = time.monotonic()
+        self.companion_label.hide()
         self._last_analysis_mode = str(self.analysis_select.currentData() or "fast")
         self.send_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -657,8 +498,8 @@ class ChatPane(QWidget):
         self._stream_inserted = False
         self._stream_start = 0
         self.transcript.append(
-            "<div style='margin-bottom:10px;padding:12px;border:1px solid #273647;border-radius:12px;"
-            f"background:#132028;white-space:pre-wrap'><strong>You</strong><br/>{_html(text)}</div>"
+            "<div style='margin-bottom:10px;padding:12px;border:1px solid #223344;border-radius:12px;"
+            f"background:#0f1b24;white-space:pre-wrap'><strong>You</strong><br/>{_html(text)}</div>"
         )
         self._scroll_transcript_to_end()
         self._worker = ChatWorker(
@@ -675,14 +516,14 @@ class ChatPane(QWidget):
     def _run_slash_command(self, command: str) -> None:
         self.input.clear()
         self.transcript.append(
-            "<div style='margin-bottom:10px;padding:12px;border:1px solid #273647;border-radius:12px;"
-            f"background:#132028;white-space:pre-wrap'><strong>You</strong><br/>{_html(command)}</div>"
+            "<div style='margin-bottom:10px;padding:12px;border:1px solid #223344;border-radius:12px;"
+            f"background:#0f1b24;white-space:pre-wrap'><strong>You</strong><br/>{_html(command)}</div>"
         )
         try:
             result = self.command_registry.execute(command, self.command_context())
             self.transcript.append(
-                "<div style='margin-bottom:10px;padding:12px;border:1px solid #32505e;border-radius:12px;"
-                f"background:#111923;white-space:pre-wrap'><strong>System</strong><br/>{_html(_pretty(result))}</div>"
+                "<div style='margin-bottom:10px;padding:12px;border:1px solid #27505e;border-radius:12px;"
+                f"background:#0d1720;white-space:pre-wrap'><strong>System</strong><br/>{_html(_pretty(result))}</div>"
             )
             self._set_chat_state("complete", f"command completed: {command.split()[0]}")
         except Exception as exc:
@@ -691,10 +532,25 @@ class ChatPane(QWidget):
         self._scroll_transcript_to_end()
 
     def _append_stream_token(self, token: str) -> None:
+        if self._chat_state in {"cancelled", "failed", "complete"}:
+            return
         self._streaming_buffer += str(token)
+        self._set_chat_state("streaming", "receiving reply")
+        if not self._stream_inserted:
+            self._render_stream_buffer()
+        elif not self._stream_render_timer.isActive():
+            self._stream_render_timer.start()
+
+    def _render_stream_buffer(self) -> None:
+        if self._chat_state in {"cancelled", "failed", "complete"}:
+            return
+        scrollbar = self.transcript.verticalScrollBar()
+        previous_scroll = scrollbar.value()
+        follow = scrollbar.maximum() - previous_scroll <= 40
         cursor = self.transcript.textCursor()
         if not self._stream_inserted:
             cursor.movePosition(QTextCursor.End)
+            cursor.insertBlock()
             self._stream_start = cursor.position()
             self._stream_inserted = True
         cursor.setPosition(self._stream_start)
@@ -702,11 +558,15 @@ class ChatPane(QWidget):
         cursor.removeSelectedText()
         cursor.insertHtml(self._message_card_html(role="assistant", text=self._streaming_buffer, agent="daise"))
         cursor.movePosition(QTextCursor.End)
-        self.transcript.setTextCursor(cursor)
-        self._scroll_transcript_to_end()
+        if follow:
+            self.transcript.setTextCursor(cursor)
+            self._scroll_transcript_to_end()
+        else:
+            scrollbar.setValue(previous_scroll)
         self._set_chat_state("streaming", "receiving reply")
 
     def _handle_result(self, payload: Dict[str, Any]) -> None:
+        self._stream_render_timer.stop()
         self.send_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.chat_finished.emit(payload)
@@ -718,17 +578,36 @@ class ChatPane(QWidget):
             self._stream_inserted = False
             return
         if payload.get("status") == "error":
-            self._set_chat_state("failed", payload.get("error") or "chat failed")
+            failed_result = payload.get("result") or {}
+            reason = str(payload.get("error") or failed_result.get("error")
+                         or failed_result.get("backend_error") or "Chat failed")
+            partial = bool(self._streaming_buffer.strip())
+            if partial:
+                self._render_stream_buffer()
+            self._stream_inserted = False
+            self._streaming_buffer = ""
+            self._set_chat_state("failed", reason)
+            detail = ("Incomplete reply. " if partial else "") + reason
             self.transcript.append(
-                f"<div style='color:#d9be87'><strong>System</strong><br/>{_html(payload.get('error') or 'Chat failed')}</div>"
+                f"<div style='color:#9fe9f5'><strong>System</strong><br/>{_html(detail)}</div>"
             )
             self._scroll_transcript_to_end()
             return
         self.input.clear()
         result = payload.get("result") or {}
+        if result.get("error") or result.get("success") is False:
+            self._set_chat_state("failed", str(result.get("error") or "Generation failed. Please retry."))
+            self._stream_inserted = False
+            self._streaming_buffer = ""
+            return
         streamed = self._streaming_buffer.strip()
         db_response = str(result.get("response") or "").strip()
-        final_text = streamed or db_response
+        final_text = db_response or streamed
+        if not final_text:
+            self._stream_inserted = False
+            self._streaming_buffer = ""
+            self._set_chat_state("failed", "No reply was returned. Please retry.")
+            return
         if final_text and self._stream_inserted:
             self._set_chat_state("finalizing", "finalizing reply")
             cursor = self.transcript.textCursor()
@@ -809,14 +688,14 @@ class ChatPane(QWidget):
     def _session_intro_html(self, *, history_count: int = 0) -> str:
         if self._session_scope == "local":
             return (
-                "<div style='padding:12px;border:1px solid #273647;border-radius:12px;background:#121b24'>"
+                "<div style='padding:12px;border:1px solid #223344;border-radius:12px;background:#101a23'>"
                 "<strong>Fresh local session ready.</strong><br/>"
                 "This thread stays local to the workspace until you switch back to a shared operator session."
                 "</div>"
             )
         if self._session_mode == "new_shared":
             return (
-                "<div style='padding:12px;border:1px solid #273647;border-radius:12px;background:#121b24'>"
+                "<div style='padding:12px;border:1px solid #223344;border-radius:12px;background:#101a23'>"
                 "<strong>New shared operator session ready.</strong><br/>"
                 "Desktop and HUD can now converge on this fresh shared task state."
                 "</div>"
@@ -827,7 +706,7 @@ class ChatPane(QWidget):
             else ""
         )
         return (
-            "<div style='padding:12px;border:1px solid #273647;border-radius:12px;background:#121b24'>"
+            "<div style='padding:12px;border:1px solid #223344;border-radius:12px;background:#101a23'>"
             "<strong>Shared operator session ready.</strong><br/>"
             f"{detail}"
             "This desktop chat shares memory and orchestration with the HUD cockpit."
@@ -836,7 +715,7 @@ class ChatPane(QWidget):
 
     def _resume_session_html(self, history_count: int) -> str:
         return (
-            "<div style='padding:12px;border:1px solid #32505e;border-radius:12px;background:#111923'>"
+            "<div style='padding:12px;border:1px solid #27505e;border-radius:12px;background:#0d1720'>"
             "<strong>Shared session resumed.</strong><br/>"
             f"{history_count} recent messages are available for this task. "
             "Use Load History to reopen the transcript, or switch modes to start clean."
@@ -856,15 +735,15 @@ class ChatPane(QWidget):
     def _message_card_html(self, *, role: str, text: str, agent: Optional[str] = None) -> str:
         normalized_role = str(role or "system").strip().lower()
         tone = {
-            "assistant": "#1a2430",
-            "user": "#132028",
-            "system": "#111923",
-        }.get(normalized_role, "#111923")
+            "assistant": "#12202b",
+            "user": "#0f1b24",
+            "system": "#0d1720",
+        }.get(normalized_role, "#0d1720")
         border = {
-            "assistant": "#8f7743",
-            "user": "#273647",
-            "system": "#32505e",
-        }.get(normalized_role, "#273647")
+            "assistant": "#1fb5cc",
+            "user": "#223344",
+            "system": "#27505e",
+        }.get(normalized_role, "#223344")
         if normalized_role == "assistant":
             label = display_agent_name(agent or "daise")
         elif normalized_role == "user":
@@ -1004,7 +883,12 @@ class TinyPane(WorkspacePane):
         self._auto_start_worker.finished.connect(self._on_autostart_complete)
         self._auto_start_worker.start()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._trigger_background_autostart()
+
     def _on_autostart_complete(self, result: Dict[str, Any]) -> None:
+        self.refresh()
         if not result.get("success"):
             try:
                 self.tinyprogrammer.notification_service.create(
@@ -1018,14 +902,8 @@ class TinyPane(WorkspacePane):
                 pass
 
     def launch(self) -> None:
-        self.write(
-            self.tinyprogrammer.ensure_running(
-                require_stream=True,
-                adopt_external=True,
-                open_browser=False,
-                consent={"approved": True, "level": 1},
-            )
-        )
+        self.diagnostics_label.setText("Checking TinyProgrammer and waiting for its first stream frame…")
+        self._trigger_background_autostart()
 
     def open_dashboard(self) -> None:
         self.write(self.tinyprogrammer.open(open_browser=True))
@@ -1681,11 +1559,13 @@ class RedAmonPane(WorkspacePane):
 class MainWindow(QMainWindow):
     """Main window for the managed Blackfong Workspace dashboard."""
 
-    def __init__(self, *, start_timer: bool = True, initial_refresh: bool = True) -> None:
+
+    def __init__(self, *, start_timer: bool = True, initial_refresh: bool = True, start_background: bool = True) -> None:
         debug_session_log(hypothesis_id="B", location="desktop_shell.py:MainWindow.__init__", message="MainWindow init start")
         super().__init__()
         self.setWindowTitle("Blackfong Workspace")
         self.resize(1680, 1040)
+        self._closing = False
         self._refresh_worker: Optional[WorkspaceRefreshWorker] = None
         self._refresh_pending = False
         self._chat_in_progress = False
@@ -1749,6 +1629,13 @@ class MainWindow(QMainWindow):
         self.trace_pane = TracePane(memory_service=self.services.memory_service)
         self.workbench_tabs = QTabWidget(self)
         self.workbench_tabs.setDocumentMode(True)
+        self.command_center_pane = CommandCenterPane(
+            launchers=[
+                ("Open HUD", lambda: webbrowser.open("http://127.0.0.1:8080/")),
+                ("Terminal", self._open_windows_terminal),
+            ]
+        )
+        self.workbench_tabs.addTab(self.command_center_pane, "Command Center")
         self.workbench_tabs.addTab(self.brain_pane, "Thoughtglass Home")
         self.workbench_tabs.addTab(self.memory_chamber_pane, "Memory Chamber")
         self.workbench_tabs.addTab(self.chat_pane, "Chat")
@@ -1762,37 +1649,51 @@ class MainWindow(QMainWindow):
         self.window_manager.restore_persisted()
         debug_session_log(hypothesis_id="D", location="desktop_shell.py:MainWindow.__init__", message="Layout restored")
         self._install_shortcuts()
-        self._warmup_worker = BackendWarmupWorker(on_status=self._on_warmup_status)
-        self._warmup_worker.start()
+        self._warmup_bridge = WarmupStatusBridge(self._on_warmup_status, self)
+        self._warmup_worker = BackendWarmupWorker(on_status=self._warmup_bridge.status.emit)
+        self._llamacpp_worker = LlamaCppServerManager()
+        if start_background:
+            self._warmup_worker.start()
+            # BackendWarmupWorker starts only the selected shared model lane.
         self._live_connected = False
         self._live_refresh_pending = False
         self._live_stream = DesktopLiveStreamWorker(parent=self)
         self._live_stream.event_received.connect(self._handle_live_event)
         self._live_stream.connection_changed.connect(self._handle_live_connection)
-        self._live_stream.start()
+        if start_background:
+            self._live_stream.start()
         debug_session_log(hypothesis_id="A", location="desktop_shell.py:MainWindow.__init__", message="Live stream worker started")
         self._warmup_timer = QTimer(self)
         self._warmup_timer.setInterval(2000)
         self._warmup_timer.timeout.connect(self._update_warmup_chip)
-        self._warmup_timer.start()
         link_surface("desktop")
-        self._boot_splash = WorkspaceBootSplash(
-            self,
-            snapshot_provider=lambda: self.services.startup_coordinator.snapshot(),
-            warmup_status_provider=lambda: self._warmup_worker.result,
-        )
-        self._boot_splash.destroyed.connect(self._on_boot_splash_destroyed)
-        self._sync_boot_splash_geometry()
-        self._boot_splash.show()
-        self._boot_splash.raise_()
+        # OBEOS_START_WORKSPACE is set only when Earth spawns this window from its
+        # Classic Workspace action. Earth has already shown a boot surface by then, so a
+        # second splash is redundant and competes with Earth's renderer for the GPU.
+        self._boot_splash = None
+        if not os.getenv("OBEOS_START_WORKSPACE"):
+            self._boot_splash = WorkspaceBootSplash(
+                self,
+                snapshot_provider=lambda: self.services.startup_coordinator.snapshot(),
+                warmup_status_provider=lambda: self._warmup_worker.result,
+            )
+            self._boot_splash.destroyed.connect(self._on_boot_splash_destroyed)
+            self._sync_boot_splash_geometry()
+            self._boot_splash.show()
+            self._boot_splash.raise_()
 
         self._timer = QTimer(self)
         self._timer.setInterval(15000)
         self._timer.timeout.connect(lambda: self.request_refresh(reason="timer"))
         if start_timer:
             self._timer.start()
-        if initial_refresh:
-            self.request_refresh(reason="startup")
+        # While the splash animates, keep the GUI thread off the full refresh and the
+        # warmup chip. Both resume in _flush_deferred_startup once it has gone.
+        self._pending_startup_refresh = bool(initial_refresh)
+        if self._boot_splash is None:
+            self._flush_deferred_startup()
+        else:
+            QTimer.singleShot(12000, self._flush_deferred_startup)
         debug_session_log(hypothesis_id="B", location="desktop_shell.py:MainWindow.__init__", message="MainWindow init complete", data={"start_timer": start_timer, "initial_refresh": initial_refresh})
 
     def _logged_handler(self, action: str, handler: Callable[[], None]) -> Callable[[], None]:
@@ -1970,7 +1871,6 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.redamon_dock, self.integrations_dock)
         self.tabifyDockWidget(self.integrations_dock, self.system_dock)
         self.tabifyDockWidget(self.trace_dock, self.notifications_dock)
-        self.tiny_dock.raise_()
         self.trace_dock.raise_()
 
     def _make_dock(self, title: str, object_name: str, widget: QWidget, area: Qt.DockWidgetArea) -> ManagedDockWidget:
@@ -2241,6 +2141,21 @@ class MainWindow(QMainWindow):
         self._refresh_worker.finished.connect(self._apply_workspace_snapshot)
         self._refresh_worker.start()
 
+    def _open_windows_terminal(self) -> None:
+        """Open an external terminal at the project root; prefers Windows Terminal, falls back to PowerShell."""
+        import shutil
+        import subprocess
+
+        root = os.path.dirname(os.path.abspath(__file__))
+        try:
+            if shutil.which("wt.exe"):
+                subprocess.Popen(["wt.exe", "-d", root])
+            else:
+                subprocess.Popen(["powershell.exe", "-NoExit", "-Command", f"Set-Location -LiteralPath '{root}'"],
+                                 creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+        except OSError as exc:
+            logging.getLogger(__name__).warning("Could not open terminal: %s", exc)
+
     def _apply_workspace_snapshot(self, payload: Dict[str, Any]) -> None:
         debug_session_log(
             hypothesis_id="C",
@@ -2261,6 +2176,7 @@ class MainWindow(QMainWindow):
             self.brain_pane.write({"status": "error", "error": error})
         else:
             self.overview_pane.apply_summary(payload.get("summary", {}))
+            self.command_center_pane.apply_snapshot(payload)
             memory_payload = payload.get("memory_chamber", {})
             self.brain_pane.apply_runtime(
                 cognition_snapshot=payload.get("cognition", {}),
@@ -2286,11 +2202,31 @@ class MainWindow(QMainWindow):
             )
             self.integration_pane.apply_listing(payload.get("integrations", {}))
             self.redamon_pane.apply_status(payload.get("redamon", {}))
+            self._offer_companion_suggestion(payload)
             self._update_status_chips(payload)
             self._schedule_tiny_retry_if_needed(payload.get("tiny", {}).get("status", {}))
         if self._refresh_pending:
             self._refresh_pending = False
             self.request_refresh(reason="queued")
+
+    def _offer_companion_suggestion(self, payload: Dict[str, Any]) -> None:
+        chat = self.chat_pane
+        busy = bool(chat.input.toPlainText().strip()) or bool(chat._worker and chat._worker.isRunning())
+        busy = busy or time.monotonic() - chat._last_interaction_at < 60
+        if busy or not chat.isVisible() or getattr(self, "_closing", False):
+            return
+        try:
+            if not hasattr(self, "_companion_suggestions"):
+                from blackfong_ecosystem.companion_suggestions import CompanionSuggestions
+                from blackfong_ecosystem.config import paths
+                self._companion_suggestions = CompanionSuggestions(paths.data_root / "companion-suggestions.sqlite3")
+            suggestion = self._companion_suggestions.offer((payload.get("trace") or {}).get("recent_events", []))
+            if suggestion:
+                chat.companion_label.setText("D.A.I.S.E. suggestion: " + suggestion["text"])
+                chat.companion_label.setToolTip("Evidence event: " + suggestion["evidence_event_id"])
+                chat.companion_label.show()
+        except (OSError, sqlite3.Error):
+            pass  # Optional suggestions must not prevent the workspace from updating.
 
     def _update_status_chips(self, payload: Dict[str, Any]) -> None:
         startup = (payload.get("summary", {}) or {}).get("startup", {})
@@ -2319,7 +2255,6 @@ class MainWindow(QMainWindow):
         model = str(outcome.get("model") or chat_settings.model_for_agent("daise"))
         if status == "ready":
             self.model_chip.setText(f"model: ready ({model})")
-            self.overall_chip.setText("READY")
         elif status == "warming":
             self.model_chip.setText(f"model: warming ({model})")
         elif status == "error":
@@ -2464,6 +2399,21 @@ class MainWindow(QMainWindow):
 
     def _on_boot_splash_destroyed(self, *_args: Any) -> None:
         self._boot_splash = None
+        self._flush_deferred_startup()
+
+    def _flush_deferred_startup(self) -> None:
+        """Start the warmup chip and the first refresh once the splash is out of the way.
+
+        Safe to call more than once: the splash's destroyed signal and the safety-net
+        timer both land here, and whichever arrives first does the work.
+        """
+        if self._closing:
+            return
+        if not self._warmup_timer.isActive():
+            self._warmup_timer.start()
+        if getattr(self, "_pending_startup_refresh", False):
+            self._pending_startup_refresh = False
+            self.request_refresh(reason="startup")
 
     def _boot_splash_is_active(self) -> bool:
         splash = getattr(self, "_boot_splash", None)
@@ -2520,9 +2470,29 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def closeEvent(self, event: Any) -> None:  # pragma: no cover - GUI lifecycle
+        self._closing = True
+        for timer in self.findChildren(QTimer):
+            timer.stop()
+        if hasattr(self, "_warmup_worker"):
+            self._warmup_worker.stop()
+        if hasattr(self, "_llamacpp_worker"):
+            self._llamacpp_worker.stop()
+        chat = getattr(getattr(self, "chat_pane", None), "_worker", None)
+        if chat and chat.isRunning():
+            chat.cancel()
+        workers = [chat, self._refresh_worker, self._tiny_retry_worker,
+                   getattr(getattr(self, "tiny_pane", None), "_auto_start_worker", None)]
+        if any(worker and worker.isRunning() for worker in workers):
+            event.ignore()
+            self.setEnabled(False)
+            QTimer.singleShot(100, self.close)
+            return
         if hasattr(self, "_live_stream"):
+
             self._live_stream.stop()
             self._live_stream.wait(1500)
+        if hasattr(self, "services") and hasattr(self.services.memory_chamber, "shutdown"):
+            self.services.memory_chamber.shutdown()
         if hasattr(self, "window_manager"):
             self.window_manager.close_all_floats()
         if hasattr(self, "tiny_pane") and hasattr(self.tiny_pane, "stream_view"):
@@ -2539,14 +2509,15 @@ def workspace_probe() -> Dict[str, Any]:
     try:
         app = QApplication.instance() or QApplication(["blackfong-workspace-probe", "-platform", "offscreen"])
         apply_workspace_theme(app)
-        window = MainWindow(start_timer=False, initial_refresh=False)
+        window = MainWindow(start_timer=False, initial_refresh=False, start_background=False)
         return {
             "success": True,
             "window_title": window.windowTitle(),
             "center_tabs": [window.workbench_tabs.tabText(index) for index in range(window.workbench_tabs.count())],
             "left_tabs": [window.left_nav_tabs.tabText(index) for index in range(window.left_nav_tabs.count())],
             "chat_available": True,
-            "thoughtglass_home_default": window.workbench_tabs.tabText(0) == "Thoughtglass Home",
+            "thoughtglass_home_default": window.workbench_tabs.tabText(1) == "Thoughtglass Home",
+            "command_center_default": window.workbench_tabs.tabText(0) == "Command Center",
             "thoughtglass_default_mode": str(window.brain_pane.mode_select.currentData() or ""),
             "memory_chamber_available": any(window.workbench_tabs.tabText(index) == "Memory Chamber" for index in range(window.workbench_tabs.count())),
             "memory_chamber_default_mode": str(window.memory_chamber_pane.mode_select.currentData() or ""),
@@ -2576,6 +2547,11 @@ def main() -> int:
         app = QApplication.instance() or QApplication(sys.argv)
         apply_workspace_theme(app)
         window = MainWindow()
+        requested_workspace = os.getenv("OBEOS_START_WORKSPACE", "")
+        for index in range(window.workbench_tabs.count()):
+            if requested_workspace.lower() in window.workbench_tabs.tabText(index).lower() and requested_workspace:
+                window.workbench_tabs.setCurrentIndex(index)
+                break
         debug_session_log(hypothesis_id="B", location="desktop_shell.py:main", message="MainWindow constructed")
         if os.getenv("BLACKFONG_ENABLE_TRAY", "").lower() in {"1", "true", "yes"}:
             from PySide6.QtWidgets import QMenu, QSystemTrayIcon

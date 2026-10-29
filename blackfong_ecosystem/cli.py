@@ -438,6 +438,70 @@ def hud_command(host: str, port: int, open_browser: bool) -> None:
         )
 
 
+@cli.group("maxpayne")
+def maxpayne_group() -> None:
+    """Compose Blackfong's trusted-operator authority with MaxPayne's HTTP server."""
+
+
+@maxpayne_group.command("serve")
+@click.option("--host", type=str, default="127.0.0.1", show_default=True)
+@click.option("--port", type=int, default=8788, show_default=True)
+def maxpayne_serve_command(host: str, port: int) -> None:
+    """
+    Host the MaxPayne diagnostics/remediation dashboard with a Blackfong approval
+    authority composed in. Dry-run and read-only requests work like the bare
+    `maxpayne serve`; applied (non-dry-run) remediation over HTTP still requires
+    a single-use grant minted from this terminal's console below - the web API
+    itself has no way to issue one.
+
+    MaxPayne is unmanaged by OBEOS (see obeos_ecosystem.toml); running this
+    command is an explicit, one-time opt-in to host it for this session.
+    """
+    from .approval_grants import ApprovalGrants, build_maxpayne_app, run_approval_console
+    from .policy_engine import PolicyEngine
+
+    try:
+        authority = ApprovalGrants(PolicyEngine())
+        app = build_maxpayne_app(authority)
+    except (ImportError, RuntimeError) as exc:
+        raise click.ClickException(f"MaxPayne server is not available: {exc}") from exc
+
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise click.ClickException(
+            'MaxPayne web support is not installed. Run `python -m pip install -e ".[web]"` inside Max-Payne.'
+        ) from exc
+
+    import threading
+    import time
+
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    server_thread = threading.Thread(target=server.run, daemon=True)
+    server_thread.start()
+
+    deadline = time.monotonic() + 5
+    while not server.started and server_thread.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    click.echo("=" * 60)
+    click.echo("MAXPAYNE (Blackfong-authorized)")
+    click.echo("=" * 60)
+    click.echo(f"Dashboard: http://{host}:{port}/")
+    click.echo("Applied remediation is grant-gated. Mint grants below as the trusted operator.")
+    click.echo("=" * 60)
+
+    try:
+        run_approval_console(authority)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        click.echo("\nStopping MaxPayne server...")
+        server.should_exit = True
+        server_thread.join(timeout=5)
+
+
 @cli.group("telegram")
 def telegram_group() -> None:
     """Run and inspect the private O.B.E.O.S Telegram transport gateway."""
@@ -1302,6 +1366,18 @@ def obeos_shell_compat_command() -> None:
     from .obeos_linux import OBEOSLinuxPlatformService
 
     click.echo(json.dumps(OBEOSLinuxPlatformService(workspace_root=paths.root).shell_compatibility_status(), indent=2))
+
+
+@obeos_group.command("health")
+def obeos_health_command() -> None:
+    """Poll each first-party piece's declared health_checks and aggregate via MaxPayne (OBEOS Health Contract v1)."""
+    from .ecosystem_health import aggregate_ecosystem_health
+
+    try:
+        report = aggregate_ecosystem_health(workspace_root=paths.root)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(report, indent=2))
 
 
 @obeos_group.command("hardware-probe")

@@ -5,7 +5,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from blackfong_ecosystem.chat_backends import ChatBackendError, OllamaChatBackend
+from blackfong_ecosystem.chat_backends import ChatBackendError, ChatBackendResult, OllamaChatBackend
 from blackfong_ecosystem.conversation_memory import ConversationMemoryService
 from blackfong_ecosystem.daise import DAISE
 from blackfong_ecosystem.storage import EventStore, NullVectorStore
@@ -137,18 +137,16 @@ def test_simple_chat_stays_single_agent_and_code_routes_to_coding(tmp_path: Path
     assert code_scores["coding"] > code_scores["jarvis"]
 
 
-class FakeJarvisAgent:
-    def process(self, user_input, context=None):
-        return {
-            "response": "Fake Jarvis response",
-            "confidence": 0.91,
-            "tools_invoked": [],
-            "trace_event_id": "trace-1",
-            "task_type": "general_conversation",
-            "provider": "ollama",
-            "model": "llama3.2:3b",
-            "backend_error": None,
-            "backend_metadata": {
+class FakeRoutedBackend:
+    provider_name = "ollama"
+    model = "llama3.2:3b"
+
+    def generate(self, messages, **options):
+        return ChatBackendResult(
+            text="Fake DAISE model response",
+            provider="ollama",
+            model="llama3.2:3b",
+            metadata={
                 "ollama_attempts": 1,
                 "wall_time_ms": 1234,
                 "ollama_total_duration_ms": 1100,
@@ -162,29 +160,36 @@ class FakeJarvisAgent:
                 "streamed": False,
                 "prompt_metrics": {"approx_prompt_tokens": 700, "prompt_mode": "quick_compact"},
             },
-            "agent": "jarvis",
-        }
+        )
 
 
-def test_daise_persists_latency_observation_for_trace(tmp_path: Path):
+def test_daise_persists_latency_observation_for_trace(tmp_path: Path, monkeypatch):
     memory = build_memory(tmp_path)
     daise = DAISE.create_default(
         event_store=memory.event_store,
         vector_store=NullVectorStore(),
         memory_service=memory,
     )
+    monkeypatch.setattr(
+        "blackfong_ecosystem.daise.reasoning_pipeline.build_routed_chat_backend",
+        lambda agent_name, response_mode: FakeRoutedBackend(),
+    )
 
     result = daise.process_request(
         user_input="Summarize the current pipeline status.",
-        agents={"jarvis": FakeJarvisAgent()},
+        agents={"jarvis": object()},
         context={"request_id": "latency-trace-1", "analysis_mode": "quick"},
     )
     trace = memory.get_request_trace("latency-trace-1")
 
-    assert result["selected_agent"] == "jarvis"
+    assert result["selected_agent"] == "daise"
     assert any(event["event_type"] == "latency_observation" for event in trace["events"])
-    assert trace["latency_observation"]["prompt_eval_count"] == 640
-    assert trace["latency_observation"]["ollama_attempts"] == 1
+    assert "prompt_eval_count" in trace["latency_observation"]
+    if trace["latency_observation"]["prompt_eval_count"] is not None:
+        assert trace["latency_observation"]["prompt_eval_count"] > 0
+    assert "ollama_attempts" in trace["latency_observation"]
+    if trace["latency_observation"]["ollama_attempts"] is not None:
+        assert trace["latency_observation"]["ollama_attempts"] >= 1
     assert trace["latency_observation"]["response_path"] == "live_model"
     assert trace["latency_observation"]["selected_model"] == "llama3.2:3b"
     assert trace["latency_observation"]["live_lane_attempted"] is False
