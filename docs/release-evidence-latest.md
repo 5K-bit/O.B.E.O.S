@@ -1,3 +1,8 @@
+> **STALE: do not cite this file as current release evidence.** It was generated on 2026-07-29 in a local
+> workspace, records no commit, and shows automated tests as `skipped`. For evidence tied to an exact commit,
+> environment and test results, run `python tools/release_evidence.py --fresh`; pending manual checks are tracked in
+> `docs/release-manual-checks.json`. Running `blackfong verify evidence` overwrites this file.
+
 # O.B.E.O.S. Release Evidence Snapshot
 
 Generated: `2026-07-29T01:59:37.568185`
