@@ -48,6 +48,40 @@ def run(cmd, cwd=None, timeout=None, capture=True):
         return 124, f"timed out after {timeout}s: {' '.join(map(str, cmd))}"
 
 
+def run_live(cmd, cwd=None, timeout=None, label="", echo=False):
+    """Like run(), but prints progress: a heartbeat every 20s, or every output line when echo=True."""
+    import threading
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {label or ' '.join(map(str, cmd))}", flush=True)
+    lines = []
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd, text=True, errors="replace",
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except FileNotFoundError as exc:
+        return 127, f"command not found: {exc}"
+
+    def pump():
+        for line in proc.stdout:
+            lines.append(line)
+            if echo:
+                print(line.rstrip(), flush=True)
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    started = time.monotonic()
+    while reader.is_alive():
+        reader.join(20)
+        if reader.is_alive():
+            elapsed = time.monotonic() - started
+            if timeout and elapsed > timeout:
+                proc.kill()
+                lines.append(f"timed out after {timeout}s\n")
+                break
+            if not echo:
+                print(f"    ... still running ({elapsed:.0f}s)", flush=True)
+    proc.wait()
+    return proc.returncode, "".join(lines)
+
+
 def git(args, cwd):
     code, out = run(["git", *args], cwd=cwd)
     return out.strip() if code == 0 else ""
@@ -110,23 +144,23 @@ def prepare_fresh(args, workdir: Path):
         sys.exit("no origin remote; pass --repo <url-or-path>")
     ref = args.ref or git(["rev-parse", "HEAD"], REPO_ROOT)
     root = workdir / "checkout"
-    code, out = run(["git", "clone", repo, str(root)], timeout=1800)
+    code, out = run_live(["git", "clone", repo, str(root)], timeout=1800, label="cloning " + repo)
     if code != 0:
         sys.exit(f"clone failed:\n{out}")
     code, out = run(["git", "checkout", "--quiet", ref], cwd=root)
     if code != 0:
         sys.exit(f"ref {ref} not found in {repo} (is it pushed?):\n{out}")
-    code, out = run(["git", "submodule", "update", "--init", "--recursive"], cwd=root, timeout=1800)
+    code, out = run_live(["git", "submodule", "update", "--init", "--recursive"], cwd=root, timeout=1800, label="initializing submodules (can fail without GitHub access; reported below)")
     notes.append(f"submodule init exit code {code}" + ("" if code == 0 else " (see submodule table below)"))
     if args.no_install:
         notes.append("--no-install: used the invoking Python and its existing packages, not a new venv")
         return root, Path(sys.executable), notes, ""
     venv = workdir / "venv"
-    code, out = run([sys.executable, "-m", "venv", str(venv)])
+    code, out = run_live([sys.executable, "-m", "venv", str(venv)], label="creating a new virtual environment")
     if code != 0:
         sys.exit(f"venv creation failed:\n{out}")
     py = venv_python(venv)
-    code, out = run([str(py), "-m", "pip", "install", "-e", str(root)], timeout=3600)
+    code, out = run_live([str(py), "-m", "pip", "install", "-e", str(root)], timeout=3600, label="installing dependencies (PySide6 and chromadb are large: expect several minutes)")
     install_log = out
     notes.append(f"pip install -e . exit code {code}")
     return root, py, notes, install_log
@@ -171,7 +205,7 @@ def main():
     junit = out_dir / "junit.xml"
     cmd = [str(py), "-m", "pytest", "tests/", "-m", args.markers, "-v", f"--junitxml={junit}"]
     t0 = time.monotonic()
-    code, output = run(cmd, cwd=root, timeout=args.timeout)
+    code, output = run_live(cmd, cwd=root, timeout=args.timeout, label="running tests: " + args.markers, echo=True)
     duration = time.monotonic() - t0
     (out_dir / "pytest-run.log").write_text(f"{output}\nEXIT_CODE={code}\n", encoding="utf-8")
     results = parse_junit(junit)
