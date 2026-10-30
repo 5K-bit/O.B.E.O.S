@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -90,13 +91,15 @@ def parse_junit(path: Path):
 
 
 def load_manual_checks(root: Path):
-    path = root / MANUAL_CHECKS
-    if not path.exists():
-        return [], f"{MANUAL_CHECKS} not found"
-    try:
-        return json.loads(path.read_text(encoding="utf-8")).get("checks", []), ""
-    except (ValueError, OSError) as exc:
-        return [], f"{MANUAL_CHECKS} unreadable: {exc}"
+    """Read the manual-check list from the tested checkout, else from the checkout holding this script."""
+    for base, label in ((root, ""), (REPO_ROOT, f"{MANUAL_CHECKS} read from the evidence script's checkout; the tested commit has none")):
+        path = base / MANUAL_CHECKS
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8")).get("checks", []), label
+            except (ValueError, OSError) as exc:
+                return [], f"{MANUAL_CHECKS} unreadable: {exc}"
+    return [], f"{MANUAL_CHECKS} not found"
 
 
 def prepare_fresh(args, workdir: Path):
@@ -172,11 +175,17 @@ def main():
     duration = time.monotonic() - t0
     (out_dir / "pytest-run.log").write_text(f"{output}\nEXIT_CODE={code}\n", encoding="utf-8")
     results = parse_junit(junit)
+    found = re.search(r"collected (\d+) items?(?: / (\d+) errors?)?(?: / (\d+) deselected)?(?: / (\d+) selected)?", output)
+    collection = {"collected": int(found.group(1)), "collection_errors": int(found.group(2) or 0),
+                  "selected": int(found.group(4) or found.group(1))} if found else {}
     pins = submodule_pins(root)
     checks, checks_note = load_manual_checks(root)
     pending = [c for c in checks if c.get("status") != "done"]
 
-    if code == 0 and results["tests"] > 0:
+    if collection.get("collection_errors"):
+        automated = (f"NOT RUN: {collection['collection_errors']} collection error(s) aborted the run, so none of the "
+                     f"{collection['selected']} selected tests executed")
+    elif code == 0 and results["tests"] > 0:
         automated = "passed"
     elif results["tests"] == 0:
         automated = "no tests ran (collection or setup error; see pytest-run.log)"
@@ -188,11 +197,13 @@ def main():
         "branch": git(["rev-parse", "--abbrev-ref", "HEAD"], root), "working_tree_clean": not dirty,
         "uncommitted_files": dirty.splitlines(), "python": pyver.strip(), "pytest": pytest_ver.strip(),
         "os": platform.platform(), "command": " ".join(cmd), "exit_code": code,
-        "duration_seconds": round(duration, 1), "results": results, "submodules": pins,
+        "duration_seconds": round(duration, 1), "results": results, "collection": collection, "submodules": pins,
         "manual_checks": checks, "notes": notes,
     }
     (out_dir / "evidence.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
 
+    coll_line = (f"Collection: {collection['selected']} selected, {collection['collection_errors']} collection error(s). "
+                 if collection else "")
     md = [
         "# O.B.E.O.S. Release Evidence", "",
         f"Generated {data['generated_utc']} by `tools/release_evidence.py`. "
@@ -206,7 +217,7 @@ def main():
         f"| Automated tests | **{automated}** |",
         f"| Manual checks | **{len(pending)} of {len(checks)} pending** |", "",
         "## Automated tests", "", f"Command: `{data['command']}`", "",
-        f"Exit code {code}; {results['tests']} tests, {results['failures']} failed, {results['errors']} errors, "
+        coll_line + f"Exit code {code}; {results['tests']} tests, {results['failures']} failed, {results['errors']} errors, "
         f"{results['skipped']} skipped, {duration:.0f}s. Full output: `pytest-run.log`, `junit.xml`; "
         "installed packages: `pip-freeze.txt`.", "",
     ]
