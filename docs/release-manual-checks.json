@@ -1,0 +1,47 @@
+{
+  "_comment": "Manual release checks. status is 'pending' or 'done'. When marking one done, set verified_on (YYYY-MM-DD) and put the commit and evidence path in note. Items below were carried over from docs/release-evidence-latest.md (2026-07-29) and have NOT been re-verified.",
+  "checks": [
+    {
+      "id": "thoughtglass-hud-shot",
+      "description": "Capture the Thoughtglass HUD release screenshot",
+      "status": "pending",
+      "verified_on": null,
+      "note": "Listed as remaining in release-evidence-latest.md (2026-07-29)."
+    },
+    {
+      "id": "tui-boot-home-shot",
+      "description": "Capture the TUI boot-home release screenshot",
+      "status": "pending",
+      "verified_on": null,
+      "note": "Listed as remaining in release-evidence-latest.md (2026-07-29)."
+    },
+    {
+      "id": "guest-branding-shot",
+      "description": "Capture the guest branding release screenshot",
+      "status": "pending",
+      "verified_on": null,
+      "note": "Listed as remaining in release-evidence-latest.md (2026-07-29)."
+    },
+    {
+      "id": "installer-plasma-alignment",
+      "description": "Align the external installer with Kubuntu 24.04 LTS + KDE Plasma",
+      "status": "pending",
+      "verified_on": null,
+      "note": "Blocker in release-evidence-latest.md: installer state was migration_input_only, shipping_ready false."
+    },
+    {
+      "id": "workspace-launch",
+      "description": "Blackfong Workspace launches as the canonical operator shell (v0.9 gate, Platform)",
+      "status": "pending",
+      "verified_on": null,
+      "note": "Required by docs/obeos-v0.9-release-gate.md; no dated evidence recorded."
+    },
+    {
+      "id": "no-jarvis-identity",
+      "description": "No operator-facing screen, help text, installer copy, notification or diagnostic identifies the assistant as Jarvis (v0.9 gate, Identity)",
+      "status": "pending",
+      "verified_on": null,
+      "note": "Required by docs/obeos-v0.9-release-gate.md; tests/test_runtime_branding_consistency.py covers part of this automatically."
+    }
+  ]
+}
