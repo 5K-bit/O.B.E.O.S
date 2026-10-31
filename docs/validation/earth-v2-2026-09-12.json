@@ -1,0 +1,152 @@
+{
+  "recorded_at": "2026-09-12T17:54:28.079Z",
+  "status": "release_acceptance_open",
+  "scope": [
+    "Earth V2",
+    "Mobility V1",
+    "Presence local implementation"
+  ],
+  "decisions": {
+    "offline_startup_requires_keys": false,
+    "optional_free_public_keys_allowed": true,
+    "paid_integrations_enabled": false,
+    "presence_host_setup": "deferred_by_user",
+    "real_tracking_activated": false
+  },
+  "tests": {
+    "backend": {
+      "passed": 169
+    },
+    "backend_final_api_followup": {
+      "passed": 79,
+      "overlaps_backend_suite": true
+    },
+    "frontend": {
+      "passed": 29,
+      "files": 11
+    },
+    "production_build": "passed",
+    "final_api_ruff_f": "passed",
+    "dependency_integrity": "passed",
+    "generated_contracts": "passed",
+    "native_control_followup": {
+      "passed": 53,
+      "overlaps_backend_suite": true
+    },
+    "diff_whitespace_check": "passed"
+  },
+  "wheel_smoke": {
+    "status": "passed",
+    "provider_count": 50,
+    "startup_seconds": 5.996356300001935,
+    "assets_bundled": true,
+    "offline_city_search": true,
+    "optional_free_keys_only": true,
+    "offline_remote_assets_blocked": true
+  },
+  "wheels": [
+    {
+      "name": "blackfong_ecosystem-0.1.0-py3-none-any.whl",
+      "sha256": "faebd60af7a59677e2e4a6369955d016daf54a0ed9a79bead1063b746000fb94"
+    },
+    {
+      "name": "earthglass-0.4.0-py3-none-any.whl",
+      "sha256": "8726ca93773348ce66976ebb6f983a4241c7c3437ea0960df3bbed86c06cab2e"
+    }
+  ],
+  "browser": {
+    "surface": "in_app_browser",
+    "offline": true,
+    "city_loaded_objects": 2153,
+    "final_close_zoom_objects": 31,
+    "selection": "CENTRE ST/GRAND ST",
+    "selection_retained_after_reload": true,
+    "route_geometry_visible": true,
+    "attributed_snapshot_saved_and_viewed": true,
+    "snapshot": "earth-v2-offline-scene.png",
+    "metrics": "earth-v2-browser-metrics.json"
+  },
+  "performance": {
+    "cached_query_10000_tracks": {
+      "p50_ms": 43.33,
+      "p95_ms": 93.38,
+      "scope": "direct backend query",
+      "target_p95_ms": 250,
+      "passed": true
+    },
+    "render_1080p_30fps": "median_near_30fps_in_adaptive_offline_orbit; full_resolution_sustained_gate_open",
+    "native_orbit": {
+      "canvasWidth": 960,
+      "canvasHeight": 472,
+      "detailBudget": 200,
+      "frameP50Ms": 33.399999998509884,
+      "frameP95Ms": 43.100000001490116,
+      "worstFrameP95Ms": 236.60000000149012,
+      "frameSampledIntervals": 2443,
+      "frameWindowCount": 27,
+      "renderMode": "continuous",
+      "renderOwners": "camera,orbit",
+      "resolution": 0.5,
+      "targetFPS": 30,
+      "knownTracks": 513,
+      "renderedTracks": 200,
+      "updateMs": 40.69999999925494,
+      "loadGeneration": 28,
+      "loadedPages": 1,
+      "fetchedTracks": 513,
+      "loadPhase": "ready"
+    }
+  },
+  "native": {
+    "windows": "tested_offline_workflow_passed",
+    "kubuntu": "not_run",
+    "display": "1920x1080",
+    "gpu": "Intel UHD Graphics",
+    "driver": "31.0.101.2137",
+    "checks": [
+      "Offline startup",
+      "Route and stop rendering",
+      "Selected stop inspection",
+      "Active-orbit reload",
+      "Overhead view",
+      "Independent route disable/re-enable",
+      "Ctrl+R",
+      "Attributed scene snapshot",
+      "Clean owned-resource shutdown"
+    ],
+    "not_exercised": [
+      "Alternate display scaling",
+      "Complete keyboard-only navigation",
+      "Forced renderer-crash recovery"
+    ],
+    "full_resolution_snapshot": {
+      "file": "earth-v2-native-scene.png",
+      "width": 1920,
+      "height": 991,
+      "includes_attribution_footer": true
+    },
+    "metrics": "earth-v2-native-final-2026-09-12.json"
+  },
+  "live_probes": "live-v2-2026-09-11.json",
+  "open_gates": [
+    "Broader native scaling, keyboard-only and renderer-crash checks",
+    "Moving-frame stalls and full-resolution/live-layer performance",
+    "Kubuntu desktop acceptance",
+    "Optional keyed provider live verification",
+    "NYC traffic units and expected-speed baseline",
+    "Detailed offline map dataset if street imagery is required",
+    "User-deferred Traccar/Tailscale/phone/viewer end-to-end setup",
+    "Automatic cloud-to-native Presence synchronization not configured"
+  ],
+  "release_committed": false,
+  "deployed": false,
+  "previous_record": "earth-v2-2026-09-11.json",
+  "fixes": [
+    "Restore selected/tracked/camera contacts outside the viewport with replay-time boundaries",
+    "Ignore numeric camera drift for rendering holds and redundant viewport work",
+    "Restore full idle resolution",
+    "Improve map-label contrast",
+    "Measure reload time independently from window uptime",
+    "Report frame sampling scope and include long active stalls"
+  ]
+}

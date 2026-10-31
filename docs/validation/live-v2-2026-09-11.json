@@ -1,0 +1,74 @@
+{
+  "at": "2026-09-11T16:25:16.351998+00:00",
+  "viewport": {
+    "west": -75.0,
+    "south": 40.0,
+    "east": -73.0,
+    "north": 41.0
+  },
+  "results": [
+    {
+      "provider": "noaa_swpc",
+      "observations": 0,
+      "rejected": 0,
+      "document_available": true,
+      "result": "received"
+    },
+    {
+      "provider": "noaa_nws",
+      "observations": 0,
+      "rejected": 149,
+      "document_available": false,
+      "result": "received"
+    },
+    {
+      "provider": "noaa_awc_metar",
+      "observations": 15,
+      "rejected": 0,
+      "document_available": false,
+      "result": "received"
+    },
+    {
+      "provider": "noaa_awc_sigmet",
+      "observations": 0,
+      "rejected": 2,
+      "document_available": false,
+      "result": "received"
+    },
+    {
+      "provider": "nasa_eonet",
+      "observations": 0,
+      "rejected": 0,
+      "document_available": false,
+      "result": "received"
+    },
+    {
+      "provider": "celestrak",
+      "observations": 21,
+      "rejected": 0,
+      "document_available": false,
+      "result": "received"
+    },
+    {
+      "provider": "nyc_dot",
+      "observations": 123,
+      "rejected": 30,
+      "document_available": false,
+      "result": "received"
+    },
+    {
+      "provider": "mta_lirr",
+      "observations": 55,
+      "rejected": 0,
+      "document_available": true,
+      "result": "received"
+    },
+    {
+      "provider": "gtfs_manhattan",
+      "result": "imported_official_archive",
+      "bytes": 9519944,
+      "routes": 307,
+      "stops": 1824
+    }
+  ]
+}

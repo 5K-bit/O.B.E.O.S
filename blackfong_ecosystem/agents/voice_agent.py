@@ -9,6 +9,7 @@ Reuses JARVIS-MARK-5 voice components for STT/TTS while integrating with O.B.E.O
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 import threading

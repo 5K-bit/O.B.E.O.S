@@ -1,0 +1,78 @@
+{
+  "checked_at": "2026-09-11",
+  "policy": "Offline-first local workspace; optional anonymous public updates; no provider credentials.",
+  "backend": {
+    "suite": "tests/test_earth_control.py EarthGlass/tests",
+    "passed": 120,
+    "focused_model_and_timeout_passed": 2
+  },
+  "frontend": {
+    "passed": 13,
+    "typescript": "passed",
+    "production_build": "passed"
+  },
+  "installed_package": {
+    "status": "passed",
+    "registered_providers": 14,
+    "anonymous_only": true,
+    "offline_remote_assets_blocked": true
+  },
+  "native": {
+    "status": "passed",
+    "platform": "Windows / PySide6",
+    "observed": [
+      "Bundled Natural Earth globe rendered in explicit offline mode",
+      "Offline/local-only network control visible",
+      "Provider keys dialog absent; road catalog and anonymous/local layers listed",
+      "Isolated runtime closed without shutdown errors"
+    ],
+    "metrics": {
+      "startup_seconds": 10.501174699980766,
+      "renderer": {
+        "canvasWidth": 825,
+        "canvasHeight": 487,
+        "detailBudget": 287,
+        "frameP50Ms": 37.09999996423721,
+        "frameP95Ms": 485.30000001192093,
+        "resolution": 0.5,
+        "targetFPS": 30,
+        "knownTracks": 0,
+        "renderedTracks": 0,
+        "updateMs": 0.10000002384185791
+      },
+      "history": {
+        "observations": 0,
+        "payload_bytes": 0,
+        "entities": 0,
+        "retention_days": 7,
+        "quota_bytes": 5368709120,
+        "database_bytes": 65536,
+        "delivery": {
+          "pending": 0,
+          "capacity": 20000,
+          "coalesced_by_entity": true,
+          "resync_required": false,
+          "resync_revision": "false"
+        }
+      },
+      "owned_process_memory_mib": 926.2,
+      "shutdown_errors": []
+    }
+  },
+  "regressions": [
+    "Offline public HTTP rejected before DNS",
+    "Public camera frames rejected offline",
+    "Local observation processing runs offline",
+    "Late public responses discarded on offline switch",
+    "Network preference survives restart and saved-scene restore",
+    "Cached road catalog retains source timestamps after restart",
+    "Local-model endpoint restricted to loopback and bypasses proxy environment",
+    "Online imagery retries after outage and cancels retry offline"
+  ],
+  "limits": [
+    "High-detail regional offline map packs and transit route/timetable datasets are not bundled",
+    "Rolling observations retain the existing seven-day/5 GiB limits; saved investigations are separate",
+    "No new live-source verification was performed for this correction",
+    "Kubuntu/display-scaling and full-resolution performance acceptance remain outstanding"
+  ]
+}

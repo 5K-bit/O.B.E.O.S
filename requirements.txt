@@ -1,6 +1,6 @@
 # Core runtime
 click==8.1.7
-pydantic==2.6.4
+pydantic>=2.10,<3
 
 # API / Web
 flask>=3.0.0
@@ -10,6 +10,7 @@ psutil>=5.9.0
 
 # Database / storage
 SQLAlchemy==2.0.25
+numpy>=1.24,<2
 
 # Vector store (Phase 4: Chroma, default embedding only)
 chromadb>=0.4.22,<0.5
@@ -46,4 +47,14 @@ winotify>=1.1.0; platform_system == "Windows"
 
 # Tests
 pytest>=7.4.0
+
+# First-party OBEOS pieces (installed editable so their declared CLI commands
+# resolve from this venv). EarthGlass is intentionally excluded: it has its
+# own .venv-earth because of heavy/platform-finicky geospatial deps
+# (xarray/cfgrib/eccodes) that don't belong in the main environment.
+-e ./3000-main
+-e ./QuietDrop
+-e ./Night-watch-OS
+-e ./Blackforge
+-e ./Max-Payne
 

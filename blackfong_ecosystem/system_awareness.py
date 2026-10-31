@@ -263,9 +263,9 @@ class SystemAwarenessService:
 
         if provider == "ollama":
             try:
-                import httpx
+                from .http_clients import client_for
 
-                with httpx.Client(timeout=1.2) as client:
+                with client_for(chat_settings.ollama_url, timeout=1.2) as client:
                     response = client.get(f"{chat_settings.ollama_url.rstrip('/')}/api/tags")
                     response.raise_for_status()
                     data = response.json()

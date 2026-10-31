@@ -1105,7 +1105,7 @@ def test_librarian_no_results_is_honest(tmp_path: Path, monkeypatch) -> None:
     record = agent.answer("unrelated question", collection="spawn", mode="hybrid")
     assert record["retrieved_count"] == 0
     assert record["provenance"] == []
-    assert "No relevant passages" in record["answer"]
+    assert "nothing relevant was retrieved" in record["answer"].lower()
 
 
 def test_librarian_filters_by_collection(tmp_path: Path, monkeypatch) -> None:

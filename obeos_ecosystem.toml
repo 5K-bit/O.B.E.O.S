@@ -23,7 +23,7 @@ health_checks = [
   { name = "project_path", type = "path_exists", path = "3000-main/three_thousand" }
 ]
 event_sources = [
-  { source = "project3000", event_types = ["motion_spike"], publisher = "three_thousand.adapters.obeos" }
+  { source = "project3000", event_types = ["project3000.motion.detected", "project3000.snapshot.created"], publisher = "three_thousand.obeos_events" }
 ]
 data_paths = [
   { name = "local_events", path = "3000-main/data/events.sqlite3" },
@@ -41,7 +41,7 @@ description = "3000 local-first camera sentinel and motion-event integration mat
 
 [[projects]]
 id = "quietdrop"
-path = "QuietDrop/QuietDrop-main"
+path = "QuietDrop"
 aliases = ["QuietDrop", "quietdrop"]
 roles = ["local_file_intake", "review_queue", "archive_adapter"]
 description = "Local-first watched-folder intake and review/archive workflow."
@@ -49,14 +49,14 @@ ports = [
   { name = "web", port = 8844, protocol = "http", bind = "127.0.0.1" }
 ]
 commands = [
-  { name = "init", command = "quietdrop init", cwd = "QuietDrop/QuietDrop-main", mode = "writes_config" },
-  { name = "status", command = "quietdrop status", cwd = "QuietDrop/QuietDrop-main", mode = "read_only" },
-  { name = "scan", command = "quietdrop scan", cwd = "QuietDrop/QuietDrop-main", mode = "local_scan" },
-  { name = "serve", command = "quietdrop serve --host 127.0.0.1 --port 8844", cwd = "QuietDrop/QuietDrop-main", mode = "long_running" }
+  { name = "init", command = "quietdrop init", cwd = "QuietDrop", mode = "writes_config" },
+  { name = "status", command = "quietdrop status", cwd = "QuietDrop", mode = "read_only" },
+  { name = "scan", command = "quietdrop scan", cwd = "QuietDrop", mode = "local_scan" },
+  { name = "serve", command = "quietdrop serve --host 127.0.0.1 --port 8844", cwd = "QuietDrop", mode = "long_running" }
 ]
 health_checks = [
-  { name = "project_path", type = "path_exists", path = "QuietDrop/QuietDrop-main/quietdrop" },
-  { name = "status", type = "command", command = "quietdrop status", cwd = "QuietDrop/QuietDrop-main", timeout_seconds = 5 }
+  { name = "project_path", type = "path_exists", path = "QuietDrop/quietdrop" },
+  { name = "status", type = "command", command = "quietdrop status", cwd = "QuietDrop", timeout_seconds = 5 }
 ]
 event_sources = [
   { source = "quietdrop", event_types = ["knowledge_source_added", "file_workflow_state"], publisher = "future_adapter" }
@@ -92,11 +92,11 @@ commands = [
 ]
 health_checks = [
   { name = "project_path", type = "path_exists", path = "Night-watch-OS/nightwatch" },
-  { name = "http_health", type = "http", url = "http://127.0.0.1:8037/health", timeout_seconds = 2, optional = true },
+  { name = "http_health", type = "http", url = "http://127.0.0.1:8037/api/health", timeout_seconds = 2, optional = true },
   { name = "offline_status", type = "command", command = "nightwatch status", cwd = "Night-watch-OS", timeout_seconds = 5 }
 ]
 event_sources = [
-  { source = "system", event_types = ["environment_snapshot", "performance_snapshot"], publisher = "future_adapter" }
+  { source = "system", event_types = ["environment_snapshot", "performance_snapshot"], publisher = "nightwatch.obeos_events" }
 ]
 data_paths = [
   { name = "database", path = "$XDG_DATA_HOME/nightwatch/nightwatch.db", env = "NIGHTWATCH_DB_PATH" },
@@ -156,16 +156,16 @@ roles = ["doctor_scan", "healing_advisor", "approval_gated_remediator"]
 description = "Local diagnostics and healing assistant with dry-run/approval defaults."
 ports = []
 commands = [
-  { name = "doctor", command = "maxpayne doctor", cwd = "Max-Payne", mode = "read_only" },
+  { name = "doctor", command = "maxpayne diagnose --no-history", cwd = "Max-Payne", mode = "read_only" },
   { name = "heal", command = "maxpayne heal", cwd = "Max-Payne", mode = "dry_run_default" },
   { name = "explain", command = "maxpayne explain <file>", cwd = "Max-Payne", mode = "read_only" }
 ]
 health_checks = [
   { name = "project_path", type = "path_exists", path = "Max-Payne/maxpayne" },
-  { name = "doctor", type = "command", command = "maxpayne doctor", cwd = "Max-Payne", timeout_seconds = 10 }
+  { name = "doctor", type = "command", command = "maxpayne profiles", cwd = "Max-Payne", timeout_seconds = 10 }
 ]
 event_sources = [
-  { source = "system", event_types = ["operator_action_result", "policy_decision"], publisher = "future_adapter" }
+  { source = "system", event_types = ["operator_action_result", "policy_decision"], publisher = "maxpayne.integrations.events" }
 ]
 data_paths = [
   { name = "project_env", path = "Max-Payne/.env" },
@@ -183,29 +183,29 @@ description = "MaxPayne diagnostics, dry-run healing, and approval-gated remedia
 
 [[projects]]
 id = "earthglass"
-path = "Blackforge/earthglass"
+path = "EarthGlass"
 aliases = ["EarthGlass", "earthglass", "earthglass-full"]
-roles = ["geospatial_dashboard", "offline_asset_adapter", "layer_catalog"]
-description = "Layered geospatial dashboard with local/offline asset mode and degraded online-state reporting."
+roles = ["geospatial_provider_engine", "spatial_history", "layer_catalog"]
+description = "Renderer-independent spatial providers, normalized observations, bounded history, replay and resumable updates. OBEOS Earth owns presentation."
 ports = [
   { name = "web", port = 8000, protocol = "http", bind = "127.0.0.1" }
 ]
 commands = [
-  { name = "serve", command = "earthglass serve --host 127.0.0.1 --port 8000", cwd = "Blackforge/earthglass", mode = "long_running" },
-  { name = "layers", command = "earthglass layers", cwd = "Blackforge/earthglass", mode = "read_only" },
-  { name = "cache_status", command = "earthglass cache status", cwd = "Blackforge/earthglass", mode = "read_only" }
+  { name = "serve", command = "earthglass serve --host 127.0.0.1 --port 8000", cwd = "EarthGlass", mode = "long_running" },
+  { name = "layers", command = "earthglass layers", cwd = "EarthGlass", mode = "read_only" },
+  { name = "cache_status", command = "earthglass cache status", cwd = "EarthGlass", mode = "read_only" }
 ]
 health_checks = [
-  { name = "project_path", type = "path_exists", path = "Blackforge/earthglass/earthglass" },
+  { name = "project_path", type = "path_exists", path = "EarthGlass/earthglass" },
   { name = "http_health", type = "http", url = "http://127.0.0.1:8000/health", timeout_seconds = 2, optional = true },
   { name = "root_scaffold", type = "path_exists", path = "EarthGlass/app/main.py", optional = true }
 ]
 event_sources = [
-  { source = "system", event_types = ["adapter_health_observation"], publisher = "future_adapter" }
+  { source = "earthglass", event_types = ["earthglass.observations.updated", "earthglass.snapshot.required"], publisher = "blackfong_ecosystem.earth.backbone" }
 ]
 data_paths = [
-  { name = "static_assets", path = "Blackforge/earthglass/earthglass/web/static" },
-  { name = "layer_catalog", path = "Blackforge/earthglass/earthglass/web/app.py" },
+  { name = "static_assets", path = "EarthGlass/earthglass/web/static" },
+  { name = "layer_catalog", path = "EarthGlass/earthglass/web/app.py" },
   { name = "root_scaffold", path = "EarthGlass" }
 ]
 offline_capabilities = ["local_layer_catalog", "offline_asset_mode", "degraded_map_status"]
@@ -222,12 +222,12 @@ description = "EarthGlass geospatial dashboard, layer catalog, local assets, and
 id = "blackrelay"
 path = "Blackrelay"
 aliases = ["BlackRelay", "blackrelay"]
-roles = ["relay_concept", "future_message_bus_adapter"]
-description = "First-party relay concept area reserved for local message routing and ecosystem bridge design."
+roles = ["workflow_dispatcher_scaffold", "bounded_action_adapter"]
+description = "Planned local workflow dispatcher that reacts to canonical events and requests authorized actions."
 ports = []
 commands = []
 health_checks = [
-  { name = "docs", type = "path_exists", path = "Blackrelay/docs/blackrelay-concept1.md.txt" }
+  { name = "docs", type = "path_exists", path = "Blackrelay/docs/blackrelay-concept1.md" }
 ]
 event_sources = [
   { source = "blackfong", event_types = ["service_registration", "routing_decision"], publisher = "future_adapter" }
@@ -249,12 +249,12 @@ description = "BlackRelay concept docs and future local message bridge design."
 id = "pybus"
 path = "PYBUS"
 aliases = ["PYBUS", "pybus"]
-roles = ["bus_concept", "future_python_message_bus"]
-description = "First-party Python bus concept area for future local event and command routing."
+roles = ["learning_platform_scaffold", "local_python_and_defensive_security_labs"]
+description = "Planned offline learning platform for Python and defensive cybersecurity, with bounded labs and an optional local tutor."
 ports = []
 commands = []
 health_checks = [
-  { name = "docs", type = "path_exists", path = "PYBUS/docs/pybus-concept1.md.txt" }
+  { name = "docs", type = "path_exists", path = "PYBUS/docs/pybus-concept1.md" }
 ]
 event_sources = [
   { source = "blackfong", event_types = ["service_registration", "tool_request", "tool_response"], publisher = "future_adapter" }
@@ -269,5 +269,5 @@ launch_policy = { managed = false, autostart = false, approval_required = true, 
 collection = "pybus"
 series = "PYBUS"
 domain = "obeos_ecosystem"
-category = "bus"
-description = "PYBUS concept docs and future Python message bus design."
+category = "learning"
+description = "PYBUS learning platform, local lab contracts and scaffold readiness."

@@ -11,8 +11,10 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-import chromadb
-
+try:
+    import chromadb
+except Exception:
+    chromadb = None
 from blackfong_ecosystem.agent import AgentType
 from blackfong_ecosystem.agents.jarvis_agent import JARVISAgent
 from blackfong_ecosystem.agents.lilo_agent import LiloAgent
@@ -48,6 +50,12 @@ class SemanticSearch:
     """Semantic search over reasoning traces using ChromaDB."""
 
     def __init__(self, persist_directory: Optional[str] = None):
+        self.client = None
+        self.collection = None
+        self.unavailable_reason = None
+        if chromadb is None:
+            self.unavailable_reason = "ChromaDB is unavailable; semantic trace search is disabled."
+            return
         persist_directory = persist_directory or str(paths.vector_db_path)
         client_kwargs: Dict[str, Any] = {"path": persist_directory}
         try:
@@ -83,11 +91,12 @@ class SemanticSearch:
         searchable_content = " | ".join(content_parts)
 
         # Store in ChromaDB
+        if self.collection is None:
+            return
         self.collection.add(
             documents=[searchable_content],
             metadatas=[{
                 "event_id": trace_event_id,
-                "agent_name": trace_data.get('agent_name', 'unknown'),
                 "timestamp": trace_data.get('timestamp', 0),
                 "confidence": trace_data.get('overall_confidence', 0.0),
                 "user_input": trace_data.get('user_input', ''),
@@ -107,6 +116,8 @@ class SemanticSearch:
         if agent_name:
             where_clause["agent_name"] = agent_name
 
+        if self.collection is None:
+            return []
         results = self.collection.query(
             query_texts=[query],
             n_results=limit,

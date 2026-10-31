@@ -205,7 +205,7 @@ def test_memory_chamber_routes_and_daise_graph_context(tmp_path: Path) -> None:
     assert summary["counts"]["nodes"] > 0
     assert graph["graph"]["nodes"]
     assert snapshot["overlays"]["memory_chamber"]["counts"]["nodes"] > 0
-    assert result["selected_agent"] == "jarvis"
+    assert result["selected_agent"] == "daise"
     assert retrieval_events
     assert retrieval_events[0].payload["retrieval_profile"] == "deep"
     assert retrieval_events[0].payload["graph_neighborhoods"]["jarvis"]["matched_nodes"]

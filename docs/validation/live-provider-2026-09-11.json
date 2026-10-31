@@ -1,0 +1,48 @@
+{
+  "checked_at": "2026-09-11T12:45:16.538081+00:00",
+  "credentials_used": false,
+  "results": [
+    {
+      "provider": "adsb",
+      "status": "received",
+      "records": 82,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "observed"
+      ],
+      "attribution": "adsb.lol contributors (ODbL 1.0)",
+      "notes": null
+    },
+    {
+      "provider": "celestrak",
+      "status": "received",
+      "records": 5000,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "predicted"
+      ],
+      "attribution": "CelesTrak / Dr. T.S. Kelso",
+      "notes": null
+    },
+    {
+      "provider": "usgs",
+      "status": "received",
+      "records": 263,
+      "rejected": 0,
+      "live_verified": true,
+      "measurement_kinds": [
+        "observed"
+      ],
+      "attribution": "U.S. Geological Survey",
+      "notes": null
+    },
+    {
+      "provider": "overpass",
+      "status": "unavailable",
+      "reason": "upstream_unavailable",
+      "live_verified": false
+    }
+  ]
+}

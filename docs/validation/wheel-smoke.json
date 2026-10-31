@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "provider_count": 50,
+  "startup_seconds": 5.996356300001935,
+  "assets_bundled": true,
+  "offline_city_search": true,
+  "optional_free_keys_only": true,
+  "offline_remote_assets_blocked": true
+}

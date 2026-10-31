@@ -89,7 +89,7 @@ class ThoughtglassScene3D(QOpenGLWidget):
         self._anim = QTimer(self)
         self._anim.setInterval(33)
         self._anim.timeout.connect(self._advance_fx)
-        self._anim.start()
+        self._sync_animation_timer()
 
     def _seed_particles(self, count: int) -> None:
         rng = random.Random(42)
@@ -97,6 +97,21 @@ class ThoughtglassScene3D(QOpenGLWidget):
             (rng.uniform(-1.4, 1.4), rng.uniform(-1.0, 1.0), rng.uniform(-1.2, 1.2), rng.uniform(0.2, 1.0))
             for _ in range(count)
         ]
+
+    def _sync_animation_timer(self, active: Optional[bool] = None) -> None:
+        should_run = bool(active) if active is not None else bool(self.isVisible())
+        if should_run and not self._anim.isActive():
+            self._anim.start()
+        if not should_run and self._anim.isActive():
+            self._anim.stop()
+
+    def showEvent(self, event: Any) -> None:
+        super().showEvent(event)
+        self._sync_animation_timer()
+
+    def hideEvent(self, event: Any) -> None:
+        self._sync_animation_timer(active=False)
+        super().hideEvent(event)
 
     def _advance_fx(self) -> None:
         self._fx_tick += 0.018
@@ -333,9 +348,10 @@ class Thoughtglass3DHost(QWidget):
     def __init__(self, graph_2d: QWidget, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.graph_2d = graph_2d
-        self.scene_3d = ThoughtglassScene3D(self)
-        self.scene_3d.node_activated.connect(self._on_node_activated)
         self._use_3d = OPENGL_AVAILABLE
+        self.scene_3d = ThoughtglassScene3D(self) if OPENGL_AVAILABLE else None
+        if self.scene_3d is not None:
+            self.scene_3d.node_activated.connect(self._on_node_activated)
 
         controls = QHBoxLayout()
         self.mode_label = QLabel("3D Brain" if self._use_3d else "2D Graph (install PyOpenGL for 3D)", self)
@@ -349,19 +365,24 @@ class Thoughtglass3DHost(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(controls)
-        layout.addWidget(self.scene_3d if self._use_3d else self.graph_2d, 1)
+        layout.addWidget(self._active_widget(), 1)
         self._stack_target = layout
+
+    def _active_widget(self) -> QWidget:
+        if self._use_3d and self.scene_3d is not None:
+            return self.scene_3d
+        return self.graph_2d
 
     def _toggle_mode(self) -> None:
         layout = self.layout()
-        if layout is None:
+        if layout is None or self.scene_3d is None:
             return
         while layout.count() > 1:
             item = layout.takeAt(1)
             if item.widget():
                 item.widget().setParent(None)
         self._use_3d = not self._use_3d
-        layout.addWidget(self.scene_3d if self._use_3d else self.graph_2d, 1)
+        layout.addWidget(self._active_widget(), 1)
         self.toggle_button.setText("Switch to 2D" if self._use_3d else "Switch to 3D")
         self.mode_label.setText("3D Brain" if self._use_3d else "2D Graph")
 
@@ -378,8 +399,9 @@ class Thoughtglass3DHost(QWidget):
         from .cognition_renderer import normalize_renderer_inputs
 
         normalized = normalize_renderer_inputs(snapshot=snapshot, graph_payload=graph_payload)
-        self.scene_3d.apply_graph(snapshot=snapshot, graph_payload=graph_payload)
-        self.scene_3d.apply_focus(normalized["focus"])
+        if self.scene_3d is not None:
+            self.scene_3d.apply_graph(snapshot=snapshot, graph_payload=graph_payload)
+            self.scene_3d.apply_focus(normalized["focus"])
         if hasattr(self.graph_2d, "apply_graph"):
             graph = dict(graph_payload or {})
             self.graph_2d.apply_graph(

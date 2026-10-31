@@ -9,6 +9,7 @@ from typing import List, Optional, Sequence, Set
 import httpx
 
 from .config import chat_settings
+from .http_clients import client_for
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def fetch_installed_models(*, force_refresh: bool = False) -> Set[str]:
     base_url = chat_settings.ollama_url.rstrip("/")
     installed: Set[str] = set()
     try:
-        with httpx.Client(timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=3.0)) as client:
+        with client_for(base_url, timeout=httpx.Timeout(connect=3.0, read=8.0, write=5.0, pool=3.0)) as client:
             response = client.get(f"{base_url}/api/tags")
             response.raise_for_status()
             for item in response.json().get("models", []):

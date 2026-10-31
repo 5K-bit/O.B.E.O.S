@@ -205,6 +205,8 @@ class UnifiedOrchestrator:
             
             return {
                 "response": f"Error processing request: {str(e)}",
+                "error": str(e),
+                "error_type": (getattr(e, "metadata", None) or {}).get("error_type"),
                 "confidence": 0.0,
                 "agent": "error_handler",
                 "trace_event_id": None,
