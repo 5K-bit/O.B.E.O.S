@@ -109,7 +109,7 @@ def submodule_pins(root: Path):
 
 
 def parse_junit(path: Path):
-    summary = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "time": 0.0, "failed_ids": []}
+    summary = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "time": 0.0, "failed_ids": [], "xfailed": []}
     if not path.exists():
         return summary
     root = ET.parse(path).getroot()
@@ -119,8 +119,14 @@ def parse_junit(path: Path):
             summary[key] += int(suite.get(key, 0))
         summary["time"] += float(suite.get("time", 0))
     for case in root.iter("testcase"):
+        test_id = f"{case.get('classname', '')}::{case.get('name', '')}"
         if case.find("failure") is not None or case.find("error") is not None:
-            summary["failed_ids"].append(f"{case.get('classname', '')}::{case.get('name', '')}")
+            summary["failed_ids"].append(test_id)
+        skipped = case.find("skipped")
+        if skipped is not None and skipped.get("type") == "pytest.xfail":
+            summary["xfailed"].append({"id": test_id, "reason": (skipped.get("message") or "").replace("reason: ", "", 1)})
+    # junit counts expected failures (xfail) as skipped; report them separately
+    summary["skipped"] -= len(summary["xfailed"])
     return summary
 
 
@@ -260,11 +266,15 @@ def main():
         f"| Manual checks | **{len(pending)} of {len(checks)} pending** |", "",
         "## Automated tests", "", f"Command: `{data['command']}`", "",
         coll_line + f"Exit code {code}; {results['tests']} tests, {results['failures']} failed, {results['errors']} errors, "
-        f"{results['skipped']} skipped, {duration:.0f}s. Full output: `pytest-run.log`, `junit.xml`; "
+        f"{results['skipped']} skipped, {len(results['xfailed'])} expected failures (xfail), {duration:.0f}s. Full output: `pytest-run.log`, `junit.xml`; "
         "installed packages: `pip-freeze.txt`.", "",
     ]
     if results["failed_ids"]:
         md += ["Failing or erroring tests (first 25):", ""] + [f"- `{i}`" for i in results["failed_ids"][:25]] + [""]
+    if results["xfailed"]:
+        md += [f"## Known failing tests (marked xfail): {len(results['xfailed'])}", "",
+               "These tests are expected to fail and do not fail the run. Each is a known gap, not a pass.", ""]
+        md += [f"- `{x['id']}`: {x['reason'] or 'no reason given'}" for x in results["xfailed"]] + [""]
     md += ["## Pinned components", "", "| Path | Pinned commit | Initialized | Matches pin |", "|---|---|---|---|"]
     md += [f"| `{p['path']}` | `{p['pinned']}` | {'yes' if p['initialized'] else 'no'} | "
            f"{'yes' if p['matches_pin'] else 'no'} |" for p in pins] or ["| none | | | |"]
