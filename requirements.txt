@@ -14,6 +14,7 @@ SQLAlchemy==2.0.25
 # Vector store (Phase 4: Chroma, default embedding only)
 numpy<2
 chromadb>=0.4.22,<0.5
+numpy<2  # chromadb<0.5 is incompatible with NumPy 2
 
 # Voice Stack (Coqui TTS for local, customizable voice)
 TTS>=0.22.0

@@ -7,7 +7,8 @@ import os
 import sys
 import time
 import webbrowser
-from typing import Any, Callable, Dict, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 try:
     from PySide6.QtCore import QPoint, QSettings, QThread, QTimer, Qt, Signal
@@ -33,7 +34,8 @@ try:
     )
 except ImportError as exc:  # pragma: no cover - GUI not available in some test environments
     raise RuntimeError(
-        "PySide6 is required to run the Blackfong Workspace shell. Install it via 'pip install pyside6'."
+        f"PySide6 could not be imported ({exc}). Install it via 'pip install pyside6'; "
+        "on Linux a missing system library (for example libEGL) also causes this."
     ) from exc
 
 from blackfong_ecosystem.debug_session_log import debug_session_log, log_ui_action, timed_ui_action
@@ -63,7 +65,16 @@ from blackfong_ecosystem.operator_session import (
 from blackfong_ecosystem.thoughtglass_scene_3d import Thoughtglass3DHost
 from blackfong_ecosystem.tiny_stream_view import TinyStreamView
 from blackfong_ecosystem.ui_commands import CommandContext, CommandRegistry, get_command_registry
+from blackfong_ecosystem.terminal_launcher import open_terminal
+from blackfong_ecosystem.workspace_diagnostics import collect_diagnostics
+from blackfong_ecosystem.workspace_feed import format_feed, raw_detail
 from blackfong_ecosystem.workspace_boot_splash import WorkspaceBootSplash
+from blackfong_ecosystem.workspace_health import (
+    default_http_checks,
+    format_tile_line,
+    probe_all,
+    tiles_from_startup,
+)
 from blackfong_ecosystem.workspace_shortcuts import (
     install_desktop_shortcuts,
     load_shortcut_overrides,
@@ -345,8 +356,13 @@ def build_workspace_snapshot(
     notifications = services.notification_service.list_notifications(limit=50)
     trace_events = services.memory_service.event_store.list_events(limit=40)
     redamon = services.redamon_workflow.status(session_id=session_id)
+    health_tiles = [
+        tile.to_dict()
+        for tile in [*tiles_from_startup(summary["startup"]), *probe_all(default_http_checks())]
+    ]
     return {
         "summary": summary,
+        "health_tiles": health_tiles,
         "awareness": awareness,
         "cognition": cognition,
         "tiny": {
@@ -1465,16 +1481,75 @@ class NotificationPane(WorkspacePane):
         self.notification_service = notification_service
         self.add_button("Refresh", self.refresh)
         self.add_button("Mark All Read", self.mark_all_read)
-        self.write({"status": "warming", "notifications": []})
+        self.add_button("Raw Detail", self.toggle_raw)
+        self._last_payload: Any = {"status": "warming", "notifications": []}
+        self._show_raw = False
+        self.write("Waiting for the first refresh.")
 
     def refresh(self) -> None:
         self.apply_notifications(self.notification_service.list_notifications(limit=50))
 
     def apply_notifications(self, payload: Dict[str, Any]) -> None:
-        self.write(payload)
+        self._last_payload = payload
+        self._render()
+
+    def toggle_raw(self) -> None:
+        self._show_raw = not self._show_raw
+        self._render()
+
+    def _render(self) -> None:
+        if self._show_raw:
+            self.write(raw_detail(self._last_payload))
+        else:
+            self.write(format_feed(self._last_payload, now=time.time()))
 
     def mark_all_read(self) -> None:
         self.write(self.notification_service.mark_all_read())
+
+
+class ServiceHealthPane(WorkspacePane):
+    """Read-only service state with explicit labels and check times. Offline is never shown as healthy."""
+
+    def __init__(self, *, parent: Optional[QWidget] = None) -> None:
+        super().__init__(
+            title="Service Health",
+            subtitle="Online, degraded, offline, unknown or stale, with the time of the last check.",
+            parent=parent,
+        )
+        self.kicker.setText("Status")
+        self.add_button("Open Terminal", self.open_terminal)
+        self.add_button("Diagnostics", self.show_diagnostics)
+        self._last_tiles: List[Dict[str, Any]] = []
+        self.write("[UNKNOWN ] No health data yet. Waiting for the first refresh.")
+
+    def show_diagnostics(self) -> None:
+        manifest = Path(__file__).resolve().parent / "obeos_ecosystem.toml"
+        self.write(collect_diagnostics(tiles=self._last_tiles, manifest_path=manifest))
+
+    def apply_tiles(self, tiles: List[Dict[str, Any]]) -> None:
+        from blackfong_ecosystem.workspace_health import HealthTile
+
+        self._last_tiles = [dict(tile) for tile in tiles if isinstance(tile, dict)]
+        now = time.time()
+        lines = []
+        for entry in tiles:
+            try:
+                tile = HealthTile(
+                    key=str(entry["key"]),
+                    label=str(entry["label"]),
+                    state=str(entry["state"]),
+                    checked_at=entry.get("checked_at"),
+                    detail=str(entry.get("detail") or ""),
+                )
+            except (KeyError, ValueError):
+                continue
+            lines.append(format_tile_line(tile, now=now))
+        self.write("\n".join(lines) if lines else "[UNKNOWN ] No health data available.")
+
+    def open_terminal(self) -> None:
+        result = open_terminal(str(Path.home()))
+        if not result.get("success"):
+            self.write({"status": "error", "error": result.get("error")})
 
 
 class TracePane(WorkspacePane):
@@ -1746,6 +1821,7 @@ class MainWindow(QMainWindow):
         self.integration_pane = IntegrationPane(integration_registry=self.services.integration_registry)
         self.redamon_pane = RedAmonPane(redamon_workflow=self.services.redamon_workflow)
         self.notification_pane = NotificationPane(notification_service=self.services.notification_service)
+        self.health_pane = ServiceHealthPane()
         self.trace_pane = TracePane(memory_service=self.services.memory_service)
         self.workbench_tabs = QTabWidget(self)
         self.workbench_tabs.setDocumentMode(True)
@@ -1964,14 +2040,16 @@ class MainWindow(QMainWindow):
         self.system_dock = self._make_dock("System", "system_dock", self.system_pane, Qt.RightDockWidgetArea)
         self.trace_dock = self._make_dock("Trace", "trace_dock", self.trace_pane, Qt.BottomDockWidgetArea)
         self.notifications_dock = self._make_dock("Notifications", "notifications_dock", self.notification_pane, Qt.BottomDockWidgetArea)
+        self.health_dock = self._make_dock("Service Health", "health_dock", self.health_pane, Qt.BottomDockWidgetArea)
 
         self.tabifyDockWidget(self.tiny_dock, self.files_dock)
         self.tabifyDockWidget(self.files_dock, self.redamon_dock)
         self.tabifyDockWidget(self.redamon_dock, self.integrations_dock)
         self.tabifyDockWidget(self.integrations_dock, self.system_dock)
         self.tabifyDockWidget(self.trace_dock, self.notifications_dock)
+        self.tabifyDockWidget(self.notifications_dock, self.health_dock)
         self.tiny_dock.raise_()
-        self.trace_dock.raise_()
+        self.health_dock.raise_()
 
     def _make_dock(self, title: str, object_name: str, widget: QWidget, area: Qt.DockWidgetArea) -> ManagedDockWidget:
         dock = ManagedDockWidget(title, object_name, self)
@@ -2030,10 +2108,19 @@ class MainWindow(QMainWindow):
             "layout_tiny": lambda: self.apply_layout_preset("tiny_focus"),
             "layout_security": lambda: self.apply_layout_preset("security_review"),
             "open_hud": lambda: webbrowser.open("http://127.0.0.1:8080/"),
+            "toggle_fullscreen": self.toggle_fullscreen,
+            "open_terminal": self.health_pane.open_terminal,
+            "quit_workspace": self.close,
         }
         for action_id, layer in layer_map.items():
             handlers[action_id] = lambda layer=layer: self._set_thoughtglass_layer(layer)
         install_desktop_shortcuts(self, handlers, overrides=load_shortcut_overrides(self.settings))
+
+    def toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
 
     def _cycle_workbench_tab(self, direction: int) -> None:
         count = self.workbench_tabs.count()
@@ -2278,6 +2365,7 @@ class MainWindow(QMainWindow):
                 }
             )
             self.notification_pane.apply_notifications(payload.get("notifications", {}))
+            self.health_pane.apply_tiles(payload.get("health_tiles", []))
             self.trace_pane.apply_trace(
                 {
                     **(payload.get("trace") or {}),
@@ -2570,6 +2658,13 @@ def workspace_probe() -> Dict[str, Any]:
         return {"success": False, "error": str(exc)}
 
 
+def want_fullscreen(argv: List[str], environ: Dict[str, str]) -> bool:
+    """The Workspace is a fullscreen shell by default; --windowed or BLACKFONG_WINDOWED=1 opts out."""
+    if "--windowed" in argv:
+        return False
+    return str(environ.get("BLACKFONG_WINDOWED", "")).lower() not in {"1", "true", "yes"}
+
+
 def main() -> int:
     debug_session_log(hypothesis_id="E", location="desktop_shell.py:main", message="desktop_shell main entered")
     try:
@@ -2587,7 +2682,10 @@ def main() -> int:
             tray.setContextMenu(tray_menu)
             tray.setToolTip("O.B.E.O.S. Blackfong Workspace")
             tray.show()
-        window.show()
+        if want_fullscreen(sys.argv[1:], os.environ):
+            window.showFullScreen()
+        else:
+            window.show()
         debug_session_log(hypothesis_id="E", location="desktop_shell.py:main", message="MainWindow shown, entering event loop")
         return app.exec()
     except Exception as exc:

@@ -308,7 +308,17 @@ def test_vm_acceptance_blocks_until_activate_home_stage_is_run(tmp_path: Path):
     assert any("blackfong obeos activate-home" in action for action in actions)
 
 
-def test_cli_exposes_desktop_and_obeos_contract_commands():
+def test_cli_exposes_desktop_and_obeos_contract_commands(tmp_path: Path, monkeypatch):
+    # `verify release-evidence` and `verify shotset` write reports under the workspace root.
+    # Point them at a temp tree so the test never rewrites tracked docs in the repo.
+    from blackfong_ecosystem import verification as verification_module
+    from blackfong_ecosystem.config import Paths
+
+    from blackfong_ecosystem import cli as cli_module
+
+    temp_paths = Paths.from_root(tmp_path)
+    monkeypatch.setattr(verification_module, "paths", temp_paths)
+    monkeypatch.setattr(cli_module, "paths", temp_paths)
     runner = CliRunner()
 
     installer_status = runner.invoke(cli, ["install-plan", "status"])

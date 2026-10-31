@@ -2691,7 +2691,8 @@ class DAISE:
         if any(phrase in normalized_compact for phrase in phrases):
             return True
         memory_anchor = bool(tokens.intersection({"memory", "remember", "remembering", "store", "stored", "save", "saved"}))
-        explanation_shape = bool(tokens.intersection({"how", "why", "explain", "works", "work", "working"}))
+        # Bare "work" is usually a noun ("our work"); only verb forms or how/why/explain signal a how-it-works question.
+        explanation_shape = bool(tokens.intersection({"how", "why", "explain", "works", "working"}))
         self_note_shape = "note to yourself" in normalized_compact or (
             bool(tokens.intersection({"note", "notes"})) and bool(tokens.intersection({"yourself", "your", "self"}))
         )
@@ -3393,6 +3394,13 @@ class DAISE:
             return []
         return []
 
+    _IDENTITY_EXCLUDED_TOKENS = frozenset(
+        {
+            "still", "carrying", "holding", "tracking", "keeping", "remembering", "retained",
+            "centered", "orbiting", "anchored", "keyed", "thread", "meaning", "focus", "work", "seeing", "shape",
+        }
+    )
+
     def _matches_identity_truth(self, normalized: str) -> bool:
         if self._matches_any(
             normalized,
@@ -3427,7 +3435,9 @@ class DAISE:
         if name_shape or acronym_shape or recall_shape:
             return True
         if identity_shape and bool(tokens.intersection({"are", "exactly", "really"})):
-            return True
+            # "what are you still carrying / meaning / tracking" asks about memory or the
+            # conversation, not about who the assistant is; let recall routing handle those.
+            return not tokens.intersection(self._IDENTITY_EXCLUDED_TOKENS)
         return "direct artificial intelligence system environment" in normalized
 
     def _matches_status_truth(self, normalized: str) -> bool:
