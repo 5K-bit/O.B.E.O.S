@@ -226,9 +226,17 @@ def main():
     else:
         automated = "failed"
 
+    branch = git(["rev-parse", "--abbrev-ref", "HEAD"], root)
+    if branch == "HEAD":
+        branch = f"detached HEAD (requested ref: {args.ref or short})"
+    if code not in (0, 1, 2, 3, 4, 5):
+        notes.append(
+            f"The test process exited with code {code} (0x{code & 0xFFFFFFFF:08X}), which is not a pytest result code: "
+            "it crashed or was killed. If pytest printed its final summary line in pytest-run.log, the counts above are "
+            "valid and the crash happened afterwards (for example at interpreter shutdown); a CI job would still fail on it.")
     data = {
         "generated_utc": started.isoformat(timespec="seconds"), "mode": mode, "commit": sha,
-        "branch": git(["rev-parse", "--abbrev-ref", "HEAD"], root), "working_tree_clean": not dirty,
+        "branch": branch, "working_tree_clean": not dirty,
         "uncommitted_files": dirty.splitlines(), "python": pyver.strip(), "pytest": pytest_ver.strip(),
         "os": platform.platform(), "command": " ".join(cmd), "exit_code": code,
         "duration_seconds": round(duration, 1), "results": results, "collection": collection, "submodules": pins,
