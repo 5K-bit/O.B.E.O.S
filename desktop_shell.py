@@ -67,7 +67,7 @@ from blackfong_ecosystem.system_awareness import SystemAwarenessService
 from blackfong_ecosystem.backend_warmup import BackendWarmupWorker
 from blackfong_ecosystem.llamacpp_process import LlamaCppServerManager
 from blackfong_ecosystem.cognition_renderer import NativeGraphCognitionRenderer
-from blackfong_ecosystem.config import chat_settings
+from blackfong_ecosystem.config import chat_settings, hud_settings
 from blackfong_ecosystem.display_names import display_agent_name, format_chat_status_line
 from blackfong_ecosystem.desktop_live_stream import DesktopLiveStreamWorker
 from blackfong_ecosystem.operator_session import (
@@ -76,7 +76,6 @@ from blackfong_ecosystem.operator_session import (
     link_surface,
     normalize_session_boot_mode,
     session_boot_mode_from_env,
-    session_link_label,
 )
 from blackfong_ecosystem.thoughtglass_scene_3d import Thoughtglass3DHost
 from blackfong_ecosystem.tiny_stream_view import TinyStreamView
@@ -743,17 +742,28 @@ class ChatPane(QWidget):
         self.status_label.style().polish(self.status_label)
 
     def _message_card_html(self, *, role: str, text: str, agent: Optional[str] = None) -> str:
+        # Flat background-tint differences between roles read as near-identical at
+        # normal screen brightness (they're all close to the base dark surface), so
+        # distinguish roles with a visible left accent bar and asymmetric margins
+        # (assistant hugs the left edge, user sits indented from the right) instead
+        # of relying on subtle fill alone - that's the difference between a real
+        # chat UI and a flat log dump.
         normalized_role = str(role or "system").strip().lower()
         tone = {
-            "assistant": "#12202b",
-            "user": "#0f1b24",
+            "assistant": "#132530",
+            "user": "#111a22",
             "system": "#0d1720",
         }.get(normalized_role, "#0d1720")
-        border = {
+        accent_bar = {
             "assistant": "#1fb5cc",
-            "user": "#223344",
+            "user": "#4a6075",
             "system": "#27505e",
-        }.get(normalized_role, "#223344")
+        }.get(normalized_role, "#27505e")
+        margin = {
+            "assistant": "margin:0 48px 12px 0",
+            "user": "margin:0 0 12px 48px",
+            "system": "margin:0 24px 12px 24px",
+        }.get(normalized_role, "margin:0 24px 12px 24px")
         if normalized_role == "assistant":
             label = display_agent_name(agent or "daise")
         elif normalized_role == "user":
@@ -762,8 +772,8 @@ class ChatPane(QWidget):
             label = "System"
         body = self._format_message_body(text)
         return (
-            "<div style='margin-bottom:10px;padding:12px;border:1px solid "
-            f"{border};border-radius:12px;background:{tone};white-space:pre-wrap'>"
+            f"<div style='{margin};padding:10px 14px;border-left:3px solid {accent_bar};"
+            f"border-radius:4px;background:{tone};white-space:pre-wrap'>"
             f"<strong>{_html(label)}</strong><br/>{body}</div>"
         )
 
@@ -1759,10 +1769,8 @@ class MainWindow(QMainWindow):
         top_row.setSpacing(6)
         self.overall_chip = QLabel("BOOTING", cluster)
         self.overall_chip.setProperty("toolbarRole", "statusHero")
-        self.linked_chip = QLabel("", cluster)
-        self.linked_chip.setProperty("toolbarRole", "statusMinor")
         top_row.addWidget(self.overall_chip, 2)
-        top_row.addWidget(self.linked_chip, 1)
+        top_row.addWidget(self._build_surface_dots(cluster), 1)
 
         bottom_row = QHBoxLayout()
         bottom_row.setContentsMargins(0, 0, 0, 0)
@@ -1778,8 +1786,98 @@ class MainWindow(QMainWindow):
 
         cluster_layout.addLayout(top_row)
         cluster_layout.addLayout(bottom_row)
-        self.linked_chip.hide()
         return cluster
+
+    def _build_surface_dots(self, parent: QWidget) -> QWidget:
+        """Live online/offline dots per surface, replacing the old static
+        "Desktop + HUD linked" text (which only ever recorded that a surface had
+        *ever* connected, persisted forever - not whether it's up right now).
+        New surfaces (Sentinel, etc.) just need an entry added to this tuple plus
+        a case in _refresh_surface_dots."""
+        container = QWidget(parent)
+        container.setProperty("toolbarRole", "surfaceDots")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        self._surface_dot_marks: Dict[str, QLabel] = {}
+        self._surface_dot_labels: Dict[str, QLabel] = {}
+        for key, label in (("desktop", "Desktop"), ("hud", "HUD"), ("tiny", "Tiny"), ("earth", "Earth")):
+            pair = QWidget(container)
+            pair_layout = QHBoxLayout(pair)
+            pair_layout.setContentsMargins(0, 0, 0, 0)
+            pair_layout.setSpacing(4)
+            mark = QLabel("●", pair)
+            mark.setProperty("toolbarRole", "surfaceDotMark")
+            mark.setProperty("surfaceState", "offline")
+            text = QLabel(label, pair)
+            text.setProperty("toolbarRole", "surfaceDotLabel")
+            text.setProperty("surfaceState", "offline")
+            pair_layout.addWidget(mark)
+            pair_layout.addWidget(text)
+            layout.addWidget(pair)
+            self._surface_dot_marks[key] = mark
+            self._surface_dot_labels[key] = text
+        layout.addStretch(1)
+        return container
+
+    def _set_surface_state(self, key: str, online: bool) -> None:
+        state = "online" if online else "offline"
+        for registry in (getattr(self, "_surface_dot_marks", {}), getattr(self, "_surface_dot_labels", {})):
+            widget = registry.get(key)
+            if widget is None:
+                continue
+            widget.setProperty("surfaceState", state)
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+
+    @staticmethod
+    def _tcp_probe(host: str, port: int, timeout: float = 0.15) -> bool:
+        """Cheap liveness check for a local service: can we open a TCP connection
+        at all. Deliberately short timeout since this runs on the UI thread on
+        every refresh tick - a hung/firewalled port should not visibly stall the
+        workspace."""
+        import socket
+
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _earth_is_running() -> bool:
+        """Best-effort: Earth's own RuntimeLease (blackfong_ecosystem/earth/lease.py)
+        holds a non-blocking OS lock on <data-dir>/runtime.lock for as long as it's
+        running. Try the same lock ourselves, non-blocking: acquiring it means
+        nobody else holds it (Earth is not running), so release it immediately;
+        failing to acquire it means Earth has it. Only covers Earth's default data
+        dir (matches earth/desktop.py's default) - a custom --data-dir won't be
+        detected, which is an acceptable gap for a status dot. Never raises.
+        """
+        try:
+            from pathlib import Path
+
+            default_dir = Path(os.getenv("LOCALAPPDATA", str(Path.home() / ".local" / "share"))) / "OBEOS" / "Earth"
+            lock_path = default_dir / "runtime.lock"
+            if not lock_path.exists():
+                return False
+            with open(lock_path, "a+b") as handle:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    return False
+                except OSError:
+                    return True
+        except Exception:
+            return False
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Workspace", self)
@@ -2264,12 +2362,10 @@ class MainWindow(QMainWindow):
         tiny_summary = self._tiny_chip_summary(subsystems, tiny_status)
         self.tiny_chip.setText(tiny_summary)
         self._update_warmup_chip()
-        link_label = session_link_label()
-        if link_label:
-            self.linked_chip.setText(link_label)
-            self.linked_chip.show()
-        else:
-            self.linked_chip.hide()
+        self._set_surface_state("desktop", True)
+        self._set_surface_state("hud", self._tcp_probe(hud_settings.host, hud_settings.port))
+        self._set_surface_state("tiny", bool(tiny_status.get("online")))
+        self._set_surface_state("earth", self._earth_is_running())
 
     def _update_warmup_chip(self) -> None:
         warmup = getattr(self, "_warmup_worker", None)

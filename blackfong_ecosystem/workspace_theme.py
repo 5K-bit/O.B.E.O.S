@@ -12,14 +12,18 @@ TOKENS: Dict[str, str] = {
     "surface": "#0b1219",
     "surface_raised": "#101a23",
     "surface_high": "#16232f",
-    # lines
-    "border": "#223344",
-    "border_strong": "#2c4357",
+    # lines - deliberately gray-leaning (not blue/cyan-leaning) so a plain
+    # structural border never gets mistaken for an accented/active one
+    "border": "#262b31",
+    "border_strong": "#363d45",
     # text
     "text": "#e6edf2",
     "text_muted": "#7c93a8",
     "text_disabled": "#6b7884",
-    # cyan accent
+    # cyan accent - reserved for interactive/active states only (the active tab,
+    # a hovered control, the one genuinely primary action), never for ordinary
+    # structural borders. border_strong below is deliberately desaturated so it
+    # doesn't read as "also accent" next to it.
     "accent": "#1fb5cc",
     "accent_hover": "#4fe0f5",
     "accent_text": "#9fe9f5",
@@ -30,11 +34,16 @@ TOKENS: Dict[str, str] = {
     "state_warn": "#f0b45a",
     "state_bad": "#ff6b6b",
     "state_unknown": "#6b7884",
-    # chat bubbles / inline panels
-    "bubble_assistant": "#12202b",
-    "bubble_user": "#0f1b24",
+    # chat bubbles / inline panels. Flat background tints close to `surface`
+    # read as near-identical at normal brightness, so cards lean on a visible
+    # left accent bar (see _message_card_html) rather than relying on subtle
+    # fill differences alone.
+    "bubble_assistant": "#132530",
+    "bubble_user": "#111a22",
     "bubble_system": "#0d1720",
     "bubble_system_border": "#27505e",
+    "bubble_assistant_accent": "#1fb5cc",
+    "bubble_user_accent": "#4a6075",
 }
 
 _FONT = '"Segoe UI", "Aptos", sans-serif'
@@ -143,6 +152,28 @@ def build_stylesheet(t: Dict[str, str] | None = None) -> str:
             border-radius: 6px;
             color: {t['text']};
             padding: 4px 8px;
+        }}
+        QWidget[toolbarRole="surfaceDots"] {{
+            background: transparent;
+        }}
+        QLabel[toolbarRole="surfaceDotMark"] {{
+            font-size: 12px;
+            padding: 0;
+            margin: 0;
+        }}
+        QLabel[toolbarRole="surfaceDotMark"][surfaceState="online"] {{
+            color: {t['state_ok']};
+        }}
+        QLabel[toolbarRole="surfaceDotMark"][surfaceState="offline"] {{
+            color: {t['state_unknown']};
+        }}
+        QLabel[toolbarRole="surfaceDotLabel"] {{
+            color: {t['text_muted']};
+            font-size: 11px;
+            padding: 0 6px 0 0;
+        }}
+        QLabel[toolbarRole="surfaceDotLabel"][surfaceState="online"] {{
+            color: {t['text']};
         }}
         QDockWidget::title {{
             text-align: left;
