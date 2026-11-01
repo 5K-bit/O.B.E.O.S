@@ -1,6 +1,7 @@
 """POST /api/chat on the Earth app: auth, validation, session identity, and the
 promise that Earth's boot path never imports the chat stack."""
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 import pytest
 from earthglass.spatial.engine import SpatialEngine
@@ -51,7 +52,7 @@ def test_creating_the_app_does_not_import_the_chat_stack(client, tmp_path):
         "control.close(); engine.stop()"
     )
     out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
-                         cwd="/home/user/O.B.E.O.S", timeout=180)
+                         cwd=str(Path(__file__).resolve().parents[1]), timeout=180)
     assert "CLEAN" in out.stdout, out.stdout + out.stderr
 
 
