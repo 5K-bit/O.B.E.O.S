@@ -1,10 +1,13 @@
 import ast
+import pytest
 from pathlib import Path
 from types import SimpleNamespace, ModuleType
 
 
 def test_tiny_stream_only_publishes_without_native_window(monkeypatch):
     source = Path(__file__).resolve().parents[2] / "TinyProgrammer-main/display/terminal.py"
+    if not source.exists():
+        pytest.skip(f"sibling checkout not present: {source}")
     tree = ast.parse(source.read_text(encoding="utf-8"))
     method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_flip")
     frames = []

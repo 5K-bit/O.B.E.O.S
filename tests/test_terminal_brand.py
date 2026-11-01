@@ -52,7 +52,7 @@ def test_root_cli_help_version_and_machine_output():
     import click
     from click.testing import CliRunner
     source = Path(__file__).resolve().parents[1] / 'blackfong_ecosystem' / 'cli.py'
-    tree = ast.parse(source.read_text())
+    tree = ast.parse(source.read_text(encoding="utf-8"))
     root = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'cli')
     namespace = {'click': click, 'PRODUCT': brand.PRODUCT, 'product_version': brand.product_version, 'show_banner': brand.show_banner}
     exec(compile(ast.Module(body=[root], type_ignores=[]), str(source), 'exec'), namespace)
