@@ -3,47 +3,92 @@
 from __future__ import annotations
 
 import math
+import os
+import platform
 import random
 from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    from PySide6.QtCore import QPointF, Qt, QTimer, Signal
-    from PySide6.QtGui import QColor, QMouseEvent, QWheelEvent
-    from PySide6.QtOpenGLWidgets import QOpenGLWidget
-    from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
-except ImportError:  # pragma: no cover
+from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QMouseEvent, QWheelEvent
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+
+def _opengl_runtime_allowed(
+    *,
+    environ: Optional[Dict[str, str]] = None,
+    kernel_release: Optional[str] = None,
+) -> bool:
+    """Return whether it is safe to instantiate a QOpenGLWidget.
+
+    Importing PyOpenGL only proves that Python bindings are installed.  WSL may
+    still lack a usable EGL/Mesa device; constructing QOpenGLWidget in that
+    state can corrupt later Qt paint calls instead of raising a Python error.
+    Keep WSL on the native 2D renderer unless the operator explicitly opts in.
+    """
+
+    env = os.environ if environ is None else environ
+    override = str(env.get("BLACKFONG_THOUGHTGLASS_3D", "")).strip().lower()
+    if override in {"1", "true", "yes", "on"}:
+        return True
+    if override in {"0", "false", "no", "off"}:
+        return False
+
+    release = platform.release() if kernel_release is None else kernel_release
+    running_under_wsl = bool(
+        env.get("WSL_INTEROP") or env.get("WSL_DISTRO_NAME")
+    ) or "microsoft" in release.lower()
+    return not running_under_wsl
+
+
+OPENGL_RUNTIME_ALLOWED = _opengl_runtime_allowed()
+if OPENGL_RUNTIME_ALLOWED:
+    try:
+        from PySide6.QtOpenGLWidgets import QOpenGLWidget
+    except ImportError:  # pragma: no cover - optional Qt OpenGL component
+        QOpenGLWidget = QWidget  # type: ignore[misc, assignment]
+        QT_OPENGL_AVAILABLE = False
+    else:
+        QT_OPENGL_AVAILABLE = True
+else:
+    # Avoid loading QtOpenGLWidgets at all on unsafe runtimes.  Merely creating
+    # a QOpenGLWidget can leave Mesa/Qt in a corrupted state after EGL fails.
     QOpenGLWidget = QWidget  # type: ignore[misc, assignment]
-    Signal = object  # type: ignore[misc, assignment]
+    QT_OPENGL_AVAILABLE = False
 
-try:
-    from OpenGL.GL import (  # type: ignore[import-untyped]
-        GL_COLOR_BUFFER_BIT,
-        GL_DEPTH_BUFFER_BIT,
-        GL_DEPTH_TEST,
-        GL_LINES,
-        GL_POINTS,
-        GL_QUADS,
-        glBegin,
-        glClear,
-        glClearColor,
-        glColor3f,
-        glEnable,
-        glEnd,
-        glLoadIdentity,
-        glMatrixMode,
-        glPointSize,
-        glRotatef,
-        glTranslatef,
-        glVertex3f,
-        glViewport,
-        GL_PROJECTION,
-        GL_MODELVIEW,
-    )
-    from OpenGL.GLU import gluPerspective  # type: ignore[import-untyped]
+if OPENGL_RUNTIME_ALLOWED:
+    try:
+        from OpenGL.GL import (  # type: ignore[import-untyped]
+            GL_COLOR_BUFFER_BIT,
+            GL_DEPTH_BUFFER_BIT,
+            GL_DEPTH_TEST,
+            GL_LINES,
+            GL_MODELVIEW,
+            GL_POINTS,
+            GL_PROJECTION,
+            GL_QUADS,
+            glBegin,
+            glClear,
+            glClearColor,
+            glColor3f,
+            glEnable,
+            glEnd,
+            glLoadIdentity,
+            glMatrixMode,
+            glPointSize,
+            glRotatef,
+            glTranslatef,
+            glVertex3f,
+            glViewport,
+        )
+        from OpenGL.GLU import gluPerspective  # type: ignore[import-untyped]
+    except Exception:  # pragma: no cover - optional PyOpenGL dependency
+        PYOPENGL_AVAILABLE = False
+    else:
+        PYOPENGL_AVAILABLE = True
+else:
+    PYOPENGL_AVAILABLE = False
 
-    OPENGL_AVAILABLE = True
-except Exception:  # pragma: no cover
-    OPENGL_AVAILABLE = False
+OPENGL_AVAILABLE = QT_OPENGL_AVAILABLE and PYOPENGL_AVAILABLE
 
 
 STATE_COLORS = {
@@ -354,7 +399,13 @@ class Thoughtglass3DHost(QWidget):
             self.scene_3d.node_activated.connect(self._on_node_activated)
 
         controls = QHBoxLayout()
-        self.mode_label = QLabel("3D Brain" if self._use_3d else "2D Graph (install PyOpenGL for 3D)", self)
+        if self._use_3d:
+            mode_label = "3D Brain"
+        elif not OPENGL_RUNTIME_ALLOWED:
+            mode_label = "2D Graph (safe graphics mode)"
+        else:
+            mode_label = "2D Graph (install OpenGL support for 3D)"
+        self.mode_label = QLabel(mode_label, self)
         self.toggle_button = QPushButton("Switch to 2D", self)
         self.toggle_button.setEnabled(self._use_3d)
         self.toggle_button.clicked.connect(self._toggle_mode)

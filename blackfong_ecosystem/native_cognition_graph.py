@@ -6,7 +6,7 @@ from html import escape
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QBrush, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QGraphicsObject,
     QGraphicsPathItem,
@@ -101,7 +101,7 @@ class GraphView(QGraphicsView):
         self.setViewportUpdateMode(QGraphicsView.BoundingRectViewportUpdate)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
-        self.setBackgroundBrush(QBrush(QColor("#0b1015")))
+        self.setBackgroundBrush(QBrush(QColor("#070b10")))
         self.setFrameShape(QGraphicsView.NoFrame)
 
     def wheelEvent(self, event: Any) -> None:
@@ -127,7 +127,7 @@ class MiniMapView(QGraphicsView):
         self._source_view = source_view
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
         self.setFrameShape(QGraphicsView.NoFrame)
-        self.setBackgroundBrush(QBrush(QColor("#0d141b")))
+        self.setBackgroundBrush(QBrush(QColor("#0b1219")))
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setMinimumHeight(220)
@@ -140,8 +140,8 @@ class MiniMapView(QGraphicsView):
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         super().drawForeground(painter, rect)
         viewport_rect = self._source_view.viewport_scene_rect()
-        painter.setPen(QPen(QColor("#f2cb7b"), 2.0))
-        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor("#4fe0f5"), 2.0))
+        painter.setBrush(QBrush(Qt.NoBrush))
         painter.drawRect(viewport_rect)
 
     def mousePressEvent(self, event: Any) -> None:
@@ -170,7 +170,7 @@ class GraphRegionItem(QGraphicsPathItem):
         self.setVisible(visible)
         color = QColor(REGION_COLORS.get(str(self.region.get("id") or ""), QColor("#1c2731")))
         color.setAlpha(74 if selected else 46)
-        pen_color = QColor("#f2cb7b" if selected else "#3a4a59")
+        pen_color = QColor("#4fe0f5" if selected else "#2c4357")
         pen_color.setAlpha(150 if selected else 80)
         self.setBrush(QBrush(color))
         self.setPen(QPen(pen_color, 2.2 if selected else 1.2, Qt.DashLine))
@@ -252,7 +252,7 @@ class GraphNodeItem(QGraphicsObject):
         tier = int(self.node.get("tier") or 3)
         if self.selected_for_focus or self.neighbor_for_focus or state in {"active", "fault", "warning"}:
             painter.setPen(QPen(halo if halo.alpha() else QColor("#274258"), 2.4 if self.selected_for_focus else 1.4))
-            painter.setBrush(Qt.NoBrush)
+            painter.setBrush(QBrush(Qt.NoBrush))
             painter.drawEllipse(QPointF(0, 0), self.radius + (14.0 if tier == 1 else 9.0), self.radius + (14.0 if tier == 1 else 9.0))
         fill = QColor(color)
         fill.setAlpha(235 if not self.dimmed else 100)
@@ -261,9 +261,9 @@ class GraphNodeItem(QGraphicsObject):
         painter.drawEllipse(QPointF(0, 0), self.radius, self.radius)
 
         if self.node.get("anchor"):
-            ring_pen = QPen(QColor("#f3d488" if self.selected_for_focus else "#d5b96b"), 1.4 if tier > 1 else 2.0)
+            ring_pen = QPen(QColor("#4fe0f5" if self.selected_for_focus else "#1fb5cc"), 1.4 if tier > 1 else 2.0)
             painter.setPen(ring_pen)
-            painter.setBrush(Qt.NoBrush)
+            painter.setBrush(QBrush(Qt.NoBrush))
             painter.drawEllipse(QPointF(0, 0), self.radius + 4.0, self.radius + 4.0)
 
         if _label_should_render(self.node, selected=self.selected_for_focus, hovered=self.hovered, zoom_bucket=self.zoom_bucket):
@@ -336,7 +336,7 @@ class GraphEdgeItem(QGraphicsPathItem):
         elif category in {"fault", "event"}:
             pen.setDashPattern([3.0, 5.0])
         painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
+        painter.setBrush(QBrush(Qt.NoBrush))
         painter.drawPath(self.path())
 
 

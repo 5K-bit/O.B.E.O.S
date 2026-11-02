@@ -98,8 +98,11 @@ class LlamaCppSettings:
     """Runtime settings for the dedicated D.A.I.S.E. llama.cpp server.
 
     llama-server loads one model per process, so this is scoped to a single
-    model (the edited Gemma model D.A.I.S.E. speaks through) rather than the
-    many-model chains Ollama still serves for the other agents.
+    model (the edited Gemma model D.A.I.S.E. used to speak through) rather
+    than the many-model chains Ollama still serves for the other agents.
+    Currently unused at runtime: ChatSettings.daise_backend defaults to
+    "ollama" (see the note on that field below), so this stays dormant
+    unless daise_backend is switched back to "llamacpp".
     """
 
     enabled: bool = True
@@ -151,8 +154,20 @@ class ChatSettings:
     backend: str = "ollama"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:3b"
-    daise_model: str = "gemma4-heretic:latest"
-    daise_backend: str = "llamacpp"
+    # D.A.I.S.E. used to speak through gemma4-heretic:latest via the dedicated
+    # llama.cpp server below. That model is a community abliterated fine-tune;
+    # abliteration strips refusal behavior by disrupting the model's
+    # instruction-following circuitry generally, and it was dumping its
+    # internal planning narration ("The user is asking... I should...")
+    # straight into the visible chat answer, ignoring the system prompt's
+    # explicit "answer directly, don't narrate your plan" instruction - with
+    # no structured reasoning channel for llamacpp_backend.py to strip it
+    # from. Switched to routing through Ollama with llama3.2:3b (already
+    # pulled locally) for reliable instruction-following. See
+    # docs/next-patch-readme.md P11. To go back to the llama.cpp path, set
+    # daise_backend back to "llamacpp".
+    daise_model: str = "llama3.2:3b"
+    daise_backend: str = "ollama"
     daise_num_predict: int = 2048
     daise_num_ctx: int = 8192
     # Earth's scene explanation has its own profile: a large evidence prompt on
@@ -164,7 +179,7 @@ class ChatSettings:
     ollama_timeout: float = 180.0
     ollama_keep_alive: str = "30m"
     ollama_num_ctx: int = 8192
-    ollama_num_predict: int = 384
+    ollama_num_predict: int = 900
     # Response-mode model routing
     fast_model: str = "llama3.2:3b"
     fast_model_fallbacks: tuple[str, ...] = ("llama3.2:3b",)
@@ -175,15 +190,15 @@ class ChatSettings:
     fast_timeout: float = 60.0
     fast_keep_alive: str = "30m"
     fast_num_ctx: int = 4096
-    fast_num_predict: int = 384
+    fast_num_predict: int = 700
     standard_timeout: float = 90.0
     standard_keep_alive: str = "30m"
     standard_num_ctx: int = 6144
-    standard_num_predict: int = 256
+    standard_num_predict: int = 900
     deep_timeout: float = 180.0
     deep_keep_alive: str = "20m"
     deep_num_ctx: int = 8192
-    deep_num_predict: int = 512
+    deep_num_predict: int = 1400
     fast_prompt_budget_tokens: int = 600
     standard_prompt_budget_tokens: int = 1800
     deep_prompt_budget_tokens: int = 4096
@@ -195,7 +210,7 @@ class ChatSettings:
     jarvis_num_ctx: int = 8192
     jarvis_num_predict: int = 256
     jarvis_quick_timeout: float = 60.0
-    jarvis_quick_num_predict: int = 384
+    jarvis_quick_num_predict: int = 700
     quick_prompt_budget_tokens: int = 600
     coding_model: str = "deepseek-coder:6.7b"
     coding_model_fallbacks: tuple[str, ...] = ("deepseek-coder", "llama3.2:3b")
@@ -203,21 +218,16 @@ class ChatSettings:
     coding_keep_alive: str = "30m"
     coding_num_ctx: int = 8192
     coding_num_predict: int = 512
+    # lilo/stitch/voice only ever need a *model name* (read directly by
+    # system_awareness.py's status display and by model_for_agent()).
+    # They have no live chat path of their own (lilo_agent.py, stitch_agent.py
+    # and voice_agent.py never call chat_backends/model_routing), so the
+    # separate timeout/keep_alive/num_ctx/num_predict fields these used to
+    # carry were dead weight: nothing anywhere read them. Removed rather than
+    # kept "just in case" per the config-duplication cleanup.
     lilo_model: str = "llama3.2:3b"
-    lilo_timeout: float = 120.0
-    lilo_keep_alive: str = "20m"
-    lilo_num_ctx: int = 8192
-    lilo_num_predict: int = 320
     stitch_model: str = "llama3.2:3b"
-    stitch_timeout: float = 120.0
-    stitch_keep_alive: str = "20m"
-    stitch_num_ctx: int = 8192
-    stitch_num_predict: int = 320
     voice_model: str = "llama3.2:3b"
-    voice_timeout: float = 120.0
-    voice_keep_alive: str = "20m"
-    voice_num_ctx: int = 4096
-    voice_num_predict: int = 192
     transcript_window: int = 16
     global_memory_limit: int = 6
     summary_cadence: int = 6
@@ -261,14 +271,15 @@ class ChatSettings:
         return per_agent_models.get(normalized) or self.ollama_model
 
     def timeout_for_agent(self, agent_name: str | None = None) -> float:
+        # NOTE: lilo/stitch/voice have no per-agent timeout of their own -
+        # they have no live chat path (see the lilo/stitch/voice comment
+        # above model_for_agent's fields), so they fall through to the
+        # generic ollama_timeout like any unrecognized agent name.
         normalized = (agent_name or "").strip().lower()
         per_agent_timeouts = {
             "daise": self.jarvis_timeout,
             "jarvis": self.jarvis_timeout,
             "coding": self.coding_timeout,
-            "lilo": self.lilo_timeout,
-            "stitch": self.stitch_timeout,
-            "voice": self.voice_timeout,
         }
         return per_agent_timeouts.get(normalized) or self.ollama_timeout
 
@@ -278,9 +289,6 @@ class ChatSettings:
             "daise": self.jarvis_keep_alive,
             "jarvis": self.jarvis_keep_alive,
             "coding": self.coding_keep_alive,
-            "lilo": self.lilo_keep_alive,
-            "stitch": self.stitch_keep_alive,
-            "voice": self.voice_keep_alive,
         }
         return per_agent_keep_alive.get(normalized) or self.ollama_keep_alive
 
@@ -290,9 +298,6 @@ class ChatSettings:
             "daise": self.jarvis_num_ctx,
             "jarvis": self.jarvis_num_ctx,
             "coding": self.coding_num_ctx,
-            "lilo": self.lilo_num_ctx,
-            "stitch": self.stitch_num_ctx,
-            "voice": self.voice_num_ctx,
         }
         return per_agent_num_ctx.get(normalized) or self.ollama_num_ctx
 
@@ -302,9 +307,6 @@ class ChatSettings:
             "daise": self.jarvis_num_predict,
             "jarvis": self.jarvis_num_predict,
             "coding": self.coding_num_predict,
-            "lilo": self.lilo_num_predict,
-            "stitch": self.stitch_num_predict,
-            "voice": self.voice_num_predict,
         }
         return per_agent_num_predict.get(normalized) or self.ollama_num_predict
 
@@ -327,7 +329,7 @@ class ChatSettings:
         default_chat_timeout = float(os.getenv("BLACKFONG_JARVIS_TIMEOUT", "180"))
         default_keep_alive = os.getenv("BLACKFONG_OLLAMA_KEEP_ALIVE", "30m")
         default_num_ctx = int(os.getenv("BLACKFONG_OLLAMA_NUM_CTX", "8192"))
-        default_num_predict = int(os.getenv("BLACKFONG_OLLAMA_NUM_PREDICT", "384"))
+        default_num_predict = int(os.getenv("BLACKFONG_OLLAMA_NUM_PREDICT", "900"))
         fast_chain = ChatSettings._env_model_chain(
             "BLACKFONG_FAST_MODEL",
             "BLACKFONG_FAST_MODEL_FALLBACKS",
@@ -354,8 +356,8 @@ class ChatSettings:
         )
         return ChatSettings(
             backend=os.getenv("BLACKFONG_CHAT_BACKEND", "ollama"),
-            daise_backend=os.getenv("BLACKFONG_DAISE_BACKEND", "llamacpp").strip().lower() or "llamacpp",
-            daise_model=os.getenv("BLACKFONG_DAISE_MODEL", os.getenv("BLACKFONG_JARVIS_MODEL", "gemma4-heretic:latest")),
+            daise_backend=os.getenv("BLACKFONG_DAISE_BACKEND", "ollama").strip().lower() or "ollama",
+            daise_model=os.getenv("BLACKFONG_DAISE_MODEL", os.getenv("BLACKFONG_JARVIS_MODEL", "llama3.2:3b")),
             daise_num_predict=int(os.getenv("BLACKFONG_DAISE_NUM_PREDICT", "2048")),
             daise_num_ctx=int(os.getenv("BLACKFONG_DAISE_NUM_CTX", "8192")),
             earth_explanation_model=os.getenv("BLACKFONG_EARTH_EXPLANATION_MODEL", "gemma3:1b-it-qat"),
@@ -377,15 +379,15 @@ class ChatSettings:
             fast_timeout=float(os.getenv("BLACKFONG_FAST_TIMEOUT", os.getenv("BLACKFONG_JARVIS_QUICK_TIMEOUT", "60"))),
             fast_keep_alive=os.getenv("BLACKFONG_FAST_KEEP_ALIVE", default_keep_alive),
             fast_num_ctx=int(os.getenv("BLACKFONG_FAST_NUM_CTX", "4096")),
-            fast_num_predict=int(os.getenv("BLACKFONG_FAST_NUM_PREDICT", os.getenv("BLACKFONG_JARVIS_QUICK_NUM_PREDICT", "384"))),
+            fast_num_predict=int(os.getenv("BLACKFONG_FAST_NUM_PREDICT", os.getenv("BLACKFONG_JARVIS_QUICK_NUM_PREDICT", "700"))),
             standard_timeout=float(os.getenv("BLACKFONG_STANDARD_TIMEOUT", "90")),
             standard_keep_alive=os.getenv("BLACKFONG_STANDARD_KEEP_ALIVE", default_keep_alive),
             standard_num_ctx=int(os.getenv("BLACKFONG_STANDARD_NUM_CTX", "6144")),
-            standard_num_predict=int(os.getenv("BLACKFONG_STANDARD_NUM_PREDICT", "256")),
+            standard_num_predict=int(os.getenv("BLACKFONG_STANDARD_NUM_PREDICT", "900")),
             deep_timeout=float(os.getenv("BLACKFONG_DEEP_TIMEOUT", str(default_timeout))),
             deep_keep_alive=os.getenv("BLACKFONG_DEEP_KEEP_ALIVE", "20m"),
             deep_num_ctx=int(os.getenv("BLACKFONG_DEEP_NUM_CTX", str(default_num_ctx))),
-            deep_num_predict=int(os.getenv("BLACKFONG_DEEP_NUM_PREDICT", "512")),
+            deep_num_predict=int(os.getenv("BLACKFONG_DEEP_NUM_PREDICT", "1400")),
             fast_prompt_budget_tokens=int(os.getenv("BLACKFONG_FAST_PROMPT_BUDGET_TOKENS", os.getenv("BLACKFONG_QUICK_PROMPT_BUDGET_TOKENS", "600"))),
             standard_prompt_budget_tokens=int(os.getenv("BLACKFONG_STANDARD_PROMPT_BUDGET_TOKENS", "1800")),
             deep_prompt_budget_tokens=int(os.getenv("BLACKFONG_DEEP_PROMPT_BUDGET_TOKENS", "4096")),
@@ -397,7 +399,7 @@ class ChatSettings:
             jarvis_num_ctx=int(os.getenv("BLACKFONG_JARVIS_NUM_CTX", str(default_num_ctx))),
             jarvis_num_predict=int(os.getenv("BLACKFONG_JARVIS_NUM_PREDICT", "256")),
             jarvis_quick_timeout=float(os.getenv("BLACKFONG_JARVIS_QUICK_TIMEOUT", os.getenv("BLACKFONG_FAST_TIMEOUT", "60"))),
-            jarvis_quick_num_predict=int(os.getenv("BLACKFONG_JARVIS_QUICK_NUM_PREDICT", os.getenv("BLACKFONG_FAST_NUM_PREDICT", "384"))),
+            jarvis_quick_num_predict=int(os.getenv("BLACKFONG_JARVIS_QUICK_NUM_PREDICT", os.getenv("BLACKFONG_FAST_NUM_PREDICT", "700"))),
             quick_prompt_budget_tokens=int(os.getenv("BLACKFONG_QUICK_PROMPT_BUDGET_TOKENS", os.getenv("BLACKFONG_FAST_PROMPT_BUDGET_TOKENS", "600"))),
             coding_model=coding_chain[0],
             coding_model_fallbacks=coding_chain[1:],
@@ -406,20 +408,8 @@ class ChatSettings:
             coding_num_ctx=int(os.getenv("BLACKFONG_CODING_NUM_CTX", "8192")),
             coding_num_predict=int(os.getenv("BLACKFONG_CODING_NUM_PREDICT", "512")),
             lilo_model=os.getenv("BLACKFONG_LILO_MODEL", default_chat_model),
-            lilo_timeout=float(os.getenv("BLACKFONG_LILO_TIMEOUT", str(default_chat_timeout))),
-            lilo_keep_alive=os.getenv("BLACKFONG_LILO_KEEP_ALIVE", "20m"),
-            lilo_num_ctx=int(os.getenv("BLACKFONG_LILO_NUM_CTX", str(default_num_ctx))),
-            lilo_num_predict=int(os.getenv("BLACKFONG_LILO_NUM_PREDICT", "320")),
             stitch_model=os.getenv("BLACKFONG_STITCH_MODEL", default_chat_model),
-            stitch_timeout=float(os.getenv("BLACKFONG_STITCH_TIMEOUT", str(default_chat_timeout))),
-            stitch_keep_alive=os.getenv("BLACKFONG_STITCH_KEEP_ALIVE", "20m"),
-            stitch_num_ctx=int(os.getenv("BLACKFONG_STITCH_NUM_CTX", str(default_num_ctx))),
-            stitch_num_predict=int(os.getenv("BLACKFONG_STITCH_NUM_PREDICT", "320")),
             voice_model=os.getenv("BLACKFONG_VOICE_MODEL", default_chat_model),
-            voice_timeout=float(os.getenv("BLACKFONG_VOICE_TIMEOUT", str(default_chat_timeout))),
-            voice_keep_alive=os.getenv("BLACKFONG_VOICE_KEEP_ALIVE", "20m"),
-            voice_num_ctx=int(os.getenv("BLACKFONG_VOICE_NUM_CTX", "4096")),
-            voice_num_predict=int(os.getenv("BLACKFONG_VOICE_NUM_PREDICT", "192")),
             transcript_window=int(os.getenv("BLACKFONG_TRANSCRIPT_WINDOW", "16")),
             global_memory_limit=int(os.getenv("BLACKFONG_GLOBAL_MEMORY_LIMIT", "6")),
             summary_cadence=int(os.getenv("BLACKFONG_SUMMARY_CADENCE", "6")),
