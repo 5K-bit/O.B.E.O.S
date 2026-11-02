@@ -271,6 +271,11 @@ class VerificationService:
     def _capture_workspace_release_shots(self, output_dir: Path) -> list[Dict[str, Any]]:
         from PySide6.QtGui import QFont
         from PySide6.QtWidgets import QApplication
+        # desktop_shell.py lives at the repository root, outside the package, so it is
+        # only importable when the current directory happens to be that root.
+        repo_root = str(Path(__file__).resolve().parents[1])
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
         from desktop_shell import MainWindow, apply_workspace_theme
 
         app_args = ["blackfong-release-shotset"]

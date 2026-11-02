@@ -32,16 +32,16 @@
     {
       "id": "workspace-launch",
       "description": "Blackfong Workspace launches as the canonical operator shell (v0.9 gate, Platform)",
-      "status": "pending",
-      "verified_on": null,
-      "note": "Required by docs/obeos-v0.9-release-gate.md; no dated evidence recorded."
+      "status": "done",
+      "verified_on": "2026-11-02",
+      "note": "Operator-reported: `blackfong desktop workspace` launches the workspace (status launched, surface blackfong_workspace, pid 40400) on the operator's Windows 11 machine. Run on the local checkout before merge/local-edits-into-main; not re-run on the merged commit. A Qt shutdown warning ('Release of profile requested but WebEnginePage still not deleted') was printed after launch."
     },
     {
       "id": "no-jarvis-identity",
       "description": "No operator-facing screen, help text, installer copy, notification or diagnostic identifies the assistant as Jarvis (v0.9 gate, Identity)",
-      "status": "pending",
-      "verified_on": null,
-      "note": "Required by docs/obeos-v0.9-release-gate.md; tests/test_runtime_branding_consistency.py covers part of this automatically."
+      "status": "done",
+      "verified_on": "2026-11-02",
+      "note": "Operator-reported: walked the operator-facing surfaces and found them consistent (no Jarvis identity). Not an exhaustive scan; tests/test_runtime_branding_consistency.py covers part automatically."
     }
   ]
 }
