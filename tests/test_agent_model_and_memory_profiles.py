@@ -58,7 +58,7 @@ class ExplodingBackend(BaseChatBackend):
 def test_chat_settings_default_to_fast_jarvis_and_heavier_coding_model():
     settings = ChatSettings()
 
-    assert settings.model_for_agent("jarvis") == "gemma4-heretic:latest"
+    assert settings.model_for_agent("jarvis") == "llama3.2:3b"
     assert settings.model_for_agent("coding") == "deepseek-coder:6.7b"
     assert settings.model_for_agent("lilo") == "llama3.2:3b"
     assert settings.timeout_for_agent("jarvis") == 180.0

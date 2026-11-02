@@ -39,7 +39,7 @@ def test_model_chains():
     assert fast
     assert deep
     assert coding
-    assert deep[0] == fast[0] == "gemma4-heretic:latest"
+    assert deep[0] == fast[0] == "llama3.2:3b"
 
 
 def test_daise_modes_preserve_natural_response_budget():

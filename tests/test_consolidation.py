@@ -27,6 +27,6 @@ def test_tiny_stream_only_publishes_without_native_window(monkeypatch):
 def test_daise_model_does_not_change_other_agents():
     from blackfong_ecosystem.config import ChatSettings
     settings = ChatSettings()
-    assert settings.model_for_agent("daise") == "gemma4-heretic:latest"
-    assert settings.model_for_agent("jarvis") == "gemma4-heretic:latest"
+    assert settings.model_for_agent("daise") == "llama3.2:3b"
+    assert settings.model_for_agent("jarvis") == "llama3.2:3b"
     assert settings.model_for_agent("coding") == settings.coding_model
