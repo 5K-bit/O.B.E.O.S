@@ -25,3 +25,7 @@ Edit the SVG as text. Keep the name and descriptor inside the left text area (x=
 ## GitHub presentation
 
 The README opens with the project banner, explicit stage, navigation and a three-part overview. Stage: **Release candidate gated**. CI badges, when present, link to existing workflows and show actual status. Keep original technical documentation below the introduction.
+
+## Icon
+
+Square app/avatar icon built from the banner symbol and accent: `assets/brand/icon.svg` (256 × 256 source) with `icon-512.png` and `icon-192.png` exports. Use it for GitHub avatars, social tiles, favicons and install icons. Regenerate it from the banner symbol if the symbol or accent changes.
