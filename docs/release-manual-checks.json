@@ -4,9 +4,9 @@
     {
       "id": "thoughtglass-hud-shot",
       "description": "Capture the Thoughtglass HUD release screenshot",
-      "status": "pending",
-      "verified_on": null,
-      "note": "Listed as remaining in release-evidence-latest.md (2026-07-29)."
+      "status": "done",
+      "verified_on": "2026-11-02",
+      "note": "docs/release-shots/thoughtglass-hud-browser.png: browser HUD at 127.0.0.1:8080 on the operator's Windows machine, captured 2026-11-02 and cropped to the page. Shows the Thoughtglass HUD heading, session list, trace ribbon and compose box. The model backend was not running when captured, so the screenshot shows 'D.A.I.S.E warning', 'backend unknown' and Health WARNING; it demonstrates the surface, not a healthy runtime."
     },
     {
       "id": "tui-boot-home-shot",
