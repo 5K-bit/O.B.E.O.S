@@ -25,9 +25,9 @@
     {
       "id": "installer-plasma-alignment",
       "description": "Align the external installer with Kubuntu 24.04 LTS + KDE Plasma",
-      "status": "pending",
-      "verified_on": null,
-      "note": "Blocker in release-evidence-latest.md: installer state was migration_input_only, shipping_ready false."
+      "status": "done",
+      "verified_on": "2026-11-02",
+      "note": "Alignment implemented in 5K-bit/Blackfong-Installer (feat/kubuntu-plasma-target): Ubuntu noble + kubuntu-desktop + SDDM; dry-run tests (16), real debootstrap, real desktop-step install in a chroot (1949 packages, dpkg audit clean, Plasma + SDDM present, no XFCE/LightDM). NOT boot-tested: see installer-boot-test."
     },
     {
       "id": "workspace-launch",
@@ -42,6 +42,13 @@
       "status": "done",
       "verified_on": "2026-11-02",
       "note": "Operator-reported: walked the operator-facing surfaces and found them consistent (no Jarvis identity). Not an exhaustive scan; tests/test_runtime_branding_consistency.py covers part automatically."
+    },
+    {
+      "id": "installer-boot-test",
+      "description": "Boot an installed disk from the Kubuntu-aligned installer (UEFI, SDDM login to a Plasma session) in a VM or on hardware",
+      "status": "pending",
+      "verified_on": null,
+      "note": "Gate for installer shipping_ready; scripts/vm_qemu.sh in Blackfong-Installer builds and boots the test VM."
     }
   ]
 }

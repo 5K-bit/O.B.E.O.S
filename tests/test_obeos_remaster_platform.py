@@ -332,7 +332,7 @@ def test_cli_exposes_desktop_and_obeos_contract_commands():
     )
 
     assert installer_status.exit_code == 0
-    assert '"state": "migration_input_only"' in installer_status.output
+    assert '"state": "kubuntu_aligned_boot_untested"' in installer_status.output
     assert manifest.exit_code == 0
     assert '"base_distribution": "Kubuntu 24.04 LTS"' in manifest.output
     assert shell_compat.exit_code == 0
@@ -378,7 +378,7 @@ def test_tui_boot_home_contract_and_commands_are_available():
 
     assert app.BOOT_HOME_OPTIONS == BOOT_HOME_OPTIONS
     assert app.ASCII_BOOT_INTRO.strip()
-    assert installer_status["installer_status"]["state"] == "migration_input_only"
+    assert installer_status["installer_status"]["state"] == "kubuntu_aligned_boot_untested"
     assert desktop["status"] == "ok"
     assert desktop["desktop"]["boot_profile"]["home_options"] == list(BOOT_HOME_OPTIONS)
     assert home["action"] == "home"
@@ -411,7 +411,7 @@ def test_dashboard_command_catalog_and_execute_support_desktop_and_obeos(tmp_pat
     activate_home = client.post("/api/commands/execute", json={"command": "/obeos activate-home"}).get_json()
 
     assert any(command["command"] == "/obeos installer-status" for command in commands["commands"])
-    assert installer_status["installer_status"]["state"] == "migration_input_only"
+    assert installer_status["installer_status"]["state"] == "kubuntu_aligned_boot_untested"
     assert any(command["command"] == "/desktop start" for command in commands["commands"])
     assert any(command["command"] == "/desktop workspace" for command in commands["commands"])
     assert any(command["command"] == "/docker up" for command in commands["commands"])
