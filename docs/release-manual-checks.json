@@ -46,9 +46,9 @@
     {
       "id": "installer-boot-test",
       "description": "Boot an installed disk from the Kubuntu-aligned installer (UEFI, SDDM login to a Plasma session) in a VM or on hardware",
-      "status": "pending",
-      "verified_on": null,
-      "note": "Gate for installer shipping_ready; scripts/vm_qemu.sh in Blackfong-Installer builds and boots the test VM."
+      "status": "done",
+      "verified_on": "2026-11-02",
+      "note": "Booted in QEMU/OVMF (UEFI, software emulation) from a disk built from the installer's Kubuntu rootfs (steps 40/30/60 via blackfong_installer libs): kernel 6.8.0-147-generic -> systemd -> SDDM greeter (Desktop Session: Plasma (X11)) -> login -> Plasma panel/launcher/clock. Screenshots: docs/release-shots/installer-vm-sddm-greeter.png, installer-vm-plasma-session.png. CAVEATS: image assembled by hand (GPT, ext4, standalone GRUB EFI), so installer steps 10 (partitioning) and 35 (grub-install) and the USB installer media were NOT exercised; wallpaper had not painted yet under emulation; no hardware boot."
     }
   ]
 }
