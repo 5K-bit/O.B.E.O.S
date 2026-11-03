@@ -42,7 +42,7 @@ INSTALL_BUNDLE_DISPLAY_NAMES = {
 }
 INSTALLER_DOCTRINE_NOTES = (
     "Canonical O.B.E.O.S. v1 session doctrine is Kubuntu 24.04 LTS plus KDE Plasma.",
-    "The external Blackfong installer project remains migration/build input until its desktop doctrine is fully aligned with O.B.E.O.S. v1.",
+    "The external Blackfong installer now installs Kubuntu 24.04 LTS + KDE Plasma (SDDM); it is not shipping-ready until an installed disk has been boot-tested in a VM or on hardware.",
     "jarvis_agent remains a compatibility bundle name; D.A.I.S.E. is the visible assistant identity.",
 )
 
@@ -86,17 +86,18 @@ class InstallerPlanService:
     def current_status(self) -> Dict[str, Any]:
         return {
             "adapter_contract_version": ADAPTER_CONTRACT_VERSION,
-            "state": "migration_input_only",
+            "state": "kubuntu_aligned_boot_untested",
             "shipping_ready": False,
             "installer_root": str(self.installer_root),
             "installer_root_exists": self.installer_root.exists(),
             "recommended_v1_path": "kubuntu_materialize_remaster",
             "summary": (
-                "The external Blackfong installer repo is currently migration/build input only, "
-                "not the final shipping O.B.E.O.S. v1 installer."
+                "The external Blackfong installer installs Kubuntu 24.04 LTS + KDE Plasma (SDDM) and is "
+                "covered by dry-run tests plus a real chroot install check, but an installed disk has "
+                "not been boot-tested, so it is not yet the shipping O.B.E.O.S. v1 installer."
             ),
-            "doctrine_gap": "Desktop implementation still follows an XFCE/Xubuntu-style migration baseline.",
-            "promotion_gate": "Align the external installer implementation with Kubuntu 24.04 LTS + KDE Plasma before promoting it as a shipping installer.",
+            "doctrine_gap": "None in code (Kubuntu 24.04 LTS + KDE Plasma, SDDM). Remaining gap is verification: no full-disk boot test yet.",
+            "promotion_gate": "Boot-test an installed Kubuntu 24.04 LTS + KDE Plasma disk from the external installer (UEFI, SDDM login to a Plasma session) in a VM or on hardware before promoting it as a shipping installer.",
         }
 
     def build_plan(self, profile: str = "amd64-pc") -> InstallerPlan:
