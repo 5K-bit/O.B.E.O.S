@@ -73,7 +73,8 @@ Current limitation:
 
 - it now installs Ubuntu 24.04 LTS + Kubuntu (KDE Plasma, SDDM), matching the O.B.E.O.S. v1 session doctrine (5K-bit/Blackfong-Installer, `feat/kubuntu-plasma-target`)
 - verified by dry-run tests, a real debootstrap of Ubuntu noble, and a real desktop install in a chroot with the post-install check run against it
-- **not yet verified:** an installed disk booting to an SDDM login and a Plasma session in a VM or on hardware
+- booted in QEMU/UEFI to the SDDM greeter and a Plasma session (2026-11-02; screenshots in `docs/release-shots/installer-vm-*.png`) from a hand-assembled disk using the installer's rootfs
+- **not yet verified:** the installer's own partition and `grub-install` steps, the USB installer media, and real hardware
 
 Therefore:
 
