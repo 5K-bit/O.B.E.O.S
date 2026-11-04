@@ -22,8 +22,9 @@ from .service_registry import get_ui_services
 class VerificationService:
     """Structured validation harness for graphical-first OBEOS."""
 
-    def __init__(self, *, workspace_root: Optional[Path] = None, services: Any = None) -> None:
+    def __init__(self, *, workspace_root: Optional[Path] = None, services: Any = None, installer_root: Optional[Path] = None) -> None:
         self.workspace_root = Path(workspace_root or paths.root)
+        self.installer_root = Path(installer_root) if installer_root else None
         self.services = services or get_ui_services()
         self.report_root = self.workspace_root / "data" / "verification"
         self.integration_registry = getattr(self.services, "integration_registry", None) or ExternalIntegrationRegistry(workspace_root=self.workspace_root)
@@ -150,7 +151,7 @@ class VerificationService:
         return report
 
     def release_evidence(self, *, profile: str = "amd64-pc", include_automated: bool = False) -> Dict[str, Any]:
-        installer_service = InstallerPlanService()
+        installer_service = InstallerPlanService(installer_root=self.installer_root) if self.installer_root else InstallerPlanService()
         installer_plan = installer_service.build_plan(profile)
         installer_status = installer_service.current_status()
         installer_validation = installer_service.validate_plan(installer_plan)
