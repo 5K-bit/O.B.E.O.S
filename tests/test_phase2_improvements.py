@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from blackfong_ecosystem.backend_warmup import warm_ollama_model
-from blackfong_ecosystem.chat_backends import ChatBackendResult, OllamaChatBackend
+from blackfong_ecosystem.chat_backends import ChatBackendError, ChatBackendResult, OllamaChatBackend
 from blackfong_ecosystem.cognition_renderer import normalize_renderer_inputs
 from blackfong_ecosystem.operator_session import (
     begin_operator_session,
@@ -90,11 +90,17 @@ def test_workspace_window_manager_tab_groups_persist(tmp_path):
     assert manager._load_persist_payload()["float_geometries"]["dock_tiny"] == "AAAA"
 
 
-def test_ollama_generate_stream_falls_back_to_generate(monkeypatch):
+def test_ollama_empty_stream_fails_instead_of_silently_falling_back(monkeypatch):
+    """An interrupted stream is a failure, not a success (see test_ollama_delivery_contract).
+
+    This used to assert a silent fallback to generate(); that behaviour was dropped on purpose so a
+    truncated answer can never be delivered as if it were complete.
+    """
     backend = OllamaChatBackend(model="test-model")
-    tokens: list[str] = []
+    fallback_calls: list[int] = []
 
     def fake_generate(self, messages, **options):
+        fallback_calls.append(1)
         return ChatBackendResult(text="hello", provider="ollama", model="test-model")
 
     monkeypatch.setattr(OllamaChatBackend, "generate", fake_generate)
@@ -106,8 +112,10 @@ def test_ollama_generate_stream_falls_back_to_generate(monkeypatch):
         stream_ctx.__enter__.return_value = stream_ctx
         stream_ctx.iter_lines.return_value = iter([])
         client.stream.return_value = stream_ctx
-        result = backend.generate_stream([{"role": "user", "content": "hi"}], on_token=tokens.append)
-    assert result.text == "hello"
+        with pytest.raises(ChatBackendError) as caught:
+            backend.generate_stream([{"role": "user", "content": "hi"}], on_token=lambda _t: None)
+    assert caught.value.metadata["error_type"] == "incomplete_stream"
+    assert fallback_calls == []
 
 
 def test_warm_ollama_model_handles_connection_error(monkeypatch):

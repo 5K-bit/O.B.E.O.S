@@ -102,7 +102,12 @@ def test_verification_full_writes_structured_report(tmp_path: Path) -> None:
 
 def test_release_evidence_writes_json_and_markdown_reports(tmp_path: Path) -> None:
     services = SimpleNamespace(integration_registry=ExternalIntegrationRegistry(workspace_root=tmp_path, tacklebox_root=tmp_path))
-    verification = VerificationService(workspace_root=tmp_path, services=services)
+    # Do not depend on a Blackfong-Installer checkout sitting next to the repo: give it a minimal installer tree.
+    installer_root = tmp_path / "installer"
+    for rel in ("manifests/base.yaml", "manifests/features.yaml", "manifests/profiles/amd64-pc.yaml"):
+        (installer_root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (installer_root / rel).write_text("{}", encoding="utf-8")
+    verification = VerificationService(workspace_root=tmp_path, services=services, installer_root=installer_root)
 
     verification.surfaces = lambda: {  # type: ignore[method-assign]
         "mode": "surfaces",

@@ -3,7 +3,17 @@ from pathlib import Path
 import threading
 import time
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
+
+# These tests exercise code that lives in git submodules; a plain clone leaves them empty.
+for _required in ("3000-main/three_thousand/background_delivery.py", "Night-watch-OS/nightwatch/background_delivery.py"):
+    if not (ROOT / _required).exists():
+        pytest.skip(
+            f"submodule file missing: {_required} (run: git submodule update --init)",
+            allow_module_level=True,
+        )
 
 
 def load(path):
