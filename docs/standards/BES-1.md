@@ -1,8 +1,8 @@
 # Blackfong Engineering Standard (BES-1)
 
-**Version:** 1.0 (proposed)  
+**Version:** 1.0  
 **Owner:** Blackfong / OBEOS  
-**Status:** Draft until the standard is accepted and merged.  
+**Adoption:** This standard takes effect only when merged into O.B.E.O.S `main`; copies on review branches are proposals.  
 **Applies to:** Maintained software repositories; implementations are adapted to each language, runtime, and risk.
 
 ## Purpose
